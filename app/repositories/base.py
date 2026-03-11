@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
 from bson import ObjectId
@@ -83,3 +84,31 @@ class BaseRepository(ABC, Generic[DocumentType]):
 
     async def aggregate(self, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return await self.collection.aggregate(pipeline).to_list(length=None)
+
+    async def get_monthly_counts(
+        self,
+        *,
+        year: int,
+        filters: dict[str, Any] | None = None,
+        date_field: str = "created_at",
+    ) -> list[int]:
+        start = datetime(year, 1, 1, tzinfo=UTC)
+        end = datetime(year + 1, 1, 1, tzinfo=UTC)
+        pipeline = [
+            {
+                "$match": {
+                    **(filters or {}),
+                    date_field: {"$gte": start, "$lt": end},
+                }
+            },
+            {
+                "$group": {
+                    "_id": {"$month": f"${date_field}"},
+                    "count": {"$sum": 1},
+                }
+            },
+        ]
+        counts = [0] * 12
+        for row in await self.aggregate(pipeline):
+            counts[row["_id"] - 1] = row["count"]
+        return counts

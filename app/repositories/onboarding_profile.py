@@ -32,3 +32,9 @@ class OnboardingProfileRepository(BaseRepository[dict]):
             return_document=ReturnDocument.AFTER,
         )
         return result
+
+    async def count_completed(self) -> int:
+        return await self.count({"onboarding_completed": True})
+
+    async def get_monthly_completed_counts(self, year: int) -> list[int]:
+        return await self.get_monthly_counts(year=year, filters={"onboarding_completed": True})

@@ -8,6 +8,7 @@ from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.user import UserRepository
 from app.services.auth import AuthService
+from app.services.dashboard import DashboardService
 from app.services.email import EmailService
 from app.services.onboarding import OnboardingService
 
@@ -18,3 +19,7 @@ async def get_auth_service(db=Depends(get_database)) -> AuthService:
 
 async def get_onboarding_service(db=Depends(get_database)) -> OnboardingService:
     return OnboardingService(OnboardingProfileRepository(db))
+
+
+async def get_dashboard_service(db=Depends(get_database)) -> DashboardService:
+    return DashboardService(UserRepository(db), OnboardingProfileRepository(db), AuthCodeRepository(db))

@@ -53,3 +53,12 @@ class AuthCodeRepository(BaseRepository[dict]):
             {"_id": self.to_object_id(code_id)},
             {"$set": {"consumed_at": utc_now(), "updated_at": utc_now()}},
         )
+
+    async def count_pending(self, *, purpose: str | None = None) -> int:
+        filters = {
+            "consumed_at": None,
+            "expires_at": {"$gt": utc_now()},
+        }
+        if purpose:
+            filters["purpose"] = purpose
+        return await self.count(filters)
