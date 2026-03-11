@@ -14,5 +14,6 @@ class UserDocument(MongoDocument):
     hashed_password: str
     role: UserRole
     is_active: bool = True
+    email_verified: bool = False
     restaurant_ids: list[PyObjectId] = Field(default_factory=list)
     branch_ids: list[PyObjectId] = Field(default_factory=list)

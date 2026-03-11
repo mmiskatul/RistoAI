@@ -35,13 +35,3 @@ def owner_credentials() -> dict[str, str]:
         "password": "OwnerPass123",
         "phone": "+15550001111",
     }
-
-
-def register_and_login(client: TestClient, owner_credentials: dict[str, str]) -> dict[str, str]:
-    client.post("/api/v1/auth/register", json=owner_credentials)
-    response = client.post(
-        "/api/v1/auth/login",
-        json={"email": owner_credentials["email"], "password": owner_credentials["password"]},
-    )
-    tokens = response.json()["tokens"]
-    return {"Authorization": f"Bearer {tokens['access_token']}"}

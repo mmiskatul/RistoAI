@@ -1,41 +1,124 @@
 from __future__ import annotations
 
+import secrets
+
+from app.config.settings import get_settings
 from app.core.enums import UserRole
-from app.core.exceptions import AuthorizationException, ConflictException, AuthenticationException
+from app.core.exceptions import ConflictException, AuthenticationException, ValidationException
 from app.core.security import password_manager, token_manager
+from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.user import UserRepository
-from app.schemas.auth import AuthResponse, AuthUserResponse, LoginRequest, RefreshTokenRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    AuthChallengeResponse,
+    AuthResponse,
+    AuthUserResponse,
+    ForgotPasswordRequest,
+    LoginRequest,
+    RefreshTokenRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+    VerifyCodeRequest,
+)
+from app.schemas.common import MessageResponse
 from app.services.base import BaseService
+from app.services.email import EmailService
 
 
 class AuthService(BaseService):
-    def __init__(self, user_repository: UserRepository) -> None:
+    RESTAURANT_REGISTRATION_PURPOSE = "restaurant_registration"
+    RESTAURANT_PASSWORD_RESET_PURPOSE = "restaurant_password_reset"
+    ADMIN_PASSWORD_RESET_PURPOSE = "admin_password_reset"
+    RESTAURANT_AUTH_ROLES = {UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF}
+    ADMIN_AUTH_ROLES = {UserRole.SUPER_ADMIN}
+    CODE_EXPIRY_SECONDS = 600
+
+    def __init__(
+        self,
+        user_repository: UserRepository,
+        auth_code_repository: AuthCodeRepository,
+        email_service: EmailService,
+    ) -> None:
         self.user_repository = user_repository
+        self.auth_code_repository = auth_code_repository
+        self.email_service = email_service
+        self.settings = get_settings()
 
-    async def register(self, payload: RegisterRequest) -> AuthResponse:
-        if await self.user_repository.get_by_email(payload.email):
-            raise ConflictException("An account with this email already exists")
-        user = await self.user_repository.create(
-            {
-                "email": payload.email.lower(),
-                "full_name": payload.full_name,
-                "phone": payload.phone,
-                "hashed_password": password_manager.hash_password(payload.password),
-                "role": UserRole.RESTAURANT_OWNER,
-                "is_active": True,
-                "restaurant_ids": [],
-                "branch_ids": [],
-            }
-        )
-        return self._build_auth_response(user)
-
-    async def login(self, payload: LoginRequest) -> AuthResponse:
+    async def register_restaurant(self, payload: RegisterRequest) -> AuthChallengeResponse:
         user = await self.user_repository.get_by_email(payload.email)
-        if not user or not password_manager.verify_password(payload.password, user["hashed_password"]):
-            raise AuthenticationException("Invalid credentials")
-        if not user["is_active"]:
-            raise AuthenticationException("User account is inactive")
+        if user and user.get("email_verified"):
+            raise ConflictException("An account with this email already exists")
+
+        if user:
+            user = await self.user_repository.update(
+                user["_id"],
+                {
+                    "full_name": payload.full_name,
+                    "phone": payload.phone,
+                    "hashed_password": password_manager.hash_password(payload.password),
+                    "role": UserRole.RESTAURANT_OWNER,
+                    "is_active": True,
+                    "email_verified": False,
+                },
+            )
+        else:
+            user = await self.user_repository.create(
+                {
+                    "email": payload.email.lower(),
+                    "full_name": payload.full_name,
+                    "phone": payload.phone,
+                    "hashed_password": password_manager.hash_password(payload.password),
+                    "role": UserRole.RESTAURANT_OWNER,
+                    "is_active": True,
+                    "email_verified": False,
+                    "restaurant_ids": [],
+                    "branch_ids": [],
+                }
+            )
+
+        return await self._issue_challenge(user=user, purpose=self.RESTAURANT_REGISTRATION_PURPOSE)
+
+    async def verify_restaurant_registration(self, payload: VerifyCodeRequest) -> AuthResponse:
+        user = await self.user_repository.get_by_email(payload.email)
+        if not user:
+            raise AuthenticationException("User not found")
+        if user["role"] not in self.RESTAURANT_AUTH_ROLES:
+            raise AuthenticationException("This account is not a restaurant account")
+        await self._verify_code(email=payload.email, code=payload.code, purpose=self.RESTAURANT_REGISTRATION_PURPOSE)
+        user = await self.user_repository.update(user["_id"], {"email_verified": True, "is_active": True})
         return self._build_auth_response(user)
+
+    async def login_restaurant(self, payload: LoginRequest) -> AuthResponse:
+        user = await self._authenticate_login(payload)
+        if user["role"] not in self.RESTAURANT_AUTH_ROLES:
+            raise AuthenticationException("Use the admin login endpoint for this account")
+        return self._build_auth_response(user)
+
+    async def login_admin(self, payload: LoginRequest) -> AuthResponse:
+        user = await self._authenticate_login(payload)
+        if user["role"] not in self.ADMIN_AUTH_ROLES:
+            raise AuthenticationException("Use the restaurant login endpoint for this account")
+        return self._build_auth_response(user)
+
+    async def forgot_password_restaurant(self, payload: ForgotPasswordRequest) -> AuthChallengeResponse:
+        user = await self._get_password_reset_user(payload.email, self.RESTAURANT_AUTH_ROLES, "This account is not a restaurant account")
+        return await self._issue_challenge(user=user, purpose=self.RESTAURANT_PASSWORD_RESET_PURPOSE)
+
+    async def reset_password_restaurant(self, payload: ResetPasswordRequest) -> MessageResponse:
+        user = await self._get_password_reset_user(payload.email, self.RESTAURANT_AUTH_ROLES, "This account is not a restaurant account")
+        await self._verify_code(email=payload.email, code=payload.code, purpose=self.RESTAURANT_PASSWORD_RESET_PURPOSE)
+        await self.user_repository.update(user["_id"], {"hashed_password": password_manager.hash_password(payload.new_password)})
+        return MessageResponse(message="Restaurant account password reset successful")
+
+    async def forgot_password_admin(self, payload: ForgotPasswordRequest) -> AuthChallengeResponse:
+        user = await self._get_password_reset_user(payload.email, self.ADMIN_AUTH_ROLES, "This account is not an admin account")
+        return await self._issue_challenge(user=user, purpose=self.ADMIN_PASSWORD_RESET_PURPOSE)
+
+    async def reset_password_admin(self, payload: ResetPasswordRequest) -> MessageResponse:
+        user = await self._get_password_reset_user(payload.email, self.ADMIN_AUTH_ROLES, "This account is not an admin account")
+        await self._verify_code(email=payload.email, code=payload.code, purpose=self.ADMIN_PASSWORD_RESET_PURPOSE)
+        await self.user_repository.update(user["_id"], {"hashed_password": password_manager.hash_password(payload.new_password)})
+        return MessageResponse(message="Admin account password reset successful")
 
     async def refresh(self, payload: RefreshTokenRequest) -> TokenResponse:
         token_payload = token_manager.decode_token(payload.refresh_token)
@@ -48,6 +131,55 @@ class AuthService(BaseService):
 
     async def get_me(self, current_user: dict) -> AuthUserResponse:
         return self._to_auth_user_response(current_user)
+
+    async def _authenticate_login(self, payload: LoginRequest) -> dict:
+        user = await self.user_repository.get_by_email(payload.email)
+        if not user or not password_manager.verify_password(payload.password, user["hashed_password"]):
+            raise AuthenticationException("Invalid credentials")
+        if not user["is_active"]:
+            raise AuthenticationException("User account is inactive")
+        if not user.get("email_verified", False):
+            raise AuthenticationException("Email is not verified")
+        return user
+
+    async def _get_password_reset_user(self, email: str, allowed_roles: set[UserRole], wrong_role_message: str) -> dict:
+        user = await self.user_repository.get_by_email(email)
+        if not user:
+            raise AuthenticationException("User not found")
+        if user["role"] not in allowed_roles:
+            raise AuthenticationException(wrong_role_message)
+        if not user.get("email_verified", False):
+            raise AuthenticationException("Email is not verified")
+        return user
+
+    async def _issue_challenge(self, *, user: dict, purpose: str) -> AuthChallengeResponse:
+        code = f"{secrets.randbelow(10**6):06d}"
+        await self.auth_code_repository.create_code(
+            user_id=user["_id"],
+            email=user["email"],
+            purpose=purpose,
+            code=code,
+            expires_in_seconds=self.CODE_EXPIRY_SECONDS,
+        )
+        await self.email_service.send_auth_code(
+            email=user["email"],
+            full_name=user["full_name"],
+            code=code,
+            purpose=purpose,
+        )
+        return AuthChallengeResponse(
+            message=f"Verification code sent for {purpose.replace('_', ' ')}",
+            purpose=purpose,
+            email=user["email"],
+            expires_in_seconds=self.CODE_EXPIRY_SECONDS,
+            debug_verification_code=code if self.settings.debug else None,
+        )
+
+    async def _verify_code(self, *, email: str, code: str, purpose: str) -> None:
+        auth_code = await self.auth_code_repository.verify_code(email=email, purpose=purpose, code=code)
+        if not auth_code:
+            raise ValidationException("Invalid or expired verification code")
+        await self.auth_code_repository.consume_code(auth_code["_id"])
 
     def _build_auth_response(self, user: dict) -> AuthResponse:
         public_user = self._to_auth_user_response(user)
@@ -65,6 +197,7 @@ class AuthService(BaseService):
             phone=serialized.get("phone"),
             role=serialized["role"],
             is_active=serialized["is_active"],
+            email_verified=serialized.get("email_verified", False),
             restaurant_ids=serialized.get("restaurant_ids", []),
             branch_ids=serialized.get("branch_ids", []),
             created_at=serialized["created_at"],

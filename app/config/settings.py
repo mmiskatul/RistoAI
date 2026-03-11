@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     debug: bool = False
     testing: bool = False
+    log_level: str = Field(default="ERROR", alias="LOG_LEVEL")
+    request_logs_enabled: bool = Field(default=False, alias="REQUEST_LOGS_ENABLED")
 
     mongodb_uri: str = Field(default="mongodb://localhost:27017", alias="MONGODB_URI")
     database_name: str = Field(default="ristoai", alias="DATABASE_NAME")

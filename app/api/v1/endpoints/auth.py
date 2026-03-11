@@ -4,20 +4,86 @@ from fastapi import APIRouter, Depends, status
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.services import get_auth_service
-from app.schemas.auth import AuthResponse, AuthUserResponse, LoginRequest, RefreshTokenRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    AuthChallengeResponse,
+    AuthResponse,
+    AuthUserResponse,
+    ForgotPasswordRequest,
+    LoginRequest,
+    RefreshTokenRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+    VerifyCodeRequest,
+)
+from app.schemas.common import MessageResponse
 from app.services.auth import AuthService
 
 router = APIRouter()
 
 
-@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: RegisterRequest, service: AuthService = Depends(get_auth_service)) -> AuthResponse:
-    return await service.register(payload)
+@router.post("/restaurant/register", response_model=AuthChallengeResponse, status_code=status.HTTP_201_CREATED)
+async def register_restaurant(
+    payload: RegisterRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> AuthChallengeResponse:
+    return await service.register_restaurant(payload)
 
 
-@router.post("/login", response_model=AuthResponse)
-async def login(payload: LoginRequest, service: AuthService = Depends(get_auth_service)) -> AuthResponse:
-    return await service.login(payload)
+@router.post("/restaurant/verify-registration", response_model=AuthResponse)
+async def verify_restaurant_registration(
+    payload: VerifyCodeRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> AuthResponse:
+    return await service.verify_restaurant_registration(payload)
+
+
+@router.post("/restaurant/login", response_model=AuthResponse)
+async def login_restaurant(
+    payload: LoginRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> AuthResponse:
+    return await service.login_restaurant(payload)
+
+
+@router.post("/restaurant/forgot-password", response_model=AuthChallengeResponse)
+async def forgot_password_restaurant(
+    payload: ForgotPasswordRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> AuthChallengeResponse:
+    return await service.forgot_password_restaurant(payload)
+
+
+@router.post("/restaurant/reset-password", response_model=MessageResponse)
+async def reset_password_restaurant(
+    payload: ResetPasswordRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> MessageResponse:
+    return await service.reset_password_restaurant(payload)
+
+
+@router.post("/admin/login", response_model=AuthResponse)
+async def login_admin(
+    payload: LoginRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> AuthResponse:
+    return await service.login_admin(payload)
+
+
+@router.post("/admin/forgot-password", response_model=AuthChallengeResponse)
+async def forgot_password_admin(
+    payload: ForgotPasswordRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> AuthChallengeResponse:
+    return await service.forgot_password_admin(payload)
+
+
+@router.post("/admin/reset-password", response_model=MessageResponse)
+async def reset_password_admin(
+    payload: ResetPasswordRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> MessageResponse:
+    return await service.reset_password_admin(payload)
 
 
 @router.post("/refresh", response_model=TokenResponse)

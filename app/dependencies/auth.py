@@ -12,7 +12,7 @@ from app.core.security import token_manager
 from app.db.mongodb import get_database
 from app.repositories.user import UserRepository
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{API_V1_PREFIX}/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{API_V1_PREFIX}/auth/restaurant/login")
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_database)) -> dict:
