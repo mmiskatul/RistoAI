@@ -30,6 +30,26 @@ def test_auth_restaurant_register_verify_login_and_me(client, owner_credentials)
     assert me_response.json()["role"] == "restaurant_owner"
 
 
+
+def test_reject_invalid_password_with_json_validation_error(client):
+    response = client.post(
+        "/api/v1/auth/restaurant/register",
+        json={
+            "full_name": "Test User",
+            "email": "test@example.com",
+            "password": "stringst",
+            "phone": "+15550001111",
+        },
+    )
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["error"]["details"]["errors"][0]["loc"] == ["body", "password"]
+    assert "Password must include letters and numbers" in payload["error"]["details"]["errors"][0]["msg"]
+    assert payload["error"]["details"]["errors"][0]["ctx"]["error"] == "Password must include letters and numbers"
+
+
+
 def test_reject_invalid_restaurant_verification_code(client, owner_credentials):
     client.post("/api/v1/auth/restaurant/register", json=owner_credentials)
     response = client.post(
@@ -37,6 +57,7 @@ def test_reject_invalid_restaurant_verification_code(client, owner_credentials):
         json={"email": owner_credentials["email"], "code": "000000"},
     )
     assert response.status_code == 422
+
 
 
 def test_restaurant_forgot_password_flow(client, owner_credentials):
@@ -70,6 +91,7 @@ def test_restaurant_forgot_password_flow(client, owner_credentials):
         json={"email": owner_credentials["email"], "password": "NewOwnerPass123"},
     )
     assert login_response.status_code == 200
+
 
 
 def test_reject_password_reset_when_password_confirmation_mismatch(client):
