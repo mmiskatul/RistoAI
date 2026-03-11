@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    ai_chat,
     ai_insights,
     analytics,
     auth,
@@ -27,6 +28,7 @@ api_router.include_router(customers.router, prefix="/customers", tags=["Customer
 api_router.include_router(orders.router, prefix="/orders", tags=["Orders"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
+api_router.include_router(ai_chat.router, prefix="/ai-chat", tags=["AI Chat"])
 api_router.include_router(ai_insights.router, prefix="/ai-insights", tags=["AI Insights"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 api_router.include_router(staff.router, prefix="/staff", tags=["Staff"])

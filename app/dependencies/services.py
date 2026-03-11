@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import Depends
 
+from app.config.settings import get_settings
 from app.db.mongodb import get_database
 from app.repositories.ai_insight import AIInsightRepository
 from app.repositories.analytics_snapshot import AnalyticsSnapshotRepository
@@ -12,6 +13,7 @@ from app.repositories.notification import NotificationRepository
 from app.repositories.order import OrderRepository
 from app.repositories.restaurant import RestaurantRepository
 from app.repositories.user import UserRepository
+from app.services.ai_chat import AIChatService
 from app.services.ai_insight import AIInsightService
 from app.services.analytics import AnalyticsService
 from app.services.auth import AuthService
@@ -20,6 +22,9 @@ from app.services.customer import CustomerService
 from app.services.menu import MenuService
 from app.services.notification import NotificationService
 from app.services.order import OrderService
+from app.services.providers.base import BaseChatProvider
+from app.services.providers.huggingface_chat import HuggingFacePipelineChatProvider
+from app.services.providers.mock_chat import MockChatProvider
 from app.services.restaurant import RestaurantService
 from app.services.staff import StaffService
 from app.services.strategies.demand_forecast import DemandForecastStrategy
@@ -79,6 +84,27 @@ async def get_ai_insight_service(
         MenuOptimizationStrategy.insight_type: MenuOptimizationStrategy(),
     }
     return AIInsightService(AIInsightRepository(db), analytics_service, strategies)
+
+
+def _build_chat_provider() -> tuple[BaseChatProvider, str, str]:
+    settings = get_settings()
+    if settings.ai_chat_provider == "huggingface":
+        return HuggingFacePipelineChatProvider(settings), "huggingface", settings.ai_chat_model_id
+    return MockChatProvider(), "mock", "rule-based-fallback"
+
+
+async def get_ai_chat_service(
+    db=Depends(get_database),
+    analytics_service: AnalyticsService = Depends(get_analytics_service),
+) -> AIChatService:
+    provider, provider_name, model_name = _build_chat_provider()
+    return AIChatService(
+        provider=provider,
+        provider_name=provider_name,
+        model_name=model_name,
+        analytics_service=analytics_service,
+        restaurant_repository=RestaurantRepository(db),
+    )
 
 
 async def get_notification_service(db=Depends(get_database)) -> NotificationService:
