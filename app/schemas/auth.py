@@ -97,8 +97,6 @@ class AuthUserResponse(BaseSchema):
     role: UserRole
     is_active: bool
     email_verified: bool
-    restaurant_ids: list[str] = Field(default_factory=list)
-    branch_ids: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
 

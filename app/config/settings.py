@@ -33,11 +33,6 @@ class Settings(BaseSettings):
     refresh_token_expiry_days: int = Field(default=7, alias="REFRESH_TOKEN_EXPIRY_DAYS")
 
     cors_origins: list[str] = Field(default_factory=lambda: ["*"], alias="CORS_ORIGINS")
-    ai_chat_provider: str = Field(default="mock", alias="AI_CHAT_PROVIDER")
-    ai_chat_model_id: str = Field(default="meta-llama/Llama-3.1-8B-Instruct", alias="AI_CHAT_MODEL_ID")
-    ai_chat_max_new_tokens: int = Field(default=256, alias="AI_CHAT_MAX_NEW_TOKENS")
-    ai_chat_temperature: float = Field(default=0.2, alias="AI_CHAT_TEMPERATURE")
-    huggingface_token: str | None = Field(default=None, alias="HUGGINGFACE_TOKEN")
 
     smtp_enabled: bool = Field(default=False, alias="SMTP_ENABLED")
     smtp_host: str | None = Field(default=None, alias="SMTP_HOST")

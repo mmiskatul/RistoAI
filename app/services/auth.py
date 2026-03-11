@@ -71,8 +71,6 @@ class AuthService(BaseService):
                     "role": UserRole.RESTAURANT_OWNER,
                     "is_active": True,
                     "email_verified": False,
-                    "restaurant_ids": [],
-                    "branch_ids": [],
                 }
             )
 
@@ -198,8 +196,6 @@ class AuthService(BaseService):
             role=serialized["role"],
             is_active=serialized["is_active"],
             email_verified=serialized.get("email_verified", False),
-            restaurant_ids=serialized.get("restaurant_ids", []),
-            branch_ids=serialized.get("branch_ids", []),
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
         )
