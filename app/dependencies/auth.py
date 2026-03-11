@@ -3,19 +3,25 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from fastapi import Depends
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.constants import API_V1_PREFIX
 from app.core.enums import UserRole
 from app.core.exceptions import AuthenticationException, AuthorizationException
 from app.core.security import token_manager
 from app.db.mongodb import get_database
 from app.repositories.user import UserRepository
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{API_V1_PREFIX}/auth/restaurant/login")
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db=Depends(get_database)) -> dict:
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db=Depends(get_database),
+) -> dict:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise AuthenticationException("Missing bearer token")
+
+    token = credentials.credentials
     payload = token_manager.decode_token(token)
     if payload.get("type") != "access":
         raise AuthenticationException("Invalid access token")
