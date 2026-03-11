@@ -47,11 +47,29 @@ class AuthService(BaseService):
         return self._build_tokens(str(user["_id"]), str(user["role"]))
 
     async def get_me(self, current_user: dict) -> AuthUserResponse:
-        return AuthUserResponse(**self.serialize(current_user))
+        return self._to_auth_user_response(current_user)
 
     def _build_auth_response(self, user: dict) -> AuthResponse:
+        public_user = self._to_auth_user_response(user)
+        return AuthResponse(
+            user=public_user,
+            tokens=self._build_tokens(public_user.id, public_user.role),
+        )
+
+    def _to_auth_user_response(self, user: dict) -> AuthUserResponse:
         serialized = self.serialize(user)
-        return AuthResponse(user=AuthUserResponse(**serialized), tokens=self._build_tokens(serialized["id"], serialized["role"]))
+        return AuthUserResponse(
+            id=serialized["id"],
+            email=serialized["email"],
+            full_name=serialized["full_name"],
+            phone=serialized.get("phone"),
+            role=serialized["role"],
+            is_active=serialized["is_active"],
+            restaurant_ids=serialized.get("restaurant_ids", []),
+            branch_ids=serialized.get("branch_ids", []),
+            created_at=serialized["created_at"],
+            updated_at=serialized["updated_at"],
+        )
 
     @staticmethod
     def _build_tokens(user_id: str, role: str) -> TokenResponse:

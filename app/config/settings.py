@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from pydantic import Field, computed_field
+from pydantic import EmailStr, Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,10 +37,38 @@ class Settings(BaseSettings):
     ai_chat_temperature: float = Field(default=0.2, alias="AI_CHAT_TEMPERATURE")
     huggingface_token: str | None = Field(default=None, alias="HUGGINGFACE_TOKEN")
 
+    smtp_enabled: bool = Field(default=False, alias="SMTP_ENABLED")
+    smtp_host: str | None = Field(default=None, alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str | None = Field(default=None, alias="SMTP_USERNAME")
+    smtp_password: str | None = Field(default=None, alias="SMTP_PASSWORD")
+    smtp_from_email: EmailStr | None = Field(default=None, alias="SMTP_FROM_EMAIL")
+    smtp_from_name: str = Field(default="RistoAI", alias="SMTP_FROM_NAME")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+    smtp_use_ssl: bool = Field(default=False, alias="SMTP_USE_SSL")
+
     @computed_field
     @property
     def openapi_url(self) -> str:
         return "/openapi.json"
+
+    @model_validator(mode="after")
+    def validate_smtp_settings(self) -> "Settings":
+        if self.smtp_use_tls and self.smtp_use_ssl:
+            raise ValueError("SMTP_USE_TLS and SMTP_USE_SSL cannot both be true")
+        if self.smtp_enabled:
+            required_fields = {
+                "SMTP_HOST": self.smtp_host,
+                "SMTP_USERNAME": self.smtp_username,
+                "SMTP_PASSWORD": self.smtp_password,
+                "SMTP_FROM_EMAIL": self.smtp_from_email,
+            }
+            missing_fields = [key for key, value in required_fields.items() if not value]
+            if missing_fields:
+                raise ValueError(
+                    f"SMTP is enabled but required settings are missing: {', '.join(missing_fields)}",
+                )
+        return self
 
     @classmethod
     def settings_customise_sources(

@@ -35,14 +35,14 @@ class StaffService(BaseService):
                 "branch_ids": self._object_ids(payload.branch_ids),
             }
         )
-        return StaffRead(**self.serialize(user))
+        return self._to_staff_read(user)
 
     async def list_staff(self, current_user: dict, restaurant_id: str, page: int, page_size: int) -> PaginatedResponse[StaffRead]:
         if current_user["role"] not in {UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.SUPER_ADMIN}:
             raise AuthorizationException("You do not have permission to view staff users")
         self.ensure_restaurant_access(current_user, restaurant_id)
         users, total = await self.user_repository.list_by_restaurant(restaurant_id, page, page_size)
-        items = [StaffRead(**document) for document in self.serialize_list(users)]
+        items = [self._to_staff_read(user) for user in users]
         return PaginatedResponse[StaffRead](**build_pagination_meta(total=total, page=page, page_size=page_size), items=items)
 
     async def update_staff(self, current_user: dict, staff_id: str, payload: StaffUpdate) -> StaffRead:
@@ -59,4 +59,19 @@ class StaffService(BaseService):
         if "branch_ids" in update_payload:
             update_payload["branch_ids"] = self._object_ids(update_payload["branch_ids"])
         staff_user = await self.user_repository.update(staff_id, update_payload)
-        return StaffRead(**self.serialize(staff_user))
+        return self._to_staff_read(staff_user)
+
+    def _to_staff_read(self, user: dict) -> StaffRead:
+        serialized = self.serialize(user)
+        return StaffRead(
+            id=serialized["id"],
+            email=serialized["email"],
+            full_name=serialized["full_name"],
+            phone=serialized.get("phone"),
+            role=serialized["role"],
+            is_active=serialized["is_active"],
+            restaurant_ids=serialized.get("restaurant_ids", []),
+            branch_ids=serialized.get("branch_ids", []),
+            created_at=serialized["created_at"],
+            updated_at=serialized["updated_at"],
+        )

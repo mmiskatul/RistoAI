@@ -9,7 +9,7 @@ from app.schemas.common import BaseSchema
 class RegisterRequest(BaseSchema):
     full_name: str = Field(min_length=2, max_length=120)
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=8, max_length=72)
     phone: str | None = Field(default=None, max_length=30)
 
     @field_validator("password")
@@ -22,7 +22,7 @@ class RegisterRequest(BaseSchema):
 
 class LoginRequest(BaseSchema):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=8, max_length=72)
 
 
 class RefreshTokenRequest(BaseSchema):
