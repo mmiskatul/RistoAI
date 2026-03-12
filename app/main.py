@@ -26,7 +26,9 @@ from app.services.bootstrap import BootstrapService
 logger = logging.getLogger(__name__)
 
 OPENAPI_TAGS = [
-    {'name': 'Authentication', 'description': 'Login, registration, token refresh, and current-user identity endpoints.'},
+    {'name': 'Restaurant Authentication', 'description': 'Restaurant-side registration, verification, login, and password reset endpoints.'},
+    {'name': 'Admin Authentication', 'description': 'Admin login and password reset endpoints.'},
+    {'name': 'Authentication', 'description': 'Shared authentication endpoints such as token refresh and current-user identity.'},
     {'name': 'User Subscription', 'description': 'User-side subscription selection and current subscription endpoints.'},
     {'name': 'Subscription Management', 'description': 'Admin-side subscription plans, coupons, and revenue management endpoints.'},
     {'name': 'Onboarding', 'description': 'Restaurant onboarding profile endpoints.'},
