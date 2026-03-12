@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from fastapi import Depends
+from fastapi import Depends, Query
 
 from app.config.settings import get_settings
 from app.db.mongodb import get_database
 from app.repositories.auth_code import AuthCodeRepository
+from app.repositories.coupon import CouponRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
+from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 from app.services.auth import AuthService
 from app.services.dashboard import DashboardService
 from app.services.email import EmailService
 from app.services.onboarding import OnboardingService
+from app.services.subscription import SubscriptionService
 from app.services.user_management import UserManagementService
 
 
@@ -28,3 +31,7 @@ async def get_dashboard_service(db=Depends(get_database)) -> DashboardService:
 
 async def get_user_management_service(db=Depends(get_database)) -> UserManagementService:
     return UserManagementService(UserRepository(db), OnboardingProfileRepository(db), AuthCodeRepository(db))
+
+
+async def get_subscription_service(db=Depends(get_database)) -> SubscriptionService:
+    return SubscriptionService(UserRepository(db), SubscriptionPlanRepository(db), CouponRepository(db))

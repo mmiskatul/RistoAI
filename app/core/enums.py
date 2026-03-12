@@ -20,3 +20,15 @@ class SubscriptionStatus(StrEnum):
     TRIAL = "trial"
     SUSPENDED = "suspended"
     EXPIRED = "expired"
+    CANCELED = "canceled"
+
+
+class CouponDiscountType(StrEnum):
+    PERCENTAGE = "percentage"
+    FIXED = "fixed"
+
+
+class CouponStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    EXPIRED = "expired"

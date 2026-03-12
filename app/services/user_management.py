@@ -120,6 +120,7 @@ class UserManagementService(BaseService):
             role=serialized_user["role"],
             restaurant_name=serialized_user.get("restaurant_name"),
             location=serialized_user.get("location"),
+            subscription_plan_name=serialized_user.get("subscription_plan_name"),
             subscription_plan=serialized_user.get("subscription_plan"),
             subscription_status=serialized_user.get("subscription_status"),
             subscription_started_at=serialized_user.get("subscription_started_at"),

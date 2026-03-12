@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.core.enums import SubscriptionStatus, UserRole
+from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
 from app.repositories.base import BaseRepository
 
 
@@ -45,6 +45,46 @@ class UserRepository(BaseRepository[dict]):
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, object]], int]:
+        filters = self._build_user_filters(
+            search=search,
+            role=role,
+            is_active=is_active,
+            subscription_status=subscription_status,
+        )
+        return await self.get_multi(filters=filters, page=page, page_size=page_size)
+
+    async def get_filtered_subscription_users(
+        self,
+        *,
+        search: str | None = None,
+        subscription_status: SubscriptionStatus | None = None,
+        billing_cycle: SubscriptionPlan | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, object]], int]:
+        filters = self._build_user_filters(search=search, subscription_status=subscription_status)
+        base_filter = {"subscription_status": {"$ne": None}}
+        if billing_cycle is not None:
+            cycle_filter = {"subscription_plan": billing_cycle}
+            if filters:
+                filters = {"$and": [base_filter, filters, cycle_filter]}
+            else:
+                filters = {"$and": [base_filter, cycle_filter]}
+        else:
+            filters = {"$and": [base_filter, filters]} if filters else base_filter
+        return await self.get_multi(filters=filters, page=page, page_size=page_size)
+
+    async def get_users_with_subscription_data(self) -> list[dict]:
+        return await self.collection.find({"subscription_status": {"$ne": None}}).to_list(length=None)
+
+    @staticmethod
+    def _build_user_filters(
+        *,
+        search: str | None = None,
+        role: UserRole | None = None,
+        is_active: bool | None = None,
+        subscription_status: SubscriptionStatus | None = None,
+    ) -> dict[str, object]:
         filters: dict[str, object] = {}
         and_filters: list[dict[str, object]] = []
 
@@ -64,10 +104,10 @@ class UserRepository(BaseRepository[dict]):
                         {"phone": escaped_search},
                         {"restaurant_name": escaped_search},
                         {"location": escaped_search},
+                        {"subscription_plan_name": escaped_search},
                     ]
                 }
             )
         if and_filters:
             filters = {"$and": and_filters} if len(and_filters) > 1 else and_filters[0]
-
-        return await self.get_multi(filters=filters, page=page, page_size=page_size)
+        return filters

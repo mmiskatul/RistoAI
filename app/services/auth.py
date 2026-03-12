@@ -25,6 +25,8 @@ from app.schemas.common import MessageResponse
 from app.services.base import BaseService
 from app.services.email import EmailService
 
+DEFAULT_PLAN_NAME = "Pro Plan"
+
 
 class AuthService(BaseService):
     RESTAURANT_REGISTRATION_PURPOSE = "restaurant_registration"
@@ -50,6 +52,7 @@ class AuthService(BaseService):
         if user and user.get("email_verified"):
             raise ConflictException("An account with this email already exists")
 
+        now = datetime.now(UTC)
         if user:
             user = await self.user_repository.update(
                 user["_id"],
@@ -60,14 +63,14 @@ class AuthService(BaseService):
                     "role": UserRole.RESTAURANT_OWNER,
                     "is_active": True,
                     "email_verified": False,
+                    "subscription_plan_name": user.get("subscription_plan_name") or DEFAULT_PLAN_NAME,
                     "subscription_plan": user.get("subscription_plan") or SubscriptionPlan.ONE_MONTH,
                     "subscription_status": user.get("subscription_status") or SubscriptionStatus.TRIAL,
-                    "subscription_started_at": user.get("subscription_started_at") or datetime.now(UTC),
-                    "subscription_expires_at": user.get("subscription_expires_at") or (datetime.now(UTC) + timedelta(days=30)),
+                    "subscription_started_at": user.get("subscription_started_at") or now,
+                    "subscription_expires_at": user.get("subscription_expires_at") or (now + timedelta(days=30)),
                 },
             )
         else:
-            now = datetime.now(UTC)
             user = await self.user_repository.create(
                 {
                     "email": payload.email.lower(),
@@ -79,6 +82,7 @@ class AuthService(BaseService):
                     "email_verified": False,
                     "restaurant_name": None,
                     "location": None,
+                    "subscription_plan_name": DEFAULT_PLAN_NAME,
                     "subscription_plan": SubscriptionPlan.ONE_MONTH,
                     "subscription_status": SubscriptionStatus.TRIAL,
                     "subscription_started_at": now,
@@ -162,7 +166,7 @@ class AuthService(BaseService):
             raise AuthenticationException("Email is not verified")
         return user
 
-    async def _issue_challenge(self, *, user: dict, purpose: str) -> AuthChallengeResponse:
+    async def _issue_challenge(self, *, user: dict, purpose: str) -> None | AuthChallengeResponse:
         code = f"{secrets.randbelow(10**6):06d}"
         await self.auth_code_repository.create_code(
             user_id=user["_id"],
@@ -210,6 +214,7 @@ class AuthService(BaseService):
             email_verified=serialized.get("email_verified", False),
             restaurant_name=serialized.get("restaurant_name"),
             location=serialized.get("location"),
+            subscription_plan_name=serialized.get("subscription_plan_name"),
             subscription_plan=serialized.get("subscription_plan"),
             subscription_status=serialized.get("subscription_status"),
             subscription_started_at=serialized.get("subscription_started_at"),

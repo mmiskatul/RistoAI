@@ -19,6 +19,7 @@ def test_auth_restaurant_register_verify_login_and_me(client, owner_credentials)
     assert verify_registration_response.status_code == 200
     assert verify_registration_response.json()['user']['email_verified'] is True
     assert verify_registration_response.json()['user']['subscription_status'] == 'trial'
+    assert verify_registration_response.json()['user']['subscription_plan_name'] == 'Pro Plan'
 
     login_response = client.post(
         '/api/v1/auth/restaurant/login',
@@ -31,6 +32,7 @@ def test_auth_restaurant_register_verify_login_and_me(client, owner_credentials)
     assert me_response.status_code == 200
     assert me_response.json()['role'] == 'restaurant_owner'
     assert me_response.json()['subscription_plan'] == '1_month'
+    assert me_response.json()['subscription_plan_name'] == 'Pro Plan'
 
 
 

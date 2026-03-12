@@ -102,6 +102,7 @@ class AuthUserResponse(BaseSchema):
     email_verified: bool
     restaurant_name: str | None = None
     location: str | None = None
+    subscription_plan_name: str | None = None
     subscription_plan: SubscriptionPlan | None = None
     subscription_status: SubscriptionStatus | None = None
     subscription_started_at: datetime | None = None

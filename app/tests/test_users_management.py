@@ -48,6 +48,7 @@ def _seed_users(mock_db):
                     'email_verified': True,
                     'restaurant_name': None,
                     'location': None,
+                    'subscription_plan_name': None,
                     'subscription_plan': None,
                     'subscription_status': None,
                     'subscription_started_at': None,
@@ -66,6 +67,7 @@ def _seed_users(mock_db):
                     'email_verified': True,
                     'restaurant_name': 'La Trattoria Milano',
                     'location': 'Milan, Italy',
+                    'subscription_plan_name': 'Pro Plan',
                     'subscription_plan': SubscriptionPlan.ONE_YEAR,
                     'subscription_status': SubscriptionStatus.ACTIVE,
                     'subscription_started_at': datetime(2026, 1, 1, tzinfo=UTC),
@@ -84,6 +86,7 @@ def _seed_users(mock_db):
                     'email_verified': True,
                     'restaurant_name': 'Kitchen Ops',
                     'location': 'Salento',
+                    'subscription_plan_name': 'Growth Plan',
                     'subscription_plan': SubscriptionPlan.ONE_MONTH,
                     'subscription_status': SubscriptionStatus.SUSPENDED,
                     'subscription_started_at': datetime(2026, 1, 1, tzinfo=UTC),
@@ -102,6 +105,7 @@ def _seed_users(mock_db):
                     'email_verified': False,
                     'restaurant_name': 'Sushi Zen',
                     'location': 'Marches',
+                    'subscription_plan_name': 'Starter Plan',
                     'subscription_plan': SubscriptionPlan.ONE_MONTH,
                     'subscription_status': SubscriptionStatus.TRIAL,
                     'subscription_started_at': datetime(2026, 1, 5, tzinfo=UTC),
@@ -141,6 +145,7 @@ def test_get_users_management_page_returns_summary_and_items():
     owner_item = next(item for item in payload['items'] if item['id'] == str(owner_id))
     assert owner_item['restaurant_name'] == 'La Trattoria Milano'
     assert owner_item['location'] == 'Milan, Italy'
+    assert owner_item['subscription_plan_name'] == 'Pro Plan'
     assert owner_item['subscription_plan'] == '1_year'
     assert owner_item['subscription_status'] == 'active'
     assert owner_item['status'] == 'active'
@@ -177,6 +182,7 @@ def test_update_user_updates_user_details():
                 'email_verified': True,
                 'restaurant_name': 'Marco Bistro',
                 'location': 'Rome, Italy',
+                'subscription_plan_name': 'Growth Plan',
                 'subscription_plan': '1_month',
                 'subscription_status': 'trial',
                 'subscription_started_at': '2026-03-01T00:00:00Z',
@@ -192,6 +198,7 @@ def test_update_user_updates_user_details():
     assert payload['user']['role'] == 'manager'
     assert payload['user']['restaurant_name'] == 'Marco Bistro'
     assert payload['user']['location'] == 'Rome, Italy'
+    assert payload['user']['subscription_plan_name'] == 'Growth Plan'
     assert payload['user']['subscription_plan'] == '1_month'
     assert payload['user']['subscription_status'] == 'trial'
 

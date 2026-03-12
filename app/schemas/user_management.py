@@ -32,6 +32,7 @@ class UserManagementListItemResponse(BaseSchema):
     role: UserRole
     restaurant_name: str | None = None
     location: str | None = None
+    subscription_plan_name: str | None = None
     subscription_plan: SubscriptionPlan | None = None
     subscription_status: SubscriptionStatus | None = None
     subscription_started_at: datetime | None = None
@@ -62,6 +63,7 @@ class UserManagementUpdateRequest(BaseSchema):
     email_verified: bool | None = None
     restaurant_name: str | None = Field(default=None, min_length=2, max_length=120)
     location: str | None = Field(default=None, min_length=2, max_length=120)
+    subscription_plan_name: str | None = Field(default=None, min_length=2, max_length=120)
     subscription_plan: SubscriptionPlan | None = None
     subscription_status: SubscriptionStatus | None = None
     subscription_started_at: datetime | None = None
