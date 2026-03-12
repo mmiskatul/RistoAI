@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from app.tests.helpers import register_and_login
+from app.tests.helpers import register_and_login, seed_subscription_plan, select_subscription_plan
 
 
-
-def test_save_and_get_onboarding_profile(client, owner_credentials) -> None:
+def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None:
+    plan_id = seed_subscription_plan(app)
     headers = register_and_login(client, owner_credentials)
+    select_subscription_plan(client, headers, plan_id=plan_id)
     payload = {
         'restaurant_name': 'The Italian Bistro',
         'restaurant_type': 'Fine Dining',

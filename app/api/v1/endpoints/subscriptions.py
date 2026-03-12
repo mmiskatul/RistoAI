@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, status
 
 from app.core.enums import UserRole
-from app.dependencies.auth import require_roles
+from app.dependencies.auth import get_current_user, require_roles
 from app.dependencies.services import get_subscription_service
 from app.schemas.subscription import (
     CouponActionResponse,
@@ -17,6 +17,10 @@ from app.schemas.subscription import (
     SubscriptionPlanCreateRequest,
     SubscriptionPlanManagementResponse,
     SubscriptionPlanUpdateRequest,
+    UserCurrentSubscriptionResponse,
+    UserSubscriptionActionResponse,
+    UserSubscriptionPlanListResponse,
+    UserSubscriptionSelectRequest,
 )
 from app.services.subscription import SubscriptionService
 
@@ -39,6 +43,31 @@ async def get_subscription_plan_management(
     service: SubscriptionService = Depends(get_subscription_service),
 ) -> SubscriptionPlanManagementResponse:
     return await service.get_plan_management(query)
+
+
+@router.get('/user/plans', response_model=UserSubscriptionPlanListResponse)
+async def get_user_subscription_plans(
+    current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> UserSubscriptionPlanListResponse:
+    return await service.get_user_visible_plans(current_user)
+
+
+@router.get('/user/current', response_model=UserCurrentSubscriptionResponse)
+async def get_user_current_subscription(
+    current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> UserCurrentSubscriptionResponse:
+    return await service.get_user_current_subscription(current_user)
+
+
+@router.post('/user/select', response_model=UserSubscriptionActionResponse)
+async def select_user_subscription_plan(
+    payload: UserSubscriptionSelectRequest,
+    current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> UserSubscriptionActionResponse:
+    return await service.select_user_plan(current_user, payload)
 
 
 @router.post('/plans', response_model=SubscriptionPlanActionResponse, status_code=status.HTTP_201_CREATED)

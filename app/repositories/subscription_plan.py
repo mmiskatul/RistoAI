@@ -16,3 +16,6 @@ class SubscriptionPlanRepository(BaseRepository[dict]):
 
     async def get_active_plans(self) -> list[dict]:
         return await self.collection.find({"is_active": True}).sort("monthly_price", 1).to_list(length=None)
+
+    async def get_visible_plans(self) -> list[dict]:
+        return await self.collection.find({"is_active": True, "is_visible": True}).sort("monthly_price", 1).to_list(length=None)

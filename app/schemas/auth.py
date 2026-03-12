@@ -107,6 +107,7 @@ class AuthUserResponse(BaseSchema):
     subscription_status: SubscriptionStatus | None = None
     subscription_started_at: datetime | None = None
     subscription_expires_at: datetime | None = None
+    subscription_selection_required: bool
     created_at: str
     updated_at: str
 

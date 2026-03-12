@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.core.enums import CouponStatus, SubscriptionPlan, SubscriptionStatus
 from app.core.exceptions import ConflictException, ValidationException
@@ -26,6 +26,11 @@ from app.schemas.subscription import (
     SubscriptionRevenuePointResponse,
     SubscriptionSummaryResponse,
     SubscriptionTableItemResponse,
+    UserCurrentSubscriptionResponse,
+    UserSubscriptionActionResponse,
+    UserSubscriptionPlanListResponse,
+    UserSubscriptionPlanResponse,
+    UserSubscriptionSelectRequest,
 )
 from app.services.base import BaseService
 from app.utils.pagination import build_pagination_meta
@@ -82,6 +87,45 @@ class SubscriptionService(BaseService):
         return SubscriptionPlanManagementResponse(
             plans=[self._to_plan_response(plan) for plan in plans],
             coupons=CouponListResponse(items=[self._to_coupon_response(coupon) for coupon in coupons], **pagination),
+        )
+
+    async def get_user_visible_plans(self, current_user: dict) -> UserSubscriptionPlanListResponse:
+        plans = await self.subscription_plan_repository.get_visible_plans()
+        return UserSubscriptionPlanListResponse(
+            selection_required=self._selection_required(current_user),
+            plans=[self._to_user_plan_response(plan) for plan in plans],
+            current_subscription=self._to_user_current_subscription(current_user),
+        )
+
+    async def get_user_current_subscription(self, current_user: dict) -> UserCurrentSubscriptionResponse:
+        return self._to_user_current_subscription(current_user)
+
+    async def select_user_plan(self, current_user: dict, payload: UserSubscriptionSelectRequest) -> UserSubscriptionActionResponse:
+        plan = await self.subscription_plan_repository.get_by_id(payload.plan_id)
+        if not plan.get('is_active', False) or not plan.get('is_visible', False):
+            raise ValidationException('Selected plan is not available')
+
+        now = datetime.now(UTC)
+        if payload.start_trial and plan.get('trial_days', 0) > 0:
+            status = SubscriptionStatus.TRIAL
+            expires_at = now + timedelta(days=plan['trial_days'])
+        else:
+            status = SubscriptionStatus.ACTIVE
+            expires_at = now + (timedelta(days=365) if payload.billing_cycle == SubscriptionPlan.ONE_YEAR else timedelta(days=30))
+
+        updated_user = await self.user_repository.update(
+            current_user['_id'],
+            {
+                'subscription_plan_name': plan['name'],
+                'subscription_plan': payload.billing_cycle,
+                'subscription_status': status,
+                'subscription_started_at': now,
+                'subscription_expires_at': expires_at,
+            },
+        )
+        return UserSubscriptionActionResponse(
+            message='Subscription plan selected successfully',
+            subscription=self._to_user_current_subscription(updated_user),
         )
 
     async def create_plan(self, payload: SubscriptionPlanCreateRequest) -> SubscriptionPlanActionResponse:
@@ -220,3 +264,30 @@ class SubscriptionService(BaseService):
     def _to_coupon_response(self, coupon: dict) -> CouponResponse:
         serialized = self.serialize(coupon)
         return CouponResponse(**serialized)
+
+    def _to_user_plan_response(self, plan: dict) -> UserSubscriptionPlanResponse:
+        serialized = self.serialize(plan)
+        return UserSubscriptionPlanResponse(
+            id=serialized['id'],
+            name=serialized['name'],
+            monthly_price=serialized['monthly_price'],
+            annual_price=serialized['annual_price'],
+            trial_days=serialized['trial_days'],
+            features=serialized['features'],
+            is_best_plan=serialized['is_best_plan'],
+        )
+
+    def _to_user_current_subscription(self, user: dict) -> UserCurrentSubscriptionResponse:
+        serialized = self.serialize(user)
+        return UserCurrentSubscriptionResponse(
+            selection_required=self._selection_required(user),
+            plan_name=serialized.get('subscription_plan_name'),
+            billing_cycle=serialized.get('subscription_plan'),
+            status=serialized.get('subscription_status'),
+            started_at=serialized.get('subscription_started_at'),
+            expires_at=serialized.get('subscription_expires_at'),
+        )
+
+    @staticmethod
+    def _selection_required(user: dict) -> bool:
+        return not bool(user.get('subscription_plan_name'))

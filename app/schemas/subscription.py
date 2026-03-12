@@ -138,6 +138,37 @@ class SubscriptionPlanManagementResponse(BaseSchema):
     coupons: CouponListResponse
 
 
+class UserSubscriptionPlanResponse(BaseSchema):
+    id: str
+    name: str
+    monthly_price: float
+    annual_price: float
+    trial_days: int
+    features: list[str]
+    is_best_plan: bool
+
+
+class UserCurrentSubscriptionResponse(BaseSchema):
+    selection_required: bool
+    plan_name: str | None = None
+    billing_cycle: SubscriptionPlan | None = None
+    status: SubscriptionStatus | None = None
+    started_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
+class UserSubscriptionPlanListResponse(BaseSchema):
+    selection_required: bool
+    plans: list[UserSubscriptionPlanResponse]
+    current_subscription: UserCurrentSubscriptionResponse
+
+
+class UserSubscriptionSelectRequest(BaseSchema):
+    plan_id: str
+    billing_cycle: SubscriptionPlan
+    start_trial: bool = True
+
+
 class SubscriptionActionResponse(BaseSchema):
     message: str
 
@@ -150,3 +181,8 @@ class SubscriptionPlanActionResponse(BaseSchema):
 class CouponActionResponse(BaseSchema):
     message: str
     coupon: CouponResponse
+
+
+class UserSubscriptionActionResponse(BaseSchema):
+    message: str
+    subscription: UserCurrentSubscriptionResponse

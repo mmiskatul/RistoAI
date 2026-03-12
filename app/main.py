@@ -19,6 +19,7 @@ from app.core.logging import configure_logging
 from app.db.indexes import ensure_indexes
 from app.db.mongodb import MongoDB
 from app.middleware.request_context import RequestContextMiddleware
+from app.middleware.subscription_guard import SubscriptionGuardMiddleware
 from app.repositories.user import UserRepository
 from app.services.bootstrap import BootstrapService
 
@@ -101,6 +102,7 @@ def create_app(*, testing: bool = False) -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(SubscriptionGuardMiddleware)
     app.include_router(api_router, prefix=API_V1_PREFIX)
 
     @app.exception_handler(AppException)
@@ -136,7 +138,7 @@ def create_app(*, testing: bool = False) -> FastAPI:
         logger.exception("Unhandled server error", exc_info=exc)
         return _error_response(500, "internal_server_error", "Unexpected server error")
 
-    @app.get("/", tags=["root"])
+    @app.get("/health", tags=["Health"])
     async def healthcheck() -> dict[str, str]:
         return {"status": "ok", "service": settings.app_name}
 

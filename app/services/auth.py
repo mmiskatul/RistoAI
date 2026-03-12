@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from app.config.settings import get_settings
-from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
+from app.core.enums import UserRole
 from app.core.exceptions import ConflictException, AuthenticationException, ValidationException
 from app.core.security import password_manager, token_manager
 from app.repositories.auth_code import AuthCodeRepository
@@ -24,8 +24,6 @@ from app.schemas.auth import (
 from app.schemas.common import MessageResponse
 from app.services.base import BaseService
 from app.services.email import EmailService
-
-DEFAULT_PLAN_NAME = "Pro Plan"
 
 
 class AuthService(BaseService):
@@ -52,7 +50,6 @@ class AuthService(BaseService):
         if user and user.get("email_verified"):
             raise ConflictException("An account with this email already exists")
 
-        now = datetime.now(UTC)
         if user:
             user = await self.user_repository.update(
                 user["_id"],
@@ -63,11 +60,11 @@ class AuthService(BaseService):
                     "role": UserRole.RESTAURANT_OWNER,
                     "is_active": True,
                     "email_verified": False,
-                    "subscription_plan_name": user.get("subscription_plan_name") or DEFAULT_PLAN_NAME,
-                    "subscription_plan": user.get("subscription_plan") or SubscriptionPlan.ONE_MONTH,
-                    "subscription_status": user.get("subscription_status") or SubscriptionStatus.TRIAL,
-                    "subscription_started_at": user.get("subscription_started_at") or now,
-                    "subscription_expires_at": user.get("subscription_expires_at") or (now + timedelta(days=30)),
+                    "subscription_plan_name": user.get("subscription_plan_name"),
+                    "subscription_plan": user.get("subscription_plan"),
+                    "subscription_status": user.get("subscription_status"),
+                    "subscription_started_at": user.get("subscription_started_at"),
+                    "subscription_expires_at": user.get("subscription_expires_at"),
                 },
             )
         else:
@@ -82,11 +79,11 @@ class AuthService(BaseService):
                     "email_verified": False,
                     "restaurant_name": None,
                     "location": None,
-                    "subscription_plan_name": DEFAULT_PLAN_NAME,
-                    "subscription_plan": SubscriptionPlan.ONE_MONTH,
-                    "subscription_status": SubscriptionStatus.TRIAL,
-                    "subscription_started_at": now,
-                    "subscription_expires_at": now + timedelta(days=30),
+                    "subscription_plan_name": None,
+                    "subscription_plan": None,
+                    "subscription_status": None,
+                    "subscription_started_at": None,
+                    "subscription_expires_at": None,
                 }
             )
 
@@ -166,7 +163,7 @@ class AuthService(BaseService):
             raise AuthenticationException("Email is not verified")
         return user
 
-    async def _issue_challenge(self, *, user: dict, purpose: str) -> None | AuthChallengeResponse:
+    async def _issue_challenge(self, *, user: dict, purpose: str) -> AuthChallengeResponse:
         code = f"{secrets.randbelow(10**6):06d}"
         await self.auth_code_repository.create_code(
             user_id=user["_id"],
@@ -219,9 +216,13 @@ class AuthService(BaseService):
             subscription_status=serialized.get("subscription_status"),
             subscription_started_at=serialized.get("subscription_started_at"),
             subscription_expires_at=serialized.get("subscription_expires_at"),
+            subscription_selection_required=self._requires_subscription_selection(serialized),
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
         )
+
+    def _requires_subscription_selection(self, serialized_user: dict) -> bool:
+        return serialized_user["role"] in self.RESTAURANT_AUTH_ROLES and not serialized_user.get("subscription_plan_name")
 
     @staticmethod
     def _build_tokens(user_id: str, role: str) -> TokenResponse:
