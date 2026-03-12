@@ -7,7 +7,7 @@ from bson import ObjectId
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
-from app.core.enums import UserRole
+from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
 from app.core.security import token_manager
 from app.db.mongodb import get_database
 from app.main import create_app
@@ -46,6 +46,12 @@ def _seed_users(mock_db):
                     'role': UserRole.SUPER_ADMIN,
                     'is_active': True,
                     'email_verified': True,
+                    'restaurant_name': None,
+                    'location': None,
+                    'subscription_plan': None,
+                    'subscription_status': None,
+                    'subscription_started_at': None,
+                    'subscription_expires_at': None,
                     'created_at': now,
                     'updated_at': now,
                 },
@@ -58,6 +64,12 @@ def _seed_users(mock_db):
                     'role': UserRole.RESTAURANT_OWNER,
                     'is_active': True,
                     'email_verified': True,
+                    'restaurant_name': 'La Trattoria Milano',
+                    'location': 'Milan, Italy',
+                    'subscription_plan': SubscriptionPlan.ONE_YEAR,
+                    'subscription_status': SubscriptionStatus.ACTIVE,
+                    'subscription_started_at': datetime(2026, 1, 1, tzinfo=UTC),
+                    'subscription_expires_at': datetime(2026, 12, 31, tzinfo=UTC),
                     'created_at': datetime(2026, 2, 1, tzinfo=UTC),
                     'updated_at': datetime(2026, 2, 1, tzinfo=UTC),
                 },
@@ -70,6 +82,12 @@ def _seed_users(mock_db):
                     'role': UserRole.MANAGER,
                     'is_active': False,
                     'email_verified': True,
+                    'restaurant_name': 'Kitchen Ops',
+                    'location': 'Salento',
+                    'subscription_plan': SubscriptionPlan.ONE_MONTH,
+                    'subscription_status': SubscriptionStatus.SUSPENDED,
+                    'subscription_started_at': datetime(2026, 1, 1, tzinfo=UTC),
+                    'subscription_expires_at': datetime(2026, 2, 1, tzinfo=UTC),
                     'created_at': datetime(2026, 1, 20, tzinfo=UTC),
                     'updated_at': datetime(2026, 1, 20, tzinfo=UTC),
                 },
@@ -82,29 +100,16 @@ def _seed_users(mock_db):
                     'role': UserRole.STAFF,
                     'is_active': True,
                     'email_verified': False,
+                    'restaurant_name': 'Sushi Zen',
+                    'location': 'Marches',
+                    'subscription_plan': SubscriptionPlan.ONE_MONTH,
+                    'subscription_status': SubscriptionStatus.TRIAL,
+                    'subscription_started_at': datetime(2026, 1, 5, tzinfo=UTC),
+                    'subscription_expires_at': datetime(2026, 2, 5, tzinfo=UTC),
                     'created_at': datetime(2026, 1, 5, tzinfo=UTC),
                     'updated_at': datetime(2026, 1, 5, tzinfo=UTC),
                 },
             ]
-        )
-    )
-    asyncio.run(
-        mock_db['onboarding_profiles'].insert_one(
-            {
-                '_id': ObjectId(),
-                'user_id': str(owner_id),
-                'restaurant_name': 'La Trattoria Milano',
-                'restaurant_type': 'Italian',
-                'city_location': 'Milan, Italy',
-                'number_of_seats': 40,
-                'average_spend_per_customer': 20,
-                'main_business_goal': 'Growth',
-                'biggest_problem': 'Need more dinner traffic during weekdays',
-                'improvement_focus': 'Marketing and repeat visitors',
-                'onboarding_completed': True,
-                'created_at': now,
-                'updated_at': now,
-            }
         )
     )
     return admin_id, owner_id, suspended_id, pending_id
@@ -130,11 +135,14 @@ def test_get_users_management_page_returns_summary_and_items():
         'total_users': 4,
         'active_users': 3,
         'suspended_users': 1,
+        'trial_users': 1,
     }
     assert payload['total'] == 4
     owner_item = next(item for item in payload['items'] if item['id'] == str(owner_id))
     assert owner_item['restaurant_name'] == 'La Trattoria Milano'
     assert owner_item['location'] == 'Milan, Italy'
+    assert owner_item['subscription_plan'] == '1_year'
+    assert owner_item['subscription_status'] == 'active'
     assert owner_item['status'] == 'active'
 
 
@@ -144,7 +152,7 @@ def test_get_users_management_page_supports_search():
     admin_id, _, _, _ = _seed_users(mock_db)
 
     with TestClient(app) as client:
-        response = client.get('/api/v1/users/management?search=owner', headers=_admin_headers(admin_id))
+        response = client.get('/api/v1/users/management?search=trattoria', headers=_admin_headers(admin_id))
 
     assert response.status_code == 200
     payload = response.json()
@@ -167,6 +175,12 @@ def test_update_user_updates_user_details():
                 'phone': '+8801700000000',
                 'role': 'manager',
                 'email_verified': True,
+                'restaurant_name': 'Marco Bistro',
+                'location': 'Rome, Italy',
+                'subscription_plan': '1_month',
+                'subscription_status': 'trial',
+                'subscription_started_at': '2026-03-01T00:00:00Z',
+                'subscription_expires_at': '2026-04-01T00:00:00Z'
             },
         )
 
@@ -176,6 +190,10 @@ def test_update_user_updates_user_details():
     assert payload['user']['email'] == 'marco@example.com'
     assert payload['user']['phone'] == '+8801700000000'
     assert payload['user']['role'] == 'manager'
+    assert payload['user']['restaurant_name'] == 'Marco Bistro'
+    assert payload['user']['location'] == 'Rome, Italy'
+    assert payload['user']['subscription_plan'] == '1_month'
+    assert payload['user']['subscription_status'] == 'trial'
 
 
 
@@ -190,6 +208,7 @@ def test_suspend_and_delete_user():
 
     assert suspend_response.status_code == 200
     assert suspend_response.json()['user']['status'] == 'suspended'
+    assert suspend_response.json()['user']['subscription_status'] == 'suspended'
     assert delete_response.status_code == 204
     assert all(item['id'] != str(owner_id) for item in list_response.json()['items'])
 

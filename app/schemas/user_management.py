@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import EmailStr, Field
 
-from app.core.enums import UserRole
+from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
 from app.schemas.common import BaseSchema
 
 
@@ -12,12 +14,14 @@ class UserManagementQuery(BaseSchema):
     search: str | None = None
     role: UserRole | None = None
     is_active: bool | None = None
+    subscription_status: SubscriptionStatus | None = None
 
 
 class UserManagementSummaryResponse(BaseSchema):
     total_users: int
     active_users: int
     suspended_users: int
+    trial_users: int
 
 
 class UserManagementListItemResponse(BaseSchema):
@@ -28,7 +32,10 @@ class UserManagementListItemResponse(BaseSchema):
     role: UserRole
     restaurant_name: str | None = None
     location: str | None = None
-    plan: str | None = None
+    subscription_plan: SubscriptionPlan | None = None
+    subscription_status: SubscriptionStatus | None = None
+    subscription_started_at: datetime | None = None
+    subscription_expires_at: datetime | None = None
     status: str
     is_active: bool
     email_verified: bool
@@ -53,6 +60,12 @@ class UserManagementUpdateRequest(BaseSchema):
     role: UserRole | None = None
     is_active: bool | None = None
     email_verified: bool | None = None
+    restaurant_name: str | None = Field(default=None, min_length=2, max_length=120)
+    location: str | None = Field(default=None, min_length=2, max_length=120)
+    subscription_plan: SubscriptionPlan | None = None
+    subscription_status: SubscriptionStatus | None = None
+    subscription_started_at: datetime | None = None
+    subscription_expires_at: datetime | None = None
 
 
 class UserManagementActionResponse(BaseSchema):

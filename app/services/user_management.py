@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.core.enums import SubscriptionStatus
 from app.core.exceptions import ConflictException, ValidationException
 from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
@@ -32,10 +33,11 @@ class UserManagementService(BaseService):
             search=query.search,
             role=query.role,
             is_active=query.is_active,
+            subscription_status=query.subscription_status,
             page=query.page,
             page_size=query.page_size,
         )
-        items = await self._build_items(users)
+        items = [self._to_item(user) for user in users]
         pagination = build_pagination_meta(total=total, page=query.page, page_size=query.page_size)
 
         return UserManagementListResponse(
@@ -43,6 +45,7 @@ class UserManagementService(BaseService):
                 total_users=await self.user_repository.count(),
                 active_users=await self.user_repository.count({"is_active": True}),
                 suspended_users=await self.user_repository.count({"is_active": False}),
+                trial_users=await self.user_repository.count({"subscription_status": SubscriptionStatus.TRIAL}),
             ),
             items=items,
             **pagination,
@@ -66,22 +69,38 @@ class UserManagementService(BaseService):
             existing_user = await self.user_repository.get_by_email(normalized_updates["email"])
             if existing_user and str(existing_user["_id"]) != str(user["_id"]):
                 raise ConflictException("An account with this email already exists")
+        if (
+            normalized_updates.get("subscription_started_at")
+            and normalized_updates.get("subscription_expires_at")
+            and normalized_updates["subscription_expires_at"] <= normalized_updates["subscription_started_at"]
+        ):
+            raise ValidationException("Subscription expiry must be later than the start date")
 
         self._prevent_self_demotion(actor_user=actor_user, target_user=user, updates=normalized_updates)
         updated_user = await self.user_repository.update(user_id, normalized_updates)
-        item = await self._build_item(updated_user)
+        item = self._to_item(updated_user)
         return UserManagementActionResponse(message="User updated successfully", user=item)
 
     async def suspend_user(self, *, actor_user: dict, user_id: str) -> UserManagementActionResponse:
         user = await self.user_repository.get_by_id(user_id)
         self._prevent_self_deactivation(actor_user=actor_user, target_user=user)
-        updated_user = await self.user_repository.update(user_id, {"is_active": False})
-        item = await self._build_item(updated_user)
+        updated_user = await self.user_repository.update(
+            user_id,
+            {"is_active": False, "subscription_status": SubscriptionStatus.SUSPENDED},
+        )
+        item = self._to_item(updated_user)
         return UserManagementActionResponse(message="User suspended successfully", user=item)
 
     async def activate_user(self, user_id: str) -> UserManagementActionResponse:
-        updated_user = await self.user_repository.update(user_id, {"is_active": True})
-        item = await self._build_item(updated_user)
+        user = await self.user_repository.get_by_id(user_id)
+        resolved_status = user.get("subscription_status")
+        if resolved_status == SubscriptionStatus.SUSPENDED:
+            resolved_status = SubscriptionStatus.ACTIVE
+        updated_user = await self.user_repository.update(
+            user_id,
+            {"is_active": True, "subscription_status": resolved_status},
+        )
+        item = self._to_item(updated_user)
         return UserManagementActionResponse(message="User activated successfully", user=item)
 
     async def delete_user(self, *, actor_user: dict, user_id: str) -> None:
@@ -91,28 +110,20 @@ class UserManagementService(BaseService):
         await self.onboarding_repository.delete_by_user_id(str(user["_id"]))
         await self.auth_code_repository.delete_by_user_id(user["_id"])
 
-    async def _build_items(self, users: list[dict]) -> list[UserManagementListItemResponse]:
-        user_ids = [str(user["_id"]) for user in users]
-        profiles = await self.onboarding_repository.get_by_user_ids(user_ids)
-        profile_map = {profile["user_id"]: profile for profile in profiles}
-        return [self._to_item(user, profile_map.get(str(user["_id"]))) for user in users]
-
-    async def _build_item(self, user: dict) -> UserManagementListItemResponse:
-        profile = await self.onboarding_repository.get_by_user_id(str(user["_id"]))
-        return self._to_item(user, profile)
-
-    def _to_item(self, user: dict, profile: dict | None) -> UserManagementListItemResponse:
+    def _to_item(self, user: dict) -> UserManagementListItemResponse:
         serialized_user = self.serialize(user)
-        serialized_profile = self.serialize(profile) if profile else None
         return UserManagementListItemResponse(
             id=serialized_user["id"],
             full_name=serialized_user["full_name"],
             email=serialized_user["email"],
             phone=serialized_user.get("phone"),
             role=serialized_user["role"],
-            restaurant_name=serialized_profile.get("restaurant_name") if serialized_profile else None,
-            location=serialized_profile.get("city_location") if serialized_profile else None,
-            plan=None,
+            restaurant_name=serialized_user.get("restaurant_name"),
+            location=serialized_user.get("location"),
+            subscription_plan=serialized_user.get("subscription_plan"),
+            subscription_status=serialized_user.get("subscription_status"),
+            subscription_started_at=serialized_user.get("subscription_started_at"),
+            subscription_expires_at=serialized_user.get("subscription_expires_at"),
             status=self._resolve_status(serialized_user),
             is_active=serialized_user["is_active"],
             email_verified=serialized_user.get("email_verified", False),
@@ -123,6 +134,8 @@ class UserManagementService(BaseService):
 
     @staticmethod
     def _resolve_status(user: dict) -> str:
+        if user.get("subscription_status"):
+            return user["subscription_status"]
         if not user["is_active"]:
             return "suspended"
         if user.get("email_verified", False):

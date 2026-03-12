@@ -19,7 +19,7 @@ async def get_auth_service(db=Depends(get_database)) -> AuthService:
 
 
 async def get_onboarding_service(db=Depends(get_database)) -> OnboardingService:
-    return OnboardingService(OnboardingProfileRepository(db))
+    return OnboardingService(OnboardingProfileRepository(db), UserRepository(db))
 
 
 async def get_dashboard_service(db=Depends(get_database)) -> DashboardService:

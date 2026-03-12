@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import EmailStr, Field, field_validator, model_validator
 
-from app.core.enums import UserRole
+from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
 from app.schemas.common import BaseSchema
+
 
 
 def validate_password_strength(value: str) -> str:
@@ -97,6 +100,12 @@ class AuthUserResponse(BaseSchema):
     role: UserRole
     is_active: bool
     email_verified: bool
+    restaurant_name: str | None = None
+    location: str | None = None
+    subscription_plan: SubscriptionPlan | None = None
+    subscription_status: SubscriptionStatus | None = None
+    subscription_started_at: datetime | None = None
+    subscription_expires_at: datetime | None = None
     created_at: str
     updated_at: str
 

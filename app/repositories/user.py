@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.core.enums import UserRole
+from app.core.enums import SubscriptionStatus, UserRole
 from app.repositories.base import BaseRepository
 
 
@@ -41,6 +41,7 @@ class UserRepository(BaseRepository[dict]):
         search: str | None = None,
         role: UserRole | None = None,
         is_active: bool | None = None,
+        subscription_status: SubscriptionStatus | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, object]], int]:
@@ -51,6 +52,8 @@ class UserRepository(BaseRepository[dict]):
             and_filters.append({"role": role})
         if is_active is not None:
             and_filters.append({"is_active": is_active})
+        if subscription_status is not None:
+            and_filters.append({"subscription_status": subscription_status})
         if search:
             escaped_search = {"$regex": search.strip(), "$options": "i"}
             and_filters.append(
@@ -59,6 +62,8 @@ class UserRepository(BaseRepository[dict]):
                         {"full_name": escaped_search},
                         {"email": escaped_search},
                         {"phone": escaped_search},
+                        {"restaurant_name": escaped_search},
+                        {"location": escaped_search},
                     ]
                 }
             )

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime, timedelta
 
 from app.config.settings import get_settings
-from app.core.enums import UserRole
+from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
 from app.core.exceptions import ConflictException, AuthenticationException, ValidationException
 from app.core.security import password_manager, token_manager
 from app.repositories.auth_code import AuthCodeRepository
@@ -59,9 +60,14 @@ class AuthService(BaseService):
                     "role": UserRole.RESTAURANT_OWNER,
                     "is_active": True,
                     "email_verified": False,
+                    "subscription_plan": user.get("subscription_plan") or SubscriptionPlan.ONE_MONTH,
+                    "subscription_status": user.get("subscription_status") or SubscriptionStatus.TRIAL,
+                    "subscription_started_at": user.get("subscription_started_at") or datetime.now(UTC),
+                    "subscription_expires_at": user.get("subscription_expires_at") or (datetime.now(UTC) + timedelta(days=30)),
                 },
             )
         else:
+            now = datetime.now(UTC)
             user = await self.user_repository.create(
                 {
                     "email": payload.email.lower(),
@@ -71,6 +77,12 @@ class AuthService(BaseService):
                     "role": UserRole.RESTAURANT_OWNER,
                     "is_active": True,
                     "email_verified": False,
+                    "restaurant_name": None,
+                    "location": None,
+                    "subscription_plan": SubscriptionPlan.ONE_MONTH,
+                    "subscription_status": SubscriptionStatus.TRIAL,
+                    "subscription_started_at": now,
+                    "subscription_expires_at": now + timedelta(days=30),
                 }
             )
 
@@ -196,6 +208,12 @@ class AuthService(BaseService):
             role=serialized["role"],
             is_active=serialized["is_active"],
             email_verified=serialized.get("email_verified", False),
+            restaurant_name=serialized.get("restaurant_name"),
+            location=serialized.get("location"),
+            subscription_plan=serialized.get("subscription_plan"),
+            subscription_status=serialized.get("subscription_status"),
+            subscription_started_at=serialized.get("subscription_started_at"),
+            subscription_expires_at=serialized.get("subscription_expires_at"),
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
         )

@@ -69,6 +69,8 @@ def _split_http_detail(detail: Any) -> tuple[str, dict[str, Any]]:
 def create_app(*, testing: bool = False) -> FastAPI:
     settings = get_settings()
     settings.testing = testing
+    if testing:
+        settings.smtp_enabled = False
     configure_logging(settings)
 
     @asynccontextmanager
