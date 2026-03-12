@@ -27,3 +27,8 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
             IndexModel([("restaurant_type", ASCENDING)], name="idx_onboarding_profiles_restaurant_type"),
         ],
     )
+    await db["subscription_plan"].create_indexes(
+        [
+            IndexModel([("singleton_key", ASCENDING)], unique=True, name="uq_subscription_plan_singleton_key"),
+        ],
+    )

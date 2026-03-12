@@ -65,17 +65,6 @@ class SubscriptionPlanResponse(BaseSchema):
     updated_at: str
 
 
-class SubscriptionPlanCreateRequest(BaseSchema):
-    name: str = Field(min_length=2, max_length=120)
-    monthly_price: float = Field(ge=0)
-    annual_price: float = Field(ge=0)
-    trial_days: int = Field(ge=0, le=365)
-    features: list[str] = Field(default_factory=list)
-    is_visible: bool = True
-    is_active: bool = True
-    is_best_plan: bool = False
-
-
 class SubscriptionPlanUpdateRequest(BaseSchema):
     name: str | None = Field(default=None, min_length=2, max_length=120)
     monthly_price: float | None = Field(default=None, ge=0)

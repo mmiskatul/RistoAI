@@ -20,6 +20,7 @@ from app.db.indexes import ensure_indexes
 from app.db.mongodb import MongoDB
 from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.subscription_guard import SubscriptionGuardMiddleware
+from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 from app.services.bootstrap import BootstrapService
 
@@ -91,8 +92,10 @@ def create_app(*, testing: bool = False) -> FastAPI:
         if not settings.testing:
             db = MongoDB.connect(settings)
             await ensure_indexes(db)
-            await BootstrapService(UserRepository(db)).ensure_super_admin(settings)
-            logger.info('MongoDB connected, indexes ensured, and super admin synchronized')
+            bootstrap_service = BootstrapService(UserRepository(db), SubscriptionPlanRepository(db))
+            await bootstrap_service.ensure_super_admin(settings)
+            await bootstrap_service.ensure_default_subscription_plan(settings)
+            logger.info('MongoDB connected, indexes ensured, super admin synchronized, and default subscription plan ensured')
         yield
         if not settings.testing:
             MongoDB.close()
@@ -159,3 +162,5 @@ def create_app(*, testing: bool = False) -> FastAPI:
 
 
 app = create_app()
+
+

@@ -48,6 +48,18 @@ class Settings(BaseSettings):
     super_admin_password: str | None = Field(default=None, alias="SUPER_ADMIN_PASSWORD")
     super_admin_full_name: str = Field(default="Super Admin", alias="SUPER_ADMIN_FULL_NAME")
 
+    subscription_plan_name: str = Field(default="Core Plan", alias="SUBSCRIPTION_PLAN_NAME")
+    subscription_plan_monthly_price: float = Field(default=30.0, alias="SUBSCRIPTION_PLAN_MONTHLY_PRICE")
+    subscription_plan_annual_price: float = Field(default=350.0, alias="SUBSCRIPTION_PLAN_ANNUAL_PRICE")
+    subscription_plan_trial_days: int = Field(default=7, alias="SUBSCRIPTION_PLAN_TRIAL_DAYS")
+    subscription_plan_features: list[str] = Field(
+        default_factory=lambda: ["AI menu suggestions", "Basic sales analytics", "Email support"],
+        alias="SUBSCRIPTION_PLAN_FEATURES",
+    )
+    subscription_plan_is_visible: bool = Field(default=True, alias="SUBSCRIPTION_PLAN_IS_VISIBLE")
+    subscription_plan_is_active: bool = Field(default=True, alias="SUBSCRIPTION_PLAN_IS_ACTIVE")
+    subscription_plan_is_best: bool = Field(default=False, alias="SUBSCRIPTION_PLAN_IS_BEST")
+
     @computed_field
     @property
     def openapi_url(self) -> str:
@@ -75,6 +87,8 @@ class Settings(BaseSettings):
     def validate_super_admin_settings(self) -> "Settings":
         if bool(self.super_admin_email) != bool(self.super_admin_password):
             raise ValueError("SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must both be set together")
+        if self.subscription_plan_trial_days < 0 or self.subscription_plan_trial_days > 365:
+            raise ValueError("SUBSCRIPTION_PLAN_TRIAL_DAYS must be between 0 and 365")
         return self
 
     @classmethod

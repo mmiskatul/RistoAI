@@ -14,13 +14,14 @@ def _resolve_mock_db(app):
     return asyncio.run(provider())
 
 
-def seed_subscription_plan(app, *, name: str = 'Pro Plan') -> str:
+def seed_subscription_plan(app, *, name: str = 'Core Plan') -> str:
     db = _resolve_mock_db(app)
     plan_id = ObjectId()
     asyncio.run(
-        db['subscription_plans'].insert_one(
+        db['subscription_plan'].insert_one(
             {
                 '_id': plan_id,
+                'singleton_key': 'default_plan',
                 'name': name,
                 'monthly_price': 29.0,
                 'annual_price': 290.0,
@@ -28,7 +29,7 @@ def seed_subscription_plan(app, *, name: str = 'Pro Plan') -> str:
                 'features': ['Advanced AI insights'],
                 'is_visible': True,
                 'is_active': True,
-                'is_best_plan': name == 'Pro Plan',
+                'is_best_plan': False,
                 'created_at': datetime(2026, 3, 12, tzinfo=UTC),
                 'updated_at': datetime(2026, 3, 12, tzinfo=UTC),
             }

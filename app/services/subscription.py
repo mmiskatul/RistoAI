@@ -19,7 +19,6 @@ from app.schemas.subscription import (
     SubscriptionOverviewQuery,
     SubscriptionOverviewResponse,
     SubscriptionPlanActionResponse,
-    SubscriptionPlanCreateRequest,
     SubscriptionPlanManagementResponse,
     SubscriptionPlanResponse,
     SubscriptionPlanUpdateRequest,
@@ -128,23 +127,14 @@ class SubscriptionService(BaseService):
             subscription=self._to_user_current_subscription(updated_user),
         )
 
-    async def create_plan(self, payload: SubscriptionPlanCreateRequest) -> SubscriptionPlanActionResponse:
-        existing_plan = await self.subscription_plan_repository.get_by_name(payload.name)
-        if existing_plan:
-            raise ConflictException('A subscription plan with this name already exists')
-        plan = await self.subscription_plan_repository.create(payload.model_dump(mode='json'))
-        return SubscriptionPlanActionResponse(message='Subscription plan created successfully', plan=self._to_plan_response(plan))
 
-    async def update_plan(self, plan_id: str, payload: SubscriptionPlanUpdateRequest) -> SubscriptionPlanActionResponse:
+    async def update_plan(self, payload: SubscriptionPlanUpdateRequest) -> SubscriptionPlanActionResponse:
         updates = payload.model_dump(exclude_none=True, mode='json')
         if not updates:
             raise ValidationException('No fields provided for update')
-        if 'name' in updates:
-            existing_plan = await self.subscription_plan_repository.get_by_name(updates['name'])
-            if existing_plan and str(existing_plan['_id']) != plan_id:
-                raise ConflictException('A subscription plan with this name already exists')
-        plan = await self.subscription_plan_repository.update(plan_id, updates)
-        return SubscriptionPlanActionResponse(message='Subscription plan updated successfully', plan=self._to_plan_response(plan))
+        plan = await self.subscription_plan_repository.get_plan()
+        updated_plan = await self.subscription_plan_repository.update(plan['_id'], updates)
+        return SubscriptionPlanActionResponse(message='Subscription plan updated successfully', plan=self._to_plan_response(updated_plan))
 
     async def create_coupon(self, payload: CouponCreateRequest) -> CouponActionResponse:
         existing_coupon = await self.coupon_repository.get_by_code(payload.code)
@@ -259,6 +249,7 @@ class SubscriptionService(BaseService):
 
     def _to_plan_response(self, plan: dict) -> SubscriptionPlanResponse:
         serialized = self.serialize(plan)
+        serialized.pop('singleton_key', None)
         return SubscriptionPlanResponse(**serialized)
 
     def _to_coupon_response(self, coupon: dict) -> CouponResponse:
@@ -291,3 +282,7 @@ class SubscriptionService(BaseService):
     @staticmethod
     def _selection_required(user: dict) -> bool:
         return not bool(user.get('subscription_plan_name'))
+
+
+
+

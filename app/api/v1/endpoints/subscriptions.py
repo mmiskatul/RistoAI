@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 
 from app.core.enums import UserRole
-from app.dependencies.auth import get_current_user, require_roles
+from app.dependencies.auth import require_roles
 from app.dependencies.services import get_subscription_service
 from app.schemas.subscription import (
     CouponActionResponse,
@@ -14,7 +14,6 @@ from app.schemas.subscription import (
     SubscriptionOverviewQuery,
     SubscriptionOverviewResponse,
     SubscriptionPlanActionResponse,
-    SubscriptionPlanCreateRequest,
     SubscriptionPlanManagementResponse,
     SubscriptionPlanUpdateRequest,
     UserCurrentSubscriptionResponse,
@@ -70,26 +69,16 @@ async def select_user_subscription_plan(
     return await service.select_user_plan(current_user, payload)
 
 
-@router.post('/plans', response_model=SubscriptionPlanActionResponse, status_code=status.HTTP_201_CREATED, tags=['Subscription Management'])
-async def create_subscription_plan(
-    payload: SubscriptionPlanCreateRequest,
-    _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
-    service: SubscriptionService = Depends(get_subscription_service),
-) -> SubscriptionPlanActionResponse:
-    return await service.create_plan(payload)
-
-
-@router.patch('/plans/{plan_id}', response_model=SubscriptionPlanActionResponse, tags=['Subscription Management'])
+@router.patch('/plans', response_model=SubscriptionPlanActionResponse, tags=['Subscription Management'])
 async def update_subscription_plan(
-    plan_id: str,
     payload: SubscriptionPlanUpdateRequest,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
     service: SubscriptionService = Depends(get_subscription_service),
 ) -> SubscriptionPlanActionResponse:
-    return await service.update_plan(plan_id, payload)
+    return await service.update_plan(payload)
 
 
-@router.post('/coupons', response_model=CouponActionResponse, status_code=status.HTTP_201_CREATED, tags=['Subscription Management'])
+@router.post('/coupons', response_model=CouponActionResponse, status_code=201, tags=['Subscription Management'])
 async def create_coupon(
     payload: CouponCreateRequest,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),

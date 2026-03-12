@@ -3,12 +3,20 @@ from __future__ import annotations
 from app.config.settings import Settings
 from app.core.enums import AppLanguage, UserRole
 from app.core.security import password_manager
+from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 
 
 class BootstrapService:
-    def __init__(self, user_repository: UserRepository) -> None:
+    SINGLETON_KEY = 'default_plan'
+
+    def __init__(
+        self,
+        user_repository: UserRepository,
+        subscription_plan_repository: SubscriptionPlanRepository,
+    ) -> None:
         self.user_repository = user_repository
+        self.subscription_plan_repository = subscription_plan_repository
 
     async def ensure_super_admin(self, settings: Settings) -> None:
         if not settings.super_admin_email or not settings.super_admin_password:
@@ -43,3 +51,22 @@ class BootstrapService:
 
         if updates:
             await self.user_repository.update(existing_user['_id'], updates)
+
+    async def ensure_default_subscription_plan(self, settings: Settings) -> None:
+        existing_plan = await self.subscription_plan_repository.get_optional_plan()
+        if existing_plan:
+            return
+
+        await self.subscription_plan_repository.create(
+            {
+                'singleton_key': self.SINGLETON_KEY,
+                'name': settings.subscription_plan_name,
+                'monthly_price': settings.subscription_plan_monthly_price,
+                'annual_price': settings.subscription_plan_annual_price,
+                'trial_days': settings.subscription_plan_trial_days,
+                'features': settings.subscription_plan_features,
+                'is_visible': settings.subscription_plan_is_visible,
+                'is_active': settings.subscription_plan_is_active,
+                'is_best_plan': settings.subscription_plan_is_best,
+            }
+        )

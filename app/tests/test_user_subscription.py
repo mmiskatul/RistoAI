@@ -22,8 +22,7 @@ def _build_app_with_mock_db():
 
 def test_user_subscription_selection_flow_for_first_login():
     app, _ = _build_app_with_mock_db()
-    seed_subscription_plan(app, name='Starter Plan')
-    seed_subscription_plan(app, name='Pro Plan')
+    seed_subscription_plan(app, name='Core Plan')
 
     with TestClient(app) as client:
         headers = register_and_login(
@@ -43,14 +42,14 @@ def test_user_subscription_selection_flow_for_first_login():
         assert current_response.json()['selection_required'] is True
         assert plans_response.status_code == 200
         assert plans_response.json()['selection_required'] is True
-        assert len(plans_response.json()['plans']) == 2
+        assert len(plans_response.json()['plans']) == 1
 
-        pro_plan = next(plan for plan in plans_response.json()['plans'] if plan['name'] == 'Pro Plan')
+        core_plan = plans_response.json()['plans'][0]
         select_response = client.post(
             '/api/v1/subscriptions/user/select',
             headers=headers,
             json={
-                'plan_id': pro_plan['id'],
+                'plan_id': core_plan['id'],
                 'billing_cycle': '1_month',
                 'start_trial': True,
             },
@@ -59,12 +58,12 @@ def test_user_subscription_selection_flow_for_first_login():
 
     assert select_response.status_code == 200
     assert select_response.json()['subscription']['selection_required'] is False
-    assert select_response.json()['subscription']['plan_name'] == 'Pro Plan'
+    assert select_response.json()['subscription']['plan_name'] == 'Core Plan'
     assert select_response.json()['subscription']['billing_cycle'] == '1_month'
     assert select_response.json()['subscription']['status'] == 'trial'
     assert me_response.status_code == 200
     assert me_response.json()['subscription_selection_required'] is False
-    assert me_response.json()['subscription_plan_name'] == 'Pro Plan'
+    assert me_response.json()['subscription_plan_name'] == 'Core Plan'
     assert me_response.json()['subscription_status'] == 'trial'
 
 
@@ -93,5 +92,6 @@ def test_subscription_middleware_blocks_protected_routes_until_plan_selected():
     assert blocked_response.json()['error']['code'] == 'subscription_required'
     assert blocked_response.json()['error']['details']['selection_required'] is True
     assert allowed_subscription_response.status_code == 200
+    assert len(allowed_subscription_response.json()['plans']) == 1
     assert unblocked_response.status_code == 200
     assert unblocked_response.json() is None
