@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
     smtp_use_ssl: bool = Field(default=False, alias="SMTP_USE_SSL")
 
+    super_admin_email: EmailStr | None = Field(default=None, alias="SUPER_ADMIN_EMAIL")
+    super_admin_password: str | None = Field(default=None, alias="SUPER_ADMIN_PASSWORD")
+    super_admin_full_name: str = Field(default="Super Admin", alias="SUPER_ADMIN_FULL_NAME")
+
     @computed_field
     @property
     def openapi_url(self) -> str:
@@ -65,6 +69,12 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"SMTP is enabled but required settings are missing: {', '.join(missing_fields)}",
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_super_admin_settings(self) -> "Settings":
+        if bool(self.super_admin_email) != bool(self.super_admin_password):
+            raise ValueError("SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must both be set together")
         return self
 
     @classmethod

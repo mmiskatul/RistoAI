@@ -19,6 +19,8 @@ from app.core.logging import configure_logging
 from app.db.indexes import ensure_indexes
 from app.db.mongodb import MongoDB
 from app.middleware.request_context import RequestContextMiddleware
+from app.repositories.user import UserRepository
+from app.services.bootstrap import BootstrapService
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,8 @@ def create_app(*, testing: bool = False) -> FastAPI:
         if not settings.testing:
             db = MongoDB.connect(settings)
             await ensure_indexes(db)
-            logger.info("MongoDB connected and indexes ensured")
+            await BootstrapService(UserRepository(db)).ensure_super_admin(settings)
+            logger.info("MongoDB connected, indexes ensured, and super admin synchronized")
         yield
         if not settings.testing:
             MongoDB.close()
