@@ -25,6 +25,16 @@ from app.services.bootstrap import BootstrapService
 
 logger = logging.getLogger(__name__)
 
+OPENAPI_TAGS = [
+    {'name': 'Authentication', 'description': 'Login, registration, token refresh, and current-user identity endpoints.'},
+    {'name': 'User Subscription', 'description': 'User-side subscription selection and current subscription endpoints.'},
+    {'name': 'Subscription Management', 'description': 'Admin-side subscription plans, coupons, and revenue management endpoints.'},
+    {'name': 'Onboarding', 'description': 'Restaurant onboarding profile endpoints.'},
+    {'name': 'Dashboard', 'description': 'Admin dashboard aggregation endpoints.'},
+    {'name': 'Users', 'description': 'Admin user management endpoints.'},
+    {'name': 'Health', 'description': 'Service health check endpoint.'},
+]
+
 
 
 def _make_json_safe(value: Any) -> Any:
@@ -41,21 +51,21 @@ def _make_json_safe(value: Any) -> Any:
 def _error_response(status_code: int, code: str, message: str, details: dict[str, Any] | None = None) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
-        content={"success": False, "error": {"code": code, "message": message, "details": details or {}}},
+        content={'success': False, 'error': {'code': code, 'message': message, 'details': details or {}}},
     )
 
 
 
 def _http_error_code(status_code: int) -> str:
     return {
-        400: "bad_request",
-        401: "unauthorized",
-        403: "forbidden",
-        404: "not_found",
-        405: "method_not_allowed",
-        409: "conflict",
-        422: "validation_error",
-    }.get(status_code, "http_error")
+        400: 'bad_request',
+        401: 'unauthorized',
+        403: 'forbidden',
+        404: 'not_found',
+        405: 'method_not_allowed',
+        409: 'conflict',
+        422: 'validation_error',
+    }.get(status_code, 'http_error')
 
 
 
@@ -63,7 +73,7 @@ def _split_http_detail(detail: Any) -> tuple[str, dict[str, Any]]:
     safe_detail = _make_json_safe(detail)
     if isinstance(safe_detail, str):
         return safe_detail, {}
-    return "Request failed", {"detail": safe_detail}
+    return 'Request failed', {'detail': safe_detail}
 
 
 
@@ -80,17 +90,18 @@ def create_app(*, testing: bool = False) -> FastAPI:
             db = MongoDB.connect(settings)
             await ensure_indexes(db)
             await BootstrapService(UserRepository(db)).ensure_super_admin(settings)
-            logger.info("MongoDB connected, indexes ensured, and super admin synchronized")
+            logger.info('MongoDB connected, indexes ensured, and super admin synchronized')
         yield
         if not settings.testing:
             MongoDB.close()
-            logger.info("MongoDB connection closed")
+            logger.info('MongoDB connection closed')
 
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
         debug=settings.debug,
         openapi_url=settings.openapi_url,
+        openapi_tags=OPENAPI_TAGS,
         lifespan=lifespan,
     )
 
@@ -98,8 +109,8 @@ def create_app(*, testing: bool = False) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=['*'],
+        allow_headers=['*'],
     )
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(SubscriptionGuardMiddleware)
@@ -118,29 +129,29 @@ def create_app(*, testing: bool = False) -> FastAPI:
     async def request_validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
         return _error_response(
             422,
-            "validation_error",
-            "Request validation failed",
-            {"errors": _make_json_safe(exc.errors())},
+            'validation_error',
+            'Request validation failed',
+            {'errors': _make_json_safe(exc.errors())},
         )
 
     @app.exception_handler(ResponseValidationError)
     async def response_validation_exception_handler(_: Request, exc: ResponseValidationError) -> JSONResponse:
-        logger.exception("Response validation failed", exc_info=exc)
+        logger.exception('Response validation failed', exc_info=exc)
         return _error_response(
             500,
-            "response_validation_error",
-            "Response validation failed",
-            {"errors": _make_json_safe(exc.errors())},
+            'response_validation_error',
+            'Response validation failed',
+            {'errors': _make_json_safe(exc.errors())},
         )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(_: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled server error", exc_info=exc)
-        return _error_response(500, "internal_server_error", "Unexpected server error")
+        logger.exception('Unhandled server error', exc_info=exc)
+        return _error_response(500, 'internal_server_error', 'Unexpected server error')
 
-    @app.get("/health", tags=["Health"])
+    @app.get('/health', tags=['Health'])
     async def healthcheck() -> dict[str, str]:
-        return {"status": "ok", "service": settings.app_name}
+        return {'status': 'ok', 'service': settings.app_name}
 
     return app
 

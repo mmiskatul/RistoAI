@@ -27,7 +27,7 @@ from app.services.subscription import SubscriptionService
 router = APIRouter()
 
 
-@router.get('/overview', response_model=SubscriptionOverviewResponse)
+@router.get('/overview', response_model=SubscriptionOverviewResponse, tags=['Subscription Management'])
 async def get_subscription_overview(
     query: SubscriptionOverviewQuery = Depends(),
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -36,7 +36,7 @@ async def get_subscription_overview(
     return await service.get_overview(query)
 
 
-@router.get('/plans/management', response_model=SubscriptionPlanManagementResponse)
+@router.get('/plans/management', response_model=SubscriptionPlanManagementResponse, tags=['Subscription Management'])
 async def get_subscription_plan_management(
     query: CouponQuery = Depends(),
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -45,7 +45,7 @@ async def get_subscription_plan_management(
     return await service.get_plan_management(query)
 
 
-@router.get('/user/plans', response_model=UserSubscriptionPlanListResponse)
+@router.get('/user/plans', response_model=UserSubscriptionPlanListResponse, tags=['User Subscription'])
 async def get_user_subscription_plans(
     current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
     service: SubscriptionService = Depends(get_subscription_service),
@@ -53,7 +53,7 @@ async def get_user_subscription_plans(
     return await service.get_user_visible_plans(current_user)
 
 
-@router.get('/user/current', response_model=UserCurrentSubscriptionResponse)
+@router.get('/user/current', response_model=UserCurrentSubscriptionResponse, tags=['User Subscription'])
 async def get_user_current_subscription(
     current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
     service: SubscriptionService = Depends(get_subscription_service),
@@ -61,7 +61,7 @@ async def get_user_current_subscription(
     return await service.get_user_current_subscription(current_user)
 
 
-@router.post('/user/select', response_model=UserSubscriptionActionResponse)
+@router.post('/user/select', response_model=UserSubscriptionActionResponse, tags=['User Subscription'])
 async def select_user_subscription_plan(
     payload: UserSubscriptionSelectRequest,
     current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
@@ -70,7 +70,7 @@ async def select_user_subscription_plan(
     return await service.select_user_plan(current_user, payload)
 
 
-@router.post('/plans', response_model=SubscriptionPlanActionResponse, status_code=status.HTTP_201_CREATED)
+@router.post('/plans', response_model=SubscriptionPlanActionResponse, status_code=status.HTTP_201_CREATED, tags=['Subscription Management'])
 async def create_subscription_plan(
     payload: SubscriptionPlanCreateRequest,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -79,7 +79,7 @@ async def create_subscription_plan(
     return await service.create_plan(payload)
 
 
-@router.patch('/plans/{plan_id}', response_model=SubscriptionPlanActionResponse)
+@router.patch('/plans/{plan_id}', response_model=SubscriptionPlanActionResponse, tags=['Subscription Management'])
 async def update_subscription_plan(
     plan_id: str,
     payload: SubscriptionPlanUpdateRequest,
@@ -89,7 +89,7 @@ async def update_subscription_plan(
     return await service.update_plan(plan_id, payload)
 
 
-@router.post('/coupons', response_model=CouponActionResponse, status_code=status.HTTP_201_CREATED)
+@router.post('/coupons', response_model=CouponActionResponse, status_code=status.HTTP_201_CREATED, tags=['Subscription Management'])
 async def create_coupon(
     payload: CouponCreateRequest,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -98,7 +98,7 @@ async def create_coupon(
     return await service.create_coupon(payload)
 
 
-@router.patch('/coupons/{coupon_id}', response_model=CouponActionResponse)
+@router.patch('/coupons/{coupon_id}', response_model=CouponActionResponse, tags=['Subscription Management'])
 async def update_coupon(
     coupon_id: str,
     payload: CouponUpdateRequest,
@@ -108,7 +108,7 @@ async def update_coupon(
     return await service.update_coupon(coupon_id, payload)
 
 
-@router.post('/coupons/{coupon_id}/activate', response_model=CouponActionResponse)
+@router.post('/coupons/{coupon_id}/activate', response_model=CouponActionResponse, tags=['Subscription Management'])
 async def activate_coupon(
     coupon_id: str,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -117,7 +117,7 @@ async def activate_coupon(
     return await service.activate_coupon(coupon_id)
 
 
-@router.post('/coupons/{coupon_id}/pause', response_model=CouponActionResponse)
+@router.post('/coupons/{coupon_id}/pause', response_model=CouponActionResponse, tags=['Subscription Management'])
 async def pause_coupon(
     coupon_id: str,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -126,7 +126,7 @@ async def pause_coupon(
     return await service.pause_coupon(coupon_id)
 
 
-@router.delete('/coupons/{coupon_id}', response_model=SubscriptionActionResponse)
+@router.delete('/coupons/{coupon_id}', response_model=SubscriptionActionResponse, tags=['Subscription Management'])
 async def delete_coupon(
     coupon_id: str,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
