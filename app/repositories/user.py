@@ -34,3 +34,35 @@ class UserRepository(BaseRepository[dict]):
         start = datetime(year, month, 1, tzinfo=UTC)
         end = datetime(year + (month // 12), (month % 12) + 1, 1, tzinfo=UTC)
         return await self.count({"created_at": {"$gte": start, "$lt": end}})
+
+    async def get_filtered_users(
+        self,
+        *,
+        search: str | None = None,
+        role: UserRole | None = None,
+        is_active: bool | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, object]], int]:
+        filters: dict[str, object] = {}
+        and_filters: list[dict[str, object]] = []
+
+        if role is not None:
+            and_filters.append({"role": role})
+        if is_active is not None:
+            and_filters.append({"is_active": is_active})
+        if search:
+            escaped_search = {"$regex": search.strip(), "$options": "i"}
+            and_filters.append(
+                {
+                    "$or": [
+                        {"full_name": escaped_search},
+                        {"email": escaped_search},
+                        {"phone": escaped_search},
+                    ]
+                }
+            )
+        if and_filters:
+            filters = {"$and": and_filters} if len(and_filters) > 1 else and_filters[0]
+
+        return await self.get_multi(filters=filters, page=page, page_size=page_size)

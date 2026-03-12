@@ -16,6 +16,11 @@ class OnboardingProfileRepository(BaseRepository[dict]):
     async def get_by_user_id(self, user_id: str) -> dict | None:
         return await self.get_one({"user_id": user_id})
 
+    async def get_by_user_ids(self, user_ids: list[str]) -> list[dict]:
+        if not user_ids:
+            return []
+        return await self.collection.find({"user_id": {"$in": user_ids}}).to_list(length=None)
+
     async def upsert_by_user_id(self, user_id: str, payload: dict) -> dict:
         now = utc_now()
         result = await self.collection.find_one_and_update(
@@ -38,3 +43,6 @@ class OnboardingProfileRepository(BaseRepository[dict]):
 
     async def get_monthly_completed_counts(self, year: int) -> list[int]:
         return await self.get_monthly_counts(year=year, filters={"onboarding_completed": True})
+
+    async def delete_by_user_id(self, user_id: str) -> None:
+        await self.collection.delete_many({"user_id": user_id})

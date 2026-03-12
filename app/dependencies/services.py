@@ -11,6 +11,7 @@ from app.services.auth import AuthService
 from app.services.dashboard import DashboardService
 from app.services.email import EmailService
 from app.services.onboarding import OnboardingService
+from app.services.user_management import UserManagementService
 
 
 async def get_auth_service(db=Depends(get_database)) -> AuthService:
@@ -23,3 +24,7 @@ async def get_onboarding_service(db=Depends(get_database)) -> OnboardingService:
 
 async def get_dashboard_service(db=Depends(get_database)) -> DashboardService:
     return DashboardService(UserRepository(db), OnboardingProfileRepository(db), AuthCodeRepository(db))
+
+
+async def get_user_management_service(db=Depends(get_database)) -> UserManagementService:
+    return UserManagementService(UserRepository(db), OnboardingProfileRepository(db), AuthCodeRepository(db))
