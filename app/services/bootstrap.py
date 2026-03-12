@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.config.settings import Settings
-from app.core.enums import UserRole
+from app.core.enums import AppLanguage, UserRole
 from app.core.security import password_manager
 from app.repositories.user import UserRepository
 
@@ -19,6 +19,7 @@ class BootstrapService:
             'email': str(settings.super_admin_email).lower(),
             'full_name': settings.super_admin_full_name,
             'role': UserRole.SUPER_ADMIN,
+            'preferred_language': AppLanguage.ENGLISH,
             'is_active': True,
             'email_verified': True,
         }

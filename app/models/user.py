@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
+from app.core.enums import AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
 from app.models.base import MongoDocument
 
 
@@ -12,6 +12,7 @@ class UserDocument(MongoDocument):
     phone: str | None = None
     hashed_password: str
     role: UserRole
+    preferred_language: AppLanguage = AppLanguage.ENGLISH
     is_active: bool = True
     email_verified: bool = False
     restaurant_name: str | None = None

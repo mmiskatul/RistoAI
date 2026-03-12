@@ -5,7 +5,7 @@ import asyncio
 from mongomock_motor import AsyncMongoMockClient
 
 from app.config.settings import Settings
-from app.core.enums import UserRole
+from app.core.enums import AppLanguage, UserRole
 from app.core.security import password_manager
 from app.repositories.user import UserRepository
 from app.services.bootstrap import BootstrapService
@@ -26,6 +26,7 @@ def test_ensure_super_admin_creates_admin_user_from_settings():
 
     assert user is not None
     assert user['role'] == UserRole.SUPER_ADMIN
+    assert user['preferred_language'] == AppLanguage.ENGLISH
     assert user['email_verified'] is True
     assert user['is_active'] is True
     assert user['full_name'] == 'Platform Admin'

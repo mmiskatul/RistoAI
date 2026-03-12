@@ -9,11 +9,13 @@ from app.schemas.auth import (
     AuthResponse,
     AuthUserResponse,
     ForgotPasswordRequest,
+    LanguagePreferenceResponse,
     LoginRequest,
     RefreshTokenRequest,
     RegisterRequest,
     ResetPasswordRequest,
     TokenResponse,
+    UpdateLanguagePreferenceRequest,
     VerifyCodeRequest,
 )
 from app.schemas.common import MessageResponse
@@ -94,3 +96,20 @@ async def refresh(payload: RefreshTokenRequest, service: AuthService = Depends(g
 @router.get('/me', response_model=AuthUserResponse, tags=['Authentication'])
 async def me(current_user: dict = Depends(get_current_user), service: AuthService = Depends(get_auth_service)) -> AuthUserResponse:
     return await service.get_me(current_user)
+
+
+@router.get('/preferences/language', response_model=LanguagePreferenceResponse, tags=['Authentication'])
+async def get_language_preference(
+    current_user: dict = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> LanguagePreferenceResponse:
+    return await service.get_language_preference(current_user)
+
+
+@router.put('/preferences/language', response_model=LanguagePreferenceResponse, tags=['Authentication'])
+async def update_language_preference(
+    payload: UpdateLanguagePreferenceRequest,
+    current_user: dict = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> LanguagePreferenceResponse:
+    return await service.update_language_preference(current_user, payload)
