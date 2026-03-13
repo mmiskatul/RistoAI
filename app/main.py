@@ -8,11 +8,12 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1.router import api_router
 from app.config.settings import get_settings
+from app.demo_pages import landing_page_html
 from app.core.constants import API_V1_PREFIX
 from app.core.exceptions import AppException
 from app.core.logging import configure_logging
@@ -158,9 +159,14 @@ def create_app(*, testing: bool = False) -> FastAPI:
     async def healthcheck() -> dict[str, str]:
         return {'status': 'ok', 'service': settings.app_name}
 
+    @app.get('/preview/landing', response_class=HTMLResponse, include_in_schema=False)
+    async def landing_preview() -> HTMLResponse:
+        return HTMLResponse(content=landing_page_html())
+
     return app
 
 
 app = create_app()
+
 
 
