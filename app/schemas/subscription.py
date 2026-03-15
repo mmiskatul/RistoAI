@@ -123,6 +123,7 @@ class CouponListResponse(BaseSchema):
 
 
 class SubscriptionPlanManagementResponse(BaseSchema):
+    plan: SubscriptionPlanResponse | None = None
     plans: list[SubscriptionPlanResponse]
     coupons: CouponListResponse
 
@@ -155,6 +156,27 @@ class UserSubscriptionPlanListResponse(BaseSchema):
 class UserSubscriptionSelectRequest(BaseSchema):
     billing_cycle: SubscriptionPlan
     start_trial: bool = True
+    coupon_code: str | None = Field(default=None, min_length=2, max_length=50)
+
+
+class UserCouponValidationRequest(BaseSchema):
+    billing_cycle: SubscriptionPlan
+    coupon_code: str = Field(min_length=2, max_length=50)
+
+
+class AppliedCouponResponse(BaseSchema):
+    id: str
+    code: str
+    discount_type: CouponDiscountType
+    value: float
+
+
+class UserCouponValidationResponse(BaseSchema):
+    valid: bool
+    original_amount: float
+    discount_amount: float
+    final_amount: float
+    coupon: AppliedCouponResponse
 
 
 class SubscriptionActionResponse(BaseSchema):

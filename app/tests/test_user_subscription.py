@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
+from bson import ObjectId
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
@@ -20,6 +22,25 @@ def _build_app_with_mock_db():
 
     app.dependency_overrides[get_database] = override_get_database
     return app, mock_db
+
+
+def _seed_coupon(mock_db, *, code: str = 'SAVE20', status: str = 'active', value: float = 20, usage_limit: int = 100, usage_count: int = 0):
+    return asyncio.run(
+        mock_db['coupons'].insert_one(
+            {
+                '_id': ObjectId(),
+                'code': code,
+                'discount_type': 'percentage',
+                'value': value,
+                'usage_limit': usage_limit,
+                'usage_count': usage_count,
+                'expires_at': datetime.now(UTC) + timedelta(days=30),
+                'status': status,
+                'created_at': datetime(2026, 3, 12, tzinfo=UTC),
+                'updated_at': datetime(2026, 3, 12, tzinfo=UTC),
+            }
+        )
+    )
 
 
 def test_user_subscription_selection_flow_for_first_login():
@@ -69,6 +90,70 @@ def test_user_subscription_selection_flow_for_first_login():
     assert subscriptions[0]['plan_name'] == 'Core Plan'
     assert subscriptions[0]['billing_cycle'] == '1_month'
     assert subscriptions[0]['status'] == 'trial'
+
+
+def test_user_can_validate_coupon_for_subscription_pricing():
+    app, mock_db = _build_app_with_mock_db()
+    seed_subscription_plan(app, name='Core Plan')
+    _seed_coupon(mock_db)
+
+    with TestClient(app) as client:
+        headers = register_and_login(
+            client,
+            {
+                'full_name': 'Coupon User',
+                'email': 'coupon@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550003333',
+            },
+        )
+
+        response = client.post(
+            '/api/v1/subscriptions/user/validate-coupon',
+            headers=headers,
+            json={'billing_cycle': '1_month', 'coupon_code': 'SAVE20'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['valid'] is True
+    assert payload['original_amount'] == 29.0
+    assert payload['discount_amount'] == 5.8
+    assert payload['final_amount'] == 23.2
+    assert payload['coupon']['code'] == 'SAVE20'
+
+
+def test_user_subscription_selection_with_coupon_stores_coupon_details():
+    app, mock_db = _build_app_with_mock_db()
+    seed_subscription_plan(app, name='Core Plan')
+    _seed_coupon(mock_db)
+
+    with TestClient(app) as client:
+        headers = register_and_login(
+            client,
+            {
+                'full_name': 'Paid User',
+                'email': 'paid@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550004444',
+            },
+        )
+
+        response = client.post(
+            '/api/v1/subscriptions/user/select',
+            headers=headers,
+            json={'billing_cycle': '1_month', 'start_trial': False, 'coupon_code': 'SAVE20'},
+        )
+
+    assert response.status_code == 200
+    subscriptions = asyncio.run(mock_db['user_subscriptions'].find().to_list(length=None))
+    assert len(subscriptions) == 1
+    assert subscriptions[0]['coupon_code'] == 'SAVE20'
+    assert subscriptions[0]['original_amount'] == 29.0
+    assert subscriptions[0]['discount_amount'] == 5.8
+    assert subscriptions[0]['amount'] == 23.2
+    coupon = asyncio.run(mock_db['coupons'].find_one({'code': 'SAVE20'}))
+    assert coupon['usage_count'] == 1
 
 
 def test_subscription_middleware_blocks_protected_routes_until_plan_selected():

@@ -16,6 +16,8 @@ from app.schemas.subscription import (
     SubscriptionPlanActionResponse,
     SubscriptionPlanManagementResponse,
     SubscriptionPlanUpdateRequest,
+    UserCouponValidationRequest,
+    UserCouponValidationResponse,
     UserCurrentSubscriptionResponse,
     UserSubscriptionActionResponse,
     UserSubscriptionPlanListResponse,
@@ -58,6 +60,15 @@ async def get_user_current_subscription(
     service: SubscriptionService = Depends(get_subscription_service),
 ) -> UserCurrentSubscriptionResponse:
     return await service.get_user_current_subscription(current_user)
+
+
+@router.post('/user/validate-coupon', response_model=UserCouponValidationResponse, tags=['User Subscription'])
+async def validate_user_subscription_coupon(
+    payload: UserCouponValidationRequest,
+    current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> UserCouponValidationResponse:
+    return await service.validate_user_coupon(current_user, payload)
 
 
 @router.post('/user/select', response_model=UserSubscriptionActionResponse, tags=['User Subscription'])

@@ -61,13 +61,17 @@ def select_subscription_plan(
     *,
     billing_cycle: str = '1_month',
     start_trial: bool = True,
+    coupon_code: str | None = None,
 ) -> None:
+    payload = {
+        'billing_cycle': billing_cycle,
+        'start_trial': start_trial,
+    }
+    if coupon_code:
+        payload['coupon_code'] = coupon_code
     response = client.post(
         '/api/v1/subscriptions/user/select',
         headers=headers,
-        json={
-            'billing_cycle': billing_cycle,
-            'start_trial': start_trial,
-        },
+        json=payload,
     )
     assert response.status_code == 200

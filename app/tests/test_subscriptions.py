@@ -224,6 +224,11 @@ def test_subscription_plan_management_returns_plans_and_coupons():
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload['plan']['name'] == 'Core Plan'
+    assert payload['plan']['monthly_price'] == 29.0
+    assert payload['plan']['annual_price'] == 290.0
+    assert payload['plan']['trial_days'] == 7
+    assert payload['plan']['is_visible'] is True
     assert len(payload['plans']) == 1
     assert payload['plans'][0]['name'] == 'Core Plan'
     assert payload['coupons']['total'] == 2
