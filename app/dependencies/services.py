@@ -8,6 +8,7 @@ from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.coupon import CouponRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.subscription_plan import SubscriptionPlanRepository
+from app.repositories.support_ticket import SupportTicketRepository
 from app.repositories.user import UserRepository
 from app.repositories.user_subscription import UserSubscriptionRepository
 from app.services.auth import AuthService
@@ -15,6 +16,7 @@ from app.services.dashboard import DashboardService
 from app.services.email import EmailService
 from app.services.onboarding import OnboardingService
 from app.services.subscription import SubscriptionService
+from app.services.support import SupportService
 from app.services.user_management import UserManagementService
 
 
@@ -36,3 +38,7 @@ async def get_user_management_service(db=Depends(get_database)) -> UserManagemen
 
 async def get_subscription_service(db=Depends(get_database)) -> SubscriptionService:
     return SubscriptionService(UserRepository(db), SubscriptionPlanRepository(db), CouponRepository(db), UserSubscriptionRepository(db))
+
+
+async def get_support_service(db=Depends(get_database)) -> SupportService:
+    return SupportService(SupportTicketRepository(db))

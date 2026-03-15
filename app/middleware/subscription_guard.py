@@ -18,6 +18,7 @@ ALLOWED_PATH_PREFIXES = (
     '/openapi.json',
     '/api/v1/auth',
     '/api/v1/subscriptions/user',
+    '/api/v1/support',
 )
 RESTAURANT_ROLES = {UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF}
 

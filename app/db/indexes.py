@@ -40,3 +40,11 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
             IndexModel([("status", ASCENDING)], name="idx_user_subscriptions_status"),
         ],
     )
+
+    await db["support_tickets"].create_indexes(
+        [
+            IndexModel([("ticket_number", ASCENDING)], unique=True, name="uq_support_tickets_number"),
+            IndexModel([("user_id", ASCENDING), ("created_at", ASCENDING)], name="idx_support_tickets_user_created"),
+            IndexModel([("status", ASCENDING)], name="idx_support_tickets_status"),
+        ],
+    )

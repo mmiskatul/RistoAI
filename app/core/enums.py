@@ -37,3 +37,13 @@ class CouponStatus(StrEnum):
     ACTIVE = 'active'
     PAUSED = 'paused'
     EXPIRED = 'expired'
+
+
+class SupportTicketStatus(StrEnum):
+    OPEN = 'open'
+    RESOLVED = 'resolved'
+
+
+class SupportTicketPriority(StrEnum):
+    NORMAL = 'normal'
+    HIGH = 'high'
