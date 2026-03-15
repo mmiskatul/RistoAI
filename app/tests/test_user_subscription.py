@@ -44,12 +44,10 @@ def test_user_subscription_selection_flow_for_first_login():
         assert plans_response.json()['selection_required'] is True
         assert len(plans_response.json()['plans']) == 1
 
-        core_plan = plans_response.json()['plans'][0]
         select_response = client.post(
             '/api/v1/subscriptions/user/select',
             headers=headers,
             json={
-                'plan_id': core_plan['id'],
                 'billing_cycle': '1_month',
                 'start_trial': True,
             },
@@ -69,7 +67,7 @@ def test_user_subscription_selection_flow_for_first_login():
 
 def test_subscription_middleware_blocks_protected_routes_until_plan_selected():
     app, _ = _build_app_with_mock_db()
-    plan_id = seed_subscription_plan(app)
+    seed_subscription_plan(app)
 
     with TestClient(app) as client:
         headers = register_and_login(
@@ -85,7 +83,7 @@ def test_subscription_middleware_blocks_protected_routes_until_plan_selected():
         blocked_response = client.get('/api/v1/onboarding/profile', headers=headers)
         allowed_subscription_response = client.get('/api/v1/subscriptions/user/plans', headers=headers)
 
-        select_subscription_plan(client, headers, plan_id=plan_id)
+        select_subscription_plan(client, headers)
         unblocked_response = client.get('/api/v1/onboarding/profile', headers=headers)
 
     assert blocked_response.status_code == 403

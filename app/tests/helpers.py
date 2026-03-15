@@ -59,7 +59,6 @@ def select_subscription_plan(
     client: TestClient,
     headers: dict[str, str],
     *,
-    plan_id: str,
     billing_cycle: str = '1_month',
     start_trial: bool = True,
 ) -> None:
@@ -67,7 +66,6 @@ def select_subscription_plan(
         '/api/v1/subscriptions/user/select',
         headers=headers,
         json={
-            'plan_id': plan_id,
             'billing_cycle': billing_cycle,
             'start_trial': start_trial,
         },

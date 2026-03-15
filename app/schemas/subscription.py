@@ -153,7 +153,6 @@ class UserSubscriptionPlanListResponse(BaseSchema):
 
 
 class UserSubscriptionSelectRequest(BaseSchema):
-    plan_id: str
     billing_cycle: SubscriptionPlan
     start_trial: bool = True
 

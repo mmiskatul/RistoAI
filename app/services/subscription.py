@@ -100,9 +100,10 @@ class SubscriptionService(BaseService):
         return self._to_user_current_subscription(current_user)
 
     async def select_user_plan(self, current_user: dict, payload: UserSubscriptionSelectRequest) -> UserSubscriptionActionResponse:
-        plan = await self.subscription_plan_repository.get_by_id(payload.plan_id)
-        if not plan.get('is_active', False) or not plan.get('is_visible', False):
-            raise ValidationException('Selected plan is not available')
+        plans = await self.subscription_plan_repository.get_visible_plans()
+        if not plans:
+            raise ValidationException('No subscription plan is available')
+        plan = plans[0]
 
         now = datetime.now(UTC)
         if payload.start_trial and plan.get('trial_days', 0) > 0:

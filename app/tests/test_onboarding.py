@@ -4,9 +4,9 @@ from app.tests.helpers import register_and_login, seed_subscription_plan, select
 
 
 def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None:
-    plan_id = seed_subscription_plan(app)
+    seed_subscription_plan(app)
     headers = register_and_login(client, owner_credentials)
-    select_subscription_plan(client, headers, plan_id=plan_id)
+    select_subscription_plan(client, headers)
     payload = {
         'restaurant_name': 'The Italian Bistro',
         'restaurant_type': 'Fine Dining',
