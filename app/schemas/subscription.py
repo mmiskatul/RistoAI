@@ -158,6 +158,18 @@ class UserSubscriptionSelectRequest(BaseSchema):
     start_trial: bool = True
 
 
+class UserSubscriptionDiscountPreviewRequest(BaseSchema):
+    billing_cycle: SubscriptionPlan
+    coupon_code: str = Field(min_length=2, max_length=50)
+
+
+class UserSubscriptionDiscountPreviewResponse(BaseSchema):
+    coupon_code: str
+    original_amount: float
+    discount_amount: float
+    final_amount: float
+
+
 class SubscriptionActionResponse(BaseSchema):
     message: str
 

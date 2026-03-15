@@ -17,6 +17,8 @@ from app.schemas.subscription import (
     SubscriptionPlanManagementResponse,
     SubscriptionPlanUpdateRequest,
     UserCurrentSubscriptionResponse,
+    UserSubscriptionDiscountPreviewRequest,
+    UserSubscriptionDiscountPreviewResponse,
     UserSubscriptionActionResponse,
     UserSubscriptionPlanListResponse,
     UserSubscriptionSelectRequest,
@@ -58,6 +60,15 @@ async def get_user_current_subscription(
     service: SubscriptionService = Depends(get_subscription_service),
 ) -> UserCurrentSubscriptionResponse:
     return await service.get_user_current_subscription(current_user)
+
+
+@router.post('/user/discount-preview', response_model=UserSubscriptionDiscountPreviewResponse, tags=['User Subscription'])
+async def preview_user_subscription_discount(
+    payload: UserSubscriptionDiscountPreviewRequest,
+    current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> UserSubscriptionDiscountPreviewResponse:
+    return await service.preview_user_discount(current_user, payload)
 
 
 @router.post('/user/select', response_model=UserSubscriptionActionResponse, tags=['User Subscription'])

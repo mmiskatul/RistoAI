@@ -27,6 +27,8 @@ from app.schemas.subscription import (
     SubscriptionSummaryResponse,
     SubscriptionTableItemResponse,
     UserCurrentSubscriptionResponse,
+    UserSubscriptionDiscountPreviewRequest,
+    UserSubscriptionDiscountPreviewResponse,
     UserSubscriptionActionResponse,
     UserSubscriptionPlanListResponse,
     UserSubscriptionPlanResponse,
@@ -103,6 +105,21 @@ class SubscriptionService(BaseService):
 
     async def get_user_current_subscription(self, current_user: dict) -> UserCurrentSubscriptionResponse:
         return self._to_user_current_subscription(current_user)
+
+    async def preview_user_discount(
+        self,
+        current_user: dict,
+        payload: UserSubscriptionDiscountPreviewRequest,
+    ) -> UserSubscriptionDiscountPreviewResponse:
+        del current_user
+        plan = await self._get_single_visible_plan()
+        pricing = await self._resolve_coupon_pricing(plan, payload.billing_cycle, payload.coupon_code)
+        return UserSubscriptionDiscountPreviewResponse(
+            coupon_code=pricing['coupon_code'],
+            original_amount=pricing['original_amount'],
+            discount_amount=pricing['discount_amount'],
+            final_amount=pricing['final_amount'],
+        )
 
     async def select_user_plan(self, current_user: dict, payload: UserSubscriptionSelectRequest) -> UserSubscriptionActionResponse:
         plan = await self._get_single_visible_plan()
@@ -191,6 +208,28 @@ class SubscriptionService(BaseService):
         if not plans:
             raise ValidationException('No subscription plan is available')
         return plans[0]
+
+    async def _resolve_coupon_pricing(self, plan: dict, billing_cycle: SubscriptionPlan, coupon_code: str) -> dict:
+        await self.coupon_repository.mark_expired_coupons()
+        coupon = await self.coupon_repository.get_by_code(coupon_code)
+        if not coupon:
+            raise ValidationException('Coupon is not valid')
+        if coupon.get('status') != CouponStatus.ACTIVE:
+            raise ValidationException('Coupon is not valid')
+        if coupon.get('usage_count', 0) >= coupon.get('usage_limit', 0):
+            raise ValidationException('Coupon is not valid')
+
+        original_amount = float(plan['annual_price']) if billing_cycle == SubscriptionPlan.ONE_YEAR else float(plan['monthly_price'])
+        if coupon['discount_type'] == 'percentage':
+            discount_amount = round(original_amount * (float(coupon['value']) / 100), 2)
+        else:
+            discount_amount = min(float(coupon['value']), original_amount)
+        return {
+            'coupon_code': str(coupon['code']),
+            'original_amount': original_amount,
+            'discount_amount': discount_amount,
+            'final_amount': round(max(original_amount - discount_amount, 0.0), 2),
+        }
 
     async def _get_plan_map(self) -> dict[str, dict]:
         plans = await self.subscription_plan_repository.get_active_plans()
