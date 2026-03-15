@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from bson import ObjectId
 
 from app.core.enums import SupportTicketStatus
+from app.core.exceptions import NotFoundException
 from app.repositories.support_ticket import SupportTicketRepository
 from app.schemas.support import (
     SupportTicketActionResponse,
@@ -13,6 +14,7 @@ from app.schemas.support import (
     SupportTicketDetailResponse,
     SupportTicketListItemResponse,
     SupportTicketManagementResponse,
+    UserSupportTicketListResponse,
     SupportTicketMessageResponse,
     SupportTicketQuery,
     SupportTicketReplyRequest,
@@ -71,6 +73,23 @@ class SupportService(BaseService):
             items=[self._to_ticket_list_item(ticket) for ticket in tickets],
             **pagination,
         )
+
+    async def get_user_tickets(self, current_user: dict, query: SupportTicketQuery) -> UserSupportTicketListResponse:
+        tickets, total = await self.support_ticket_repository.get_filtered_user_tickets(
+            str(current_user['_id']),
+            search=query.search,
+            status=query.status,
+            page=query.page,
+            page_size=query.page_size,
+        )
+        pagination = build_pagination_meta(total=total, page=query.page, page_size=query.page_size)
+        return UserSupportTicketListResponse(items=[self._to_ticket_list_item(ticket) for ticket in tickets], **pagination)
+
+    async def get_user_ticket_detail(self, current_user: dict, ticket_id: str) -> SupportTicketDetailResponse:
+        ticket = await self.support_ticket_repository.get_by_id(ticket_id)
+        if str(ticket['user_id']) != str(current_user['_id']):
+            raise NotFoundException('Support ticket not found')
+        return self._to_ticket_detail(ticket)
 
     async def get_ticket_detail(self, ticket_id: str) -> SupportTicketDetailResponse:
         ticket = await self.support_ticket_repository.get_by_id(ticket_id)

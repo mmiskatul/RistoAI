@@ -63,6 +63,14 @@ class SupportTicketManagementResponse(BaseSchema):
     items: list[SupportTicketListItemResponse]
 
 
+class UserSupportTicketListResponse(BaseSchema):
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    items: list[SupportTicketListItemResponse]
+
+
 class SupportTicketCustomerResponse(BaseSchema):
     user_name: str
     email: EmailStr

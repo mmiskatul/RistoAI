@@ -52,6 +52,57 @@ def _seed_admin(mock_db) -> ObjectId:
     return admin_id
 
 
+def test_restaurant_can_list_and_view_only_their_own_tickets():
+    app, mock_db = _build_app_with_mock_db()
+    _seed_admin(mock_db)
+
+    with TestClient(app) as client:
+        owner_headers = register_and_login(
+            client,
+            {
+                'full_name': 'Owner One',
+                'email': 'owner-one@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550001111',
+            },
+        )
+        other_headers = register_and_login(
+            client,
+            {
+                'full_name': 'Owner Two',
+                'email': 'owner-two@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550002222',
+            },
+        )
+
+        own_create = client.post(
+            '/api/v1/support/tickets',
+            headers=owner_headers,
+            json={'subject': 'Need help', 'message': 'My issue details here.', 'priority': 'normal'},
+        )
+        other_create = client.post(
+            '/api/v1/support/tickets',
+            headers=other_headers,
+            json={'subject': 'Other issue', 'message': 'Other issue details here.', 'priority': 'normal'},
+        )
+
+        own_ticket_id = own_create.json()['ticket']['id']
+        other_ticket_id = other_create.json()['ticket']['id']
+
+        list_response = client.get('/api/v1/support/user/tickets?page=1&page_size=10', headers=owner_headers)
+        detail_response = client.get(f'/api/v1/support/user/tickets/{own_ticket_id}', headers=owner_headers)
+        forbidden_response = client.get(f'/api/v1/support/user/tickets/{other_ticket_id}', headers=owner_headers)
+
+    assert list_response.status_code == 200
+    assert list_response.json()['total'] == 1
+    assert list_response.json()['items'][0]['issue_subject'] == 'Need help'
+    assert detail_response.status_code == 200
+    assert detail_response.json()['subject'] == 'Need help'
+    assert forbidden_response.status_code == 404
+    assert forbidden_response.json()['error']['message'] == 'Support ticket not found'
+
+
 def test_restaurant_can_create_support_ticket_and_admin_can_manage_it():
     app, mock_db = _build_app_with_mock_db()
     admin_id = _seed_admin(mock_db)

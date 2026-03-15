@@ -36,7 +36,8 @@ OPENAPI_TAGS = [
     {'name': 'Onboarding', 'description': 'Restaurant onboarding profile endpoints.'},
     {'name': 'Dashboard', 'description': 'Admin dashboard aggregation endpoints.'},
     {'name': 'Users', 'description': 'Admin user management endpoints.'},
-    {'name': 'Support', 'description': 'Restaurant support ticket creation and admin support management endpoints.'},
+    {'name': 'Restaurant Support', 'description': 'Restaurant-side support ticket creation and personal ticket history endpoints.'},
+    {'name': 'Support Management', 'description': 'Admin-side support ticket management, replies, and resolution endpoints.'},
     {'name': 'Health', 'description': 'Service health check endpoint.'},
 ]
 

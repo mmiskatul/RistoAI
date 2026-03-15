@@ -14,6 +14,31 @@ class SupportTicketRepository(BaseRepository[dict]):
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db)
 
+    async def get_filtered_user_tickets(
+        self,
+        user_id: str,
+        *,
+        search: str | None = None,
+        status: SupportTicketStatus | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
+        filters: list[dict[str, object]] = [{"user_id": self.to_object_id(user_id)}]
+        if status is not None:
+            filters.append({"status": status})
+        if search:
+            search_filter = {"$regex": search.strip(), "$options": "i"}
+            filters.append(
+                {
+                    "$or": [
+                        {"ticket_number": search_filter},
+                        {"subject": search_filter},
+                    ]
+                }
+            )
+        resolved = {"$and": filters} if len(filters) > 1 else filters[0]
+        return await self.get_multi(filters=resolved, page=page, page_size=page_size)
+
     async def get_filtered_tickets(
         self,
         *,
