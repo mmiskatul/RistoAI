@@ -8,6 +8,7 @@ from app.core.exceptions import ConflictException, ValidationException
 from app.repositories.coupon import CouponRepository
 from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
+from app.repositories.user_subscription import UserSubscriptionRepository
 from app.schemas.subscription import (
     CouponActionResponse,
     CouponCreateRequest,
@@ -41,10 +42,12 @@ class SubscriptionService(BaseService):
         user_repository: UserRepository,
         subscription_plan_repository: SubscriptionPlanRepository,
         coupon_repository: CouponRepository,
+        user_subscription_repository: UserSubscriptionRepository,
     ) -> None:
         self.user_repository = user_repository
         self.subscription_plan_repository = subscription_plan_repository
         self.coupon_repository = coupon_repository
+        self.user_subscription_repository = user_subscription_repository
 
     async def get_overview(self, query: SubscriptionOverviewQuery) -> SubscriptionOverviewResponse:
         users, total = await self.user_repository.get_filtered_subscription_users(
@@ -113,6 +116,8 @@ class SubscriptionService(BaseService):
             status = SubscriptionStatus.ACTIVE
             expires_at = now + (timedelta(days=365) if payload.billing_cycle == SubscriptionPlan.ONE_YEAR else timedelta(days=30))
 
+        amount = float(plan['annual_price']) if payload.billing_cycle == SubscriptionPlan.ONE_YEAR else float(plan['monthly_price'])
+
         updated_user = await self.user_repository.update(
             current_user['_id'],
             {
@@ -122,6 +127,20 @@ class SubscriptionService(BaseService):
                 'subscription_started_at': now,
                 'subscription_expires_at': expires_at,
             },
+        )
+        await self.user_subscription_repository.create(
+            {
+                'user_id': current_user['_id'],
+                'subscription_plan_id': plan['_id'],
+                'plan_name': plan['name'],
+                'billing_cycle': payload.billing_cycle,
+                'status': status,
+                'start_trial': payload.start_trial,
+                'trial_days': int(plan.get('trial_days', 0)),
+                'amount': amount,
+                'started_at': now,
+                'expires_at': expires_at,
+            }
         )
         return UserSubscriptionActionResponse(
             message='Subscription plan selected successfully',

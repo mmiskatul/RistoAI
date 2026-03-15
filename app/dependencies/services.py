@@ -9,6 +9,7 @@ from app.repositories.coupon import CouponRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
+from app.repositories.user_subscription import UserSubscriptionRepository
 from app.services.auth import AuthService
 from app.services.dashboard import DashboardService
 from app.services.email import EmailService
@@ -34,4 +35,4 @@ async def get_user_management_service(db=Depends(get_database)) -> UserManagemen
 
 
 async def get_subscription_service(db=Depends(get_database)) -> SubscriptionService:
-    return SubscriptionService(UserRepository(db), SubscriptionPlanRepository(db), CouponRepository(db))
+    return SubscriptionService(UserRepository(db), SubscriptionPlanRepository(db), CouponRepository(db), UserSubscriptionRepository(db))

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
@@ -61,8 +63,12 @@ def test_user_subscription_selection_flow_for_first_login():
     assert select_response.json()['subscription']['status'] == 'trial'
     assert me_response.status_code == 200
     assert me_response.json()['subscription_selection_required'] is False
-    assert me_response.json()['subscription_plan_name'] == 'Core Plan'
-    assert me_response.json()['subscription_status'] == 'trial'
+    subscriptions = asyncio.run(_['user_subscriptions'].find().to_list(length=None))
+    assert len(subscriptions) == 1
+    assert str(subscriptions[0]['user_id']) == me_response.json()['id']
+    assert subscriptions[0]['plan_name'] == 'Core Plan'
+    assert subscriptions[0]['billing_cycle'] == '1_month'
+    assert subscriptions[0]['status'] == 'trial'
 
 
 def test_subscription_middleware_blocks_protected_routes_until_plan_selected():
