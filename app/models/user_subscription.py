@@ -15,10 +15,6 @@ class UserSubscriptionDocument(MongoDocument):
     status: SubscriptionStatus
     start_trial: bool
     trial_days: int
-    original_amount: float
-    discount_amount: float = 0.0
     amount: float
-    coupon_id: PyObjectId | None = None
-    coupon_code: str | None = None
     started_at: datetime
     expires_at: datetime | None = None

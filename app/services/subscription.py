@@ -10,7 +10,6 @@ from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 from app.repositories.user_subscription import UserSubscriptionRepository
 from app.schemas.subscription import (
-    AppliedCouponResponse,
     CouponActionResponse,
     CouponCreateRequest,
     CouponListResponse,
@@ -27,8 +26,6 @@ from app.schemas.subscription import (
     SubscriptionRevenuePointResponse,
     SubscriptionSummaryResponse,
     SubscriptionTableItemResponse,
-    UserCouponValidationRequest,
-    UserCouponValidationResponse,
     UserCurrentSubscriptionResponse,
     UserSubscriptionActionResponse,
     UserSubscriptionPlanListResponse,
@@ -107,23 +104,8 @@ class SubscriptionService(BaseService):
     async def get_user_current_subscription(self, current_user: dict) -> UserCurrentSubscriptionResponse:
         return self._to_user_current_subscription(current_user)
 
-    async def validate_user_coupon(self, current_user: dict, payload: UserCouponValidationRequest) -> UserCouponValidationResponse:
-        del current_user
-        plan = await self._get_single_visible_plan()
-        pricing = await self._resolve_coupon_pricing(plan, payload.billing_cycle, payload.coupon_code)
-        return UserCouponValidationResponse(
-            valid=True,
-            original_amount=pricing['original_amount'],
-            discount_amount=pricing['discount_amount'],
-            final_amount=pricing['final_amount'],
-            coupon=self._to_applied_coupon_response(pricing['coupon']),
-        )
-
     async def select_user_plan(self, current_user: dict, payload: UserSubscriptionSelectRequest) -> UserSubscriptionActionResponse:
         plan = await self._get_single_visible_plan()
-
-        if payload.start_trial and payload.coupon_code:
-            raise ValidationException('Coupons cannot be applied when starting a trial')
 
         now = datetime.now(UTC)
         if payload.start_trial and plan.get('trial_days', 0) > 0:
@@ -133,15 +115,7 @@ class SubscriptionService(BaseService):
             status = SubscriptionStatus.ACTIVE
             expires_at = now + (timedelta(days=365) if payload.billing_cycle == SubscriptionPlan.ONE_YEAR else timedelta(days=30))
 
-        original_amount = float(plan['annual_price']) if payload.billing_cycle == SubscriptionPlan.ONE_YEAR else float(plan['monthly_price'])
-        pricing = {
-            'original_amount': original_amount,
-            'discount_amount': 0.0,
-            'final_amount': original_amount,
-            'coupon': None,
-        }
-        if payload.coupon_code:
-            pricing = await self._resolve_coupon_pricing(plan, payload.billing_cycle, payload.coupon_code)
+        amount = float(plan['annual_price']) if payload.billing_cycle == SubscriptionPlan.ONE_YEAR else float(plan['monthly_price'])
 
         updated_user = await self.user_repository.update(
             current_user['_id'],
@@ -162,20 +136,11 @@ class SubscriptionService(BaseService):
                 'status': status,
                 'start_trial': payload.start_trial,
                 'trial_days': int(plan.get('trial_days', 0)),
-                'original_amount': pricing['original_amount'],
-                'discount_amount': pricing['discount_amount'],
-                'amount': pricing['final_amount'],
-                'coupon_id': pricing['coupon']['_id'] if pricing['coupon'] else None,
-                'coupon_code': pricing['coupon']['code'] if pricing['coupon'] else None,
+                'amount': amount,
                 'started_at': now,
                 'expires_at': expires_at,
             }
         )
-        if pricing['coupon']:
-            await self.coupon_repository.update(
-                pricing['coupon']['_id'],
-                {'usage_count': pricing['coupon']['usage_count'] + 1},
-            )
         return UserSubscriptionActionResponse(
             message='Subscription plan selected successfully',
             subscription=self._to_user_current_subscription(updated_user),
@@ -226,29 +191,6 @@ class SubscriptionService(BaseService):
         if not plans:
             raise ValidationException('No subscription plan is available')
         return plans[0]
-
-    async def _resolve_coupon_pricing(self, plan: dict, billing_cycle: SubscriptionPlan, coupon_code: str) -> dict:
-        await self.coupon_repository.mark_expired_coupons()
-        coupon = await self.coupon_repository.get_by_code(coupon_code)
-        if not coupon:
-            raise ValidationException('Coupon code is invalid')
-        if coupon.get('status') != CouponStatus.ACTIVE:
-            raise ValidationException('Coupon is not active')
-        if coupon.get('usage_count', 0) >= coupon.get('usage_limit', 0):
-            raise ValidationException('Coupon usage limit has been reached')
-
-        original_amount = float(plan['annual_price']) if billing_cycle == SubscriptionPlan.ONE_YEAR else float(plan['monthly_price'])
-        if coupon['discount_type'] == 'percentage':
-            discount_amount = round(original_amount * (float(coupon['value']) / 100), 2)
-        else:
-            discount_amount = min(float(coupon['value']), original_amount)
-        final_amount = round(max(original_amount - discount_amount, 0.0), 2)
-        return {
-            'coupon': coupon,
-            'original_amount': original_amount,
-            'discount_amount': discount_amount,
-            'final_amount': final_amount,
-        }
 
     async def _get_plan_map(self) -> dict[str, dict]:
         plans = await self.subscription_plan_repository.get_active_plans()
@@ -337,15 +279,6 @@ class SubscriptionService(BaseService):
     def _to_coupon_response(self, coupon: dict) -> CouponResponse:
         serialized = self.serialize(coupon)
         return CouponResponse(**serialized)
-
-    def _to_applied_coupon_response(self, coupon: dict) -> AppliedCouponResponse:
-        serialized = self.serialize(coupon)
-        return AppliedCouponResponse(
-            id=serialized['id'],
-            code=serialized['code'],
-            discount_type=serialized['discount_type'],
-            value=serialized['value'],
-        )
 
     def _to_user_plan_response(self, plan: dict) -> UserSubscriptionPlanResponse:
         serialized = self.serialize(plan)

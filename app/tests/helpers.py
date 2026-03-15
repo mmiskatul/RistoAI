@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
-
-from bson import ObjectId
 from fastapi.testclient import TestClient
 
 from app.db.mongodb import get_database
@@ -15,6 +12,9 @@ def _resolve_mock_db(app):
 
 
 def seed_subscription_plan(app, *, name: str = 'Core Plan') -> str:
+    from datetime import UTC, datetime
+    from bson import ObjectId
+
     db = _resolve_mock_db(app)
     plan_id = ObjectId()
     asyncio.run(
@@ -61,17 +61,13 @@ def select_subscription_plan(
     *,
     billing_cycle: str = '1_month',
     start_trial: bool = True,
-    coupon_code: str | None = None,
 ) -> None:
-    payload = {
-        'billing_cycle': billing_cycle,
-        'start_trial': start_trial,
-    }
-    if coupon_code:
-        payload['coupon_code'] = coupon_code
     response = client.post(
         '/api/v1/subscriptions/user/select',
         headers=headers,
-        json=payload,
+        json={
+            'billing_cycle': billing_cycle,
+            'start_trial': start_trial,
+        },
     )
     assert response.status_code == 200
