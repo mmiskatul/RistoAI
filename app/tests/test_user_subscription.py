@@ -146,6 +146,46 @@ def test_user_discount_preview_rejects_invalid_coupon():
     assert response.json()['error']['message'] == 'Coupon is not valid'
 
 
+def test_reselecting_subscription_closes_previous_current_record_and_keeps_history():
+    app, mock_db = _build_app_with_mock_db()
+    seed_subscription_plan(app, name='Core Plan')
+
+    with TestClient(app) as client:
+        headers = register_and_login(
+            client,
+            {
+                'full_name': 'Repeat User',
+                'email': 'repeat@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550005555',
+            },
+        )
+
+        first = client.post(
+            '/api/v1/subscriptions/user/select',
+            headers=headers,
+            json={'billing_cycle': '1_month', 'start_trial': True},
+        )
+        second = client.post(
+            '/api/v1/subscriptions/user/select',
+            headers=headers,
+            json={'billing_cycle': '1_year', 'start_trial': False},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    subscriptions = asyncio.run(mock_db['user_subscriptions'].find().sort('created_at', 1).to_list(length=None))
+    assert len(subscriptions) == 2
+    assert subscriptions[0]['is_current'] is False
+    assert subscriptions[0]['status'] == 'canceled'
+    assert subscriptions[0]['ended_at'] is not None
+    assert subscriptions[1]['is_current'] is True
+    assert subscriptions[1]['billing_cycle'] == '1_year'
+    assert subscriptions[1]['status'] == 'active'
+    current_count = asyncio.run(mock_db['user_subscriptions'].count_documents({'is_current': True}))
+    assert current_count == 1
+
+
 def test_subscription_middleware_blocks_protected_routes_until_plan_selected():
     app, _ = _build_app_with_mock_db()
     seed_subscription_plan(app)

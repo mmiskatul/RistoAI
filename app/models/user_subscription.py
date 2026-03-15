@@ -16,5 +16,7 @@ class UserSubscriptionDocument(MongoDocument):
     start_trial: bool
     trial_days: int
     amount: float
+    is_current: bool = True
     started_at: datetime
+    ended_at: datetime | None = None
     expires_at: datetime | None = None

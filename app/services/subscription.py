@@ -134,6 +134,12 @@ class SubscriptionService(BaseService):
 
         amount = float(plan['annual_price']) if payload.billing_cycle == SubscriptionPlan.ONE_YEAR else float(plan['monthly_price'])
 
+        await self.user_subscription_repository.close_current_for_user(
+            str(current_user['_id']),
+            ended_at=now,
+            final_status=SubscriptionStatus.CANCELED,
+        )
+
         updated_user = await self.user_repository.update(
             current_user['_id'],
             {
@@ -154,7 +160,9 @@ class SubscriptionService(BaseService):
                 'start_trial': payload.start_trial,
                 'trial_days': int(plan.get('trial_days', 0)),
                 'amount': amount,
+                'is_current': True,
                 'started_at': now,
+                'ended_at': None,
                 'expires_at': expires_at,
             }
         )
