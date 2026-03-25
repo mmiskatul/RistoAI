@@ -20,9 +20,12 @@ def test_auth_restaurant_register_verify_login_and_me(client, owner_credentials)
     verified_user = verify_registration_response.json()['user']
     assert verified_user['email_verified'] is True
     assert verified_user['preferred_language'] == 'en'
-    assert verified_user['subscription_status'] is None
-    assert verified_user['subscription_plan_name'] is None
-    assert verified_user['subscription_selection_required'] is True
+    assert verified_user['subscription_status'] == 'trial'
+    assert verified_user['subscription_plan_name'] == 'Core Plan'
+    assert verified_user['subscription_plan'] == '1_month'
+    assert verified_user['subscription_started_at'] is not None
+    assert verified_user['subscription_expires_at'] is not None
+    assert verified_user['subscription_selection_required'] is False
 
     login_response = client.post(
         '/api/v1/auth/restaurant/login',
@@ -35,9 +38,10 @@ def test_auth_restaurant_register_verify_login_and_me(client, owner_credentials)
     assert me_response.status_code == 200
     assert me_response.json()['role'] == 'restaurant_owner'
     assert me_response.json()['preferred_language'] == 'en'
-    assert me_response.json()['subscription_plan'] is None
-    assert me_response.json()['subscription_plan_name'] is None
-    assert me_response.json()['subscription_selection_required'] is True
+    assert me_response.json()['subscription_plan'] == '1_month'
+    assert me_response.json()['subscription_plan_name'] == 'Core Plan'
+    assert me_response.json()['subscription_status'] == 'trial'
+    assert me_response.json()['subscription_selection_required'] is False
 
 
 

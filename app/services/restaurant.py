@@ -27,6 +27,8 @@ from app.schemas.restaurant import (
     ChatMessageCreateRequest,
     ChatMessageResponse,
     DailyDataCreateRequest,
+    DailyDataAddButtonResponse,
+    DailyDataListItemActionResponse,
     DailyDataListItemResponse,
     DailyDataListResponse,
     DailyDataResponse,
@@ -394,16 +396,22 @@ class RestaurantOperationsService(BaseService):
         revenue_label = "Today's Revenue" if view == "date" else ("This Week Revenue" if view == "week" else "This Month Revenue")
         expense_label = "Total Expenses" if view == "date" else ("This Week Expenses" if view == "week" else "This Month Expenses")
         profit_label = "Profit" if view == "date" else ("This Week Profit" if view == "week" else "This Month Profit")
+        latest_revenue = float(latest_item.get("total_revenue", 0)) if latest_item else 0.0
+        latest_expenses = float(latest_item.get("total_expenses", 0)) if latest_item else 0.0
+        latest_profit = float(latest_item.get("profit", 0)) if latest_item else 0.0
+        latest_covers = float((latest_item.get("lunch_covers", 0) if latest_item else 0) + (latest_item.get("dinner_covers", 0) if latest_item else 0))
+        latest_avg = float(latest_item.get("avg_revenue_per_cover", 0)) if latest_item else 0.0
         summary_cards = [
-            DailyDataSummaryCardResponse(label=revenue_label, value=float(latest_item.get("total_revenue", 0)) if latest_item else 0.0, value_prefix="EUR"),
-            DailyDataSummaryCardResponse(label=expense_label, value=float(latest_item.get("total_expenses", 0)) if latest_item else 0.0, value_prefix="EUR"),
-            DailyDataSummaryCardResponse(label=profit_label, value=float(latest_item.get("profit", 0)) if latest_item else 0.0, value_prefix="EUR"),
-            DailyDataSummaryCardResponse(label="Total Covers", value=float((latest_item.get("lunch_covers", 0) if latest_item else 0) + (latest_item.get("dinner_covers", 0) if latest_item else 0))),
-            DailyDataSummaryCardResponse(label="Avg. Rev/Cover", value=float(latest_item.get("avg_revenue_per_cover", 0)) if latest_item else 0.0, value_prefix="USD"),
+            DailyDataSummaryCardResponse(label=revenue_label, value=latest_revenue, value_prefix="EUR", value_formatted=self._format_currency(latest_revenue), icon_key="revenue"),
+            DailyDataSummaryCardResponse(label=expense_label, value=latest_expenses, value_prefix="EUR", value_formatted=self._format_currency(latest_expenses), icon_key="expenses"),
+            DailyDataSummaryCardResponse(label=profit_label, value=latest_profit, value_prefix="EUR", value_formatted=self._format_currency(latest_profit), icon_key="profit"),
+            DailyDataSummaryCardResponse(label="Total Covers", value=latest_covers, value_formatted=str(int(latest_covers)), icon_key=None),
+            DailyDataSummaryCardResponse(label="Avg. Rev/Cover", value=latest_avg, value_prefix="USD", value_formatted=self._format_currency(latest_avg), icon_key=None),
         ]
         return DailyDataListResponse(
             active_view=view,
             summary_cards=summary_cards,
+            add_button=DailyDataAddButtonResponse(endpoint="/api/v1/restaurant/daily-data"),
             items=[self._to_daily_data_list_item(item, anchor_date=anchor_date) for item in page_items],
             **build_pagination_meta(total=total, page=page, page_size=page_size),
         )
@@ -593,6 +601,10 @@ class RestaurantOperationsService(BaseService):
         }
 
     @staticmethod
+    def _format_currency(value: float) -> str:
+        return f"${value:,.2f}" if value >= 0 else f"-${abs(value):,.2f}"
+
+    @staticmethod
     def _percent_change(previous: float, current: float) -> float:
         if previous == 0:
             return 0.0 if current == 0 else 100.0
@@ -745,13 +757,22 @@ class RestaurantOperationsService(BaseService):
             day_label = "YESTERDAY"
         else:
             day_label = business_date.strftime("%A").upper()
+        revenue = float(serialized["total_revenue"])
+        avg_value = float(serialized.get("avg_revenue_per_cover", 0.0))
         return DailyDataListItemResponse(
             id=serialized["id"],
             business_date=serialized["business_date"],
+            business_date_formatted=business_date.strftime("%b %d, %Y"),
             day_label=day_label,
-            total_revenue=serialized["total_revenue"],
+            total_revenue=revenue,
+            total_revenue_formatted=self._format_currency(revenue),
             total_covers=total_covers,
-            avg_revenue_per_cover=serialized.get("avg_revenue_per_cover", 0.0),
+            avg_revenue_per_cover=avg_value,
+            avg_revenue_per_cover_formatted=self._format_currency(avg_value),
+            actions=DailyDataListItemActionResponse(
+                view_endpoint=f"/api/v1/restaurant/daily-data/{serialized['id']}",
+                delete_endpoint=f"/api/v1/restaurant/daily-data/{serialized['id']}",
+            ),
             created_at=serialized["created_at"],
         )
 

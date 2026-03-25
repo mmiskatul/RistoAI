@@ -38,7 +38,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
         json={
             "supplier_name": "Bakery Goods Co",
             "invoice_number": upload_payload["invoice_number"],
-            "invoice_date": "2026-03-10",
+            "invoice_date": "10 March 2026",
             "total_amount": 425.0,
             "line_items": [
                 {"product_name": "Sourdough Loaf", "quantity": 20, "unit_price": 5.0, "total_price": 100.0},
@@ -210,12 +210,21 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert len(daily_list_payload["summary_cards"]) == 5
     assert daily_list_payload["summary_cards"][0]["label"] == "Today's Revenue"
     assert daily_list_payload["summary_cards"][0]["value"] == 920
+    assert daily_list_payload["summary_cards"][0]["value_formatted"] == "$920.00"
+    assert daily_list_payload["summary_cards"][0]["icon_key"] == "revenue"
     assert daily_list_payload["summary_cards"][3]["label"] == "Total Covers"
     assert daily_list_payload["summary_cards"][3]["value"] == 38
+    assert daily_list_payload["add_button"]["label"] == "Add Daily Data"
+    assert daily_list_payload["add_button"]["endpoint"] == "/api/v1/restaurant/daily-data"
     assert daily_list_payload["items"][0]["business_date"] == "2026-03-25"
+    assert daily_list_payload["items"][0]["business_date_formatted"] == "Mar 25, 2026"
     assert daily_list_payload["items"][0]["day_label"] == "YESTERDAY"
     assert daily_list_payload["items"][0]["total_covers"] == 38
+    assert daily_list_payload["items"][0]["total_revenue_formatted"] == "$920.00"
     assert daily_list_payload["items"][0]["avg_revenue_per_cover"] == 24.21
+    assert daily_list_payload["items"][0]["avg_revenue_per_cover_formatted"] == "$24.21"
+    assert daily_list_payload["items"][0]["actions"]["view_endpoint"].endswith(daily_list_payload["items"][0]["id"])
+    assert daily_list_payload["items"][0]["actions"]["delete_endpoint"].endswith(daily_list_payload["items"][0]["id"])
 
     week_list_response = client.get("/api/v1/restaurant/daily-data?view=week&reference_date=2026-03-26", headers=headers)
     assert week_list_response.status_code == 200

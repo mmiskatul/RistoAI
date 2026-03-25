@@ -1,11 +1,27 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.schemas.common import BaseSchema
+
+
+def _parse_flexible_date(value: object) -> object:
+    if value is None or isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return value
+    candidate = value.strip()
+    if not candidate:
+        return None
+    for fmt in ("%Y-%m-%d", "%d %B %Y", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(candidate, fmt).date()
+        except ValueError:
+            continue
+    return value
 
 
 class MetricCardResponse(BaseSchema):
@@ -127,6 +143,11 @@ class DocumentConfirmRequest(BaseSchema):
     total_amount: float | None = Field(default=None, ge=0)
     line_items: list[DocumentLineItemSchema] | None = None
 
+    @field_validator("invoice_date", mode="before")
+    @classmethod
+    def parse_invoice_date(cls, value: object) -> object:
+        return _parse_flexible_date(value)
+
 
 class DocumentSaveRequest(BaseSchema):
     supplier_name: str = Field(min_length=2, max_length=120)
@@ -137,6 +158,11 @@ class DocumentSaveRequest(BaseSchema):
     source_file_name: str = Field(min_length=1, max_length=255)
     ai_provider: str = Field(min_length=2, max_length=50)
     ai_summary: str = Field(default='', max_length=2000)
+
+    @field_validator("invoice_date", mode="before")
+    @classmethod
+    def parse_invoice_date(cls, value: object) -> object:
+        return _parse_flexible_date(value)
 
 
 class DocumentListItemResponse(BaseSchema):
@@ -284,16 +310,33 @@ class DailyDataSummaryCardResponse(BaseSchema):
     label: str
     value: float
     value_prefix: str | None = None
+    value_formatted: str
+    icon_key: str | None = None
+
+
+class DailyDataListItemActionResponse(BaseSchema):
+    view_endpoint: str
+    delete_endpoint: str
 
 
 class DailyDataListItemResponse(BaseSchema):
     id: str
     business_date: str
+    business_date_formatted: str
     day_label: str
     total_revenue: float
+    total_revenue_formatted: str
     total_covers: int
     avg_revenue_per_cover: float
+    avg_revenue_per_cover_formatted: str
+    actions: DailyDataListItemActionResponse
     created_at: str
+
+
+class DailyDataAddButtonResponse(BaseSchema):
+    label: str = "Add Daily Data"
+    endpoint: str
+    method: str = "POST"
 
 
 class DailyDataListResponse(BaseSchema):
@@ -302,6 +345,7 @@ class DailyDataListResponse(BaseSchema):
     view_options: list[str] = Field(default_factory=lambda: ["date", "week", "month"])
     active_view: Literal["date", "week", "month"] = "date"
     summary_cards: list[DailyDataSummaryCardResponse]
+    add_button: DailyDataAddButtonResponse
     total: int
     page: int
     page_size: int

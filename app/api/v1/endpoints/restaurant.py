@@ -149,12 +149,12 @@ async def get_cash_management(current_user: dict = Depends(get_current_user), se
     return await service.get_cash_management(current_user)
 
 
-@router.post('/daily-data', response_model=DailyDataResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Daily Data'])
+@router.post('/daily-data', response_model=DailyDataResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Data Management'])
 async def create_daily_data(payload: DailyDataCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DailyDataResponse:
     return await service.create_daily_data(current_user, payload)
 
 
-@router.get('/daily-data', response_model=DailyDataListResponse, tags=['Restaurant Daily Data'])
+@router.get('/daily-data', response_model=DailyDataListResponse, tags=['Restaurant Data Management'])
 async def list_daily_data(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -166,12 +166,12 @@ async def list_daily_data(
     return await service.list_daily_data(current_user, page=page, page_size=page_size, view=view, reference_date=reference_date)
 
 
-@router.get('/daily-data/{record_id}', response_model=DailyDataResponse, tags=['Restaurant Daily Data'])
+@router.get('/daily-data/{record_id}', response_model=DailyDataResponse, tags=['Restaurant Data Management'])
 async def get_daily_data_detail(record_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DailyDataResponse:
     return await service.get_daily_data_detail(current_user, record_id)
 
 
-@router.delete('/daily-data/{record_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Daily Data'])
+@router.delete('/daily-data/{record_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Data Management'])
 async def delete_daily_data(record_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
     await service.delete_daily_data(current_user, record_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -44,7 +44,7 @@ OPENAPI_TAGS = [
     {'name': 'Restaurant Documents', 'description': 'Restaurant-side invoice upload, extraction, review, and document history endpoints.'},
     {'name': 'Restaurant Expenses', 'description': 'Restaurant-side expense entry and expense summary endpoints.'},
     {'name': 'Restaurant Cash Management', 'description': 'Restaurant-side cash collection and bank deposit endpoints.'},
-    {'name': 'Restaurant Daily Data', 'description': 'Restaurant-side daily business data entry and record history endpoints.'},
+    {'name': 'Restaurant Data Management', 'description': 'Restaurant-side daily business data entry and record history endpoints.'},
     {'name': 'Restaurant Inventory', 'description': 'Restaurant-side inventory listing, detail, and stock update endpoints.'},
     {'name': 'Restaurant Analytics', 'description': 'Restaurant-side analytics overview endpoints.'},
     {'name': 'Restaurant Chat', 'description': 'Restaurant-side AI chat conversation endpoints.'},

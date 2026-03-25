@@ -44,7 +44,7 @@ def _seed_coupon(mock_db, *, code: str = 'SAVE20', usage_limit: int = 100, usage
 
 
 def test_user_subscription_selection_flow_for_first_login():
-    app, _ = _build_app_with_mock_db()
+    app, mock_db = _build_app_with_mock_db()
     seed_subscription_plan(app, name='Core Plan')
 
     with TestClient(app) as client:
@@ -60,31 +60,19 @@ def test_user_subscription_selection_flow_for_first_login():
 
         current_response = client.get('/api/v1/subscriptions/user/current', headers=headers)
         plans_response = client.get('/api/v1/subscriptions/user/plans', headers=headers)
-
-        assert current_response.status_code == 200
-        assert current_response.json()['selection_required'] is True
-        assert plans_response.status_code == 200
-        assert plans_response.json()['selection_required'] is True
-        assert len(plans_response.json()['plans']) == 1
-
-        select_response = client.post(
-            '/api/v1/subscriptions/user/select',
-            headers=headers,
-            json={
-                'billing_cycle': '1_month',
-                'start_trial': True,
-            },
-        )
         me_response = client.get('/api/v1/auth/me', headers=headers)
 
-    assert select_response.status_code == 200
-    assert select_response.json()['subscription']['selection_required'] is False
-    assert select_response.json()['subscription']['plan_name'] == 'Core Plan'
-    assert select_response.json()['subscription']['billing_cycle'] == '1_month'
-    assert select_response.json()['subscription']['status'] == 'trial'
+    assert current_response.status_code == 200
+    assert current_response.json()['selection_required'] is False
+    assert current_response.json()['plan_name'] == 'Core Plan'
+    assert current_response.json()['billing_cycle'] == '1_month'
+    assert current_response.json()['status'] == 'trial'
+    assert plans_response.status_code == 200
+    assert plans_response.json()['selection_required'] is False
+    assert len(plans_response.json()['plans']) == 1
     assert me_response.status_code == 200
     assert me_response.json()['subscription_selection_required'] is False
-    subscriptions = asyncio.run(_['user_subscriptions'].find().to_list(length=None))
+    subscriptions = asyncio.run(mock_db['user_subscriptions'].find().to_list(length=None))
     assert len(subscriptions) == 1
     assert str(subscriptions[0]['user_id']) == me_response.json()['id']
     assert subscriptions[0]['plan_name'] == 'Core Plan'
@@ -175,18 +163,21 @@ def test_reselecting_subscription_closes_previous_current_record_and_keeps_histo
     assert first.status_code == 200
     assert second.status_code == 200
     subscriptions = asyncio.run(mock_db['user_subscriptions'].find().sort('created_at', 1).to_list(length=None))
-    assert len(subscriptions) == 2
+    assert len(subscriptions) == 3
     assert subscriptions[0]['is_current'] is False
     assert subscriptions[0]['status'] == 'canceled'
     assert subscriptions[0]['ended_at'] is not None
-    assert subscriptions[1]['is_current'] is True
-    assert subscriptions[1]['billing_cycle'] == '1_year'
-    assert subscriptions[1]['status'] == 'active'
+    assert subscriptions[1]['is_current'] is False
+    assert subscriptions[1]['status'] == 'canceled'
+    assert subscriptions[1]['ended_at'] is not None
+    assert subscriptions[2]['is_current'] is True
+    assert subscriptions[2]['billing_cycle'] == '1_year'
+    assert subscriptions[2]['status'] == 'active'
     current_count = asyncio.run(mock_db['user_subscriptions'].count_documents({'is_current': True}))
     assert current_count == 1
 
 
-def test_subscription_middleware_blocks_protected_routes_until_plan_selected():
+def test_subscription_middleware_allows_protected_routes_after_automatic_trial_assignment():
     app, _ = _build_app_with_mock_db()
     seed_subscription_plan(app)
 
@@ -201,16 +192,11 @@ def test_subscription_middleware_blocks_protected_routes_until_plan_selected():
             },
         )
 
-        blocked_response = client.get('/api/v1/onboarding/profile', headers=headers)
-        allowed_subscription_response = client.get('/api/v1/subscriptions/user/plans', headers=headers)
+        plans_response = client.get('/api/v1/subscriptions/user/plans', headers=headers)
+        onboarding_response = client.get('/api/v1/onboarding/profile', headers=headers)
 
-        select_subscription_plan(client, headers)
-        unblocked_response = client.get('/api/v1/onboarding/profile', headers=headers)
-
-    assert blocked_response.status_code == 403
-    assert blocked_response.json()['error']['code'] == 'subscription_required'
-    assert blocked_response.json()['error']['details']['selection_required'] is True
-    assert allowed_subscription_response.status_code == 200
-    assert len(allowed_subscription_response.json()['plans']) == 1
-    assert unblocked_response.status_code == 200
-    assert unblocked_response.json() is None
+    assert plans_response.status_code == 200
+    assert plans_response.json()['selection_required'] is False
+    assert len(plans_response.json()['plans']) == 1
+    assert onboarding_response.status_code == 200
+    assert onboarding_response.json() is None
