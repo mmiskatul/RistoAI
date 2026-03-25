@@ -14,7 +14,9 @@ from app.schemas.restaurant import (
     CashManagementSummaryResponse,
     ChatConversationResponse,
     ChatMessageCreateRequest,
+    DailyDataCollectionResponse,
     DailyDataCreateRequest,
+    DailyDataDetailResponse,
     DailyDataListResponse,
     DailyDataResponse,
     DocumentConfirmRequest,
@@ -96,11 +98,6 @@ async def confirm_and_save_document(payload: DocumentSaveRequest, current_user: 
     return await service.create_document_from_confirmation(current_user, payload)
 
 
-@router.post('/documents/{document_id}/confirm', response_model=DocumentDetailResponse, tags=['Restaurant Documents'])
-async def confirm_document(document_id: str, payload: DocumentConfirmRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DocumentDetailResponse:
-    return await service.confirm_document(current_user, document_id, payload)
-
-
 @router.get('/documents', response_model=DocumentListResponse, tags=['Restaurant Documents'])
 async def list_documents(
     page: int = Query(default=1, ge=1),
@@ -164,6 +161,60 @@ async def list_daily_data(
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> DailyDataListResponse:
     return await service.list_daily_data(current_user, page=page, page_size=page_size, view=view, reference_date=reference_date)
+
+
+@router.get('/daily-data/by-date', response_model=DailyDataDetailResponse | DailyDataCollectionResponse, tags=['Restaurant Data Management'])
+async def get_daily_data_by_date_detail(
+    business_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> DailyDataDetailResponse | DailyDataCollectionResponse:
+    return await service.get_daily_data_by_date_detail(current_user, business_date=business_date)
+
+
+@router.get('/daily-data/by-date-reference', response_model=DailyDataDetailResponse, tags=['Restaurant Data Management'])
+async def get_daily_data_by_date_reference_detail(
+    reference_date: date = Query(...),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> DailyDataDetailResponse:
+    return await service.get_daily_data_by_date_detail(current_user, business_date=reference_date)
+
+
+@router.get('/daily-data/by-week', response_model=DailyDataDetailResponse | DailyDataCollectionResponse, tags=['Restaurant Data Management'])
+async def get_daily_data_by_week_detail(
+    reference_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> DailyDataDetailResponse | DailyDataCollectionResponse:
+    return await service.get_daily_data_by_week_detail(current_user, reference_date=reference_date)
+
+
+@router.get('/daily-data/by-week-business-date', response_model=DailyDataDetailResponse, tags=['Restaurant Data Management'])
+async def get_daily_data_by_week_business_date_detail(
+    business_date: date = Query(...),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> DailyDataDetailResponse:
+    return await service.get_daily_data_by_week_detail(current_user, reference_date=business_date)
+
+
+@router.get('/daily-data/by-month', response_model=DailyDataDetailResponse | DailyDataCollectionResponse, tags=['Restaurant Data Management'])
+async def get_daily_data_by_month_detail(
+    reference_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> DailyDataDetailResponse | DailyDataCollectionResponse:
+    return await service.get_daily_data_by_month_detail(current_user, reference_date=reference_date)
+
+
+@router.get('/daily-data/by-month-business-date', response_model=DailyDataDetailResponse, tags=['Restaurant Data Management'])
+async def get_daily_data_by_month_business_date_detail(
+    business_date: date = Query(...),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> DailyDataDetailResponse:
+    return await service.get_daily_data_by_month_detail(current_user, reference_date=business_date)
 
 
 @router.get('/daily-data/{record_id}', response_model=DailyDataResponse, tags=['Restaurant Data Management'])

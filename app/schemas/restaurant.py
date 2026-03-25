@@ -364,6 +364,48 @@ class DailyDataListResponse(BaseSchema):
     items: list[DailyDataListItemResponse]
 
 
+
+class DailyDataDocumentItemResponse(BaseSchema):
+    id: str
+    supplier_name: str
+    invoice_number: str | None = None
+    invoice_date: str | None = None
+    total_amount: float
+    status: str
+    source_file_name: str
+    upload_date: str
+    confirmed_at: str | None = None
+
+
+class DailyDataDetailResponse(BaseSchema):
+    page_title: str = "Daily Data Details"
+    active_view: Literal["date", "week", "month"] = "date"
+    reference_date: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    business_date: str
+    business_date_formatted: str
+    day_label: str
+    summary_cards: list[DailyDataSummaryCardResponse] = Field(default_factory=list)
+    total_revenue: float
+    total_revenue_formatted: str
+    total_expenses: float
+    total_expenses_formatted: str
+    total_covers: int
+    avg_revenue_per_cover: float
+    avg_revenue_per_cover_formatted: str
+    invoices: list[DailyDataDocumentItemResponse] = Field(default_factory=list)
+    invoice_count: int = 0
+    data_sources: list[DailyDataEntrySourceResponse] = Field(default_factory=list)
+
+
+class DailyDataCollectionResponse(BaseSchema):
+    page_title: str = "Daily Data Collections"
+    active_view: Literal["date", "week", "month"]
+    total: int
+    items: list[DailyDataDetailResponse] = Field(default_factory=list)
+
+
 class InventoryCreateRequest(BaseSchema):
     product_name: str = Field(min_length=2, max_length=120)
     category: str = Field(min_length=2, max_length=80)
