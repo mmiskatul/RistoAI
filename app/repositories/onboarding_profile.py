@@ -3,12 +3,13 @@ from __future__ import annotations
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
+from app.db.collections import CoreCollections
 from app.repositories.base import BaseRepository
 from app.utils.datetime import utc_now
 
 
 class OnboardingProfileRepository(BaseRepository[dict]):
-    collection_name = "onboarding_profiles"
+    collection_name = CoreCollections.ONBOARDING_PROFILES
 
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db)

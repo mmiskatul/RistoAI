@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ASCENDING, DESCENDING
 
 from app.core.exceptions import NotFoundException
+from app.db.collections import RestaurantCollections
 from app.repositories.base import BaseRepository
 
 
@@ -34,7 +35,7 @@ class ScopedRepository(BaseRepository[dict]):
 
 
 class RestaurantDocumentRepository(ScopedRepository):
-    collection_name = "restaurant_documents"
+    collection_name = RestaurantCollections.INVOICES
 
     async def list_by_scope(
         self,
@@ -59,7 +60,7 @@ class RestaurantDocumentRepository(ScopedRepository):
 
 
 class RestaurantExpenseRepository(ScopedRepository):
-    collection_name = "restaurant_expenses"
+    collection_name = RestaurantCollections.EXPENSES
 
     async def list_by_scope(
         self,
@@ -82,14 +83,14 @@ class RestaurantExpenseRepository(ScopedRepository):
 
 
 class RestaurantCashDepositRepository(ScopedRepository):
-    collection_name = "restaurant_cash_deposits"
+    collection_name = RestaurantCollections.CASH_DEPOSITS
 
     async def list_by_scope(self, *, scope_id: str, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
         return await self.get_multi(filters=self.scope_filters(scope_id), page=page, page_size=page_size)
 
 
 class RestaurantDailyRecordRepository(ScopedRepository):
-    collection_name = "restaurant_daily_records"
+    collection_name = RestaurantCollections.MANUAL_ENTRIES
 
     async def list_by_scope(
         self,
@@ -119,8 +120,66 @@ class RestaurantDailyRecordRepository(ScopedRepository):
         return await self.get_one(self.scope_filters(scope_id, {"business_date": business_date}))
 
 
+class RestaurantRecordRepository(ScopedRepository):
+    collection_name = RestaurantCollections.DAILY_RECORDS
+
+    async def list_by_scope(
+        self,
+        *,
+        scope_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        filters = self.scope_filters(scope_id)
+        if start_date or end_date:
+            date_filters: dict[str, Any] = {}
+            if start_date:
+                date_filters["$gte"] = start_date.isoformat()
+            if end_date:
+                date_filters["$lte"] = end_date.isoformat()
+            filters["business_date"] = date_filters
+        return await self.get_multi(filters=filters, page=page, page_size=page_size, sort=[("business_date", DESCENDING), ("updated_at", DESCENDING)])
+
+    async def find_by_business_date(self, *, scope_id: str, business_date: date) -> dict[str, Any] | None:
+        return await self.get_one(self.scope_filters(scope_id, {"business_date": business_date.isoformat()}))
+
+    async def upsert_by_business_date(self, *, scope_id: str, business_date: date, payload: dict[str, Any]) -> dict[str, Any]:
+        existing = await self.find_by_business_date(scope_id=scope_id, business_date=business_date)
+        if existing:
+            return await self.update(existing["_id"], payload)
+        return await self.create({**payload, "tenant_id": scope_id, "business_date": business_date.isoformat()})
+
+
+class RestaurantWeeklyRecordRepository(ScopedRepository):
+    collection_name = RestaurantCollections.WEEKLY_RECORDS
+
+    async def find_by_week_start_date(self, *, scope_id: str, week_start_date: date) -> dict[str, Any] | None:
+        return await self.get_one(self.scope_filters(scope_id, {"week_start_date": week_start_date.isoformat()}))
+
+    async def upsert_by_week_start_date(self, *, scope_id: str, week_start_date: date, payload: dict[str, Any]) -> dict[str, Any]:
+        existing = await self.find_by_week_start_date(scope_id=scope_id, week_start_date=week_start_date)
+        if existing:
+            return await self.update(existing["_id"], payload)
+        return await self.create({**payload, "tenant_id": scope_id, "week_start_date": week_start_date.isoformat()})
+
+
+class RestaurantMonthlyRecordRepository(ScopedRepository):
+    collection_name = RestaurantCollections.MONTHLY_RECORDS
+
+    async def find_by_month_key(self, *, scope_id: str, month_key: str) -> dict[str, Any] | None:
+        return await self.get_one(self.scope_filters(scope_id, {"month_key": month_key}))
+
+    async def upsert_by_month_key(self, *, scope_id: str, month_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        existing = await self.find_by_month_key(scope_id=scope_id, month_key=month_key)
+        if existing:
+            return await self.update(existing["_id"], payload)
+        return await self.create({**payload, "tenant_id": scope_id, "month_key": month_key})
+
+
 class RestaurantInventoryRepository(ScopedRepository):
-    collection_name = "restaurant_inventory_items"
+    collection_name = RestaurantCollections.INVENTORY_ITEMS
 
     async def list_by_scope(
         self,
@@ -148,7 +207,7 @@ class RestaurantInventoryRepository(ScopedRepository):
 
 
 class RestaurantChatRepository(ScopedRepository):
-    collection_name = "restaurant_chat_messages"
+    collection_name = RestaurantCollections.CHAT_MESSAGES
 
     async def list_recent_by_scope(self, *, scope_id: str, limit: int = 20) -> list[dict[str, Any]]:
         cursor = self.collection.find(self.scope_filters(scope_id)).sort([("created_at", ASCENDING)]).limit(limit)
@@ -156,7 +215,7 @@ class RestaurantChatRepository(ScopedRepository):
 
 
 class RestaurantInsightRepository(ScopedRepository):
-    collection_name = "restaurant_ai_insights"
+    collection_name = RestaurantCollections.AI_INSIGHTS
 
     async def list_by_scope(self, *, scope_id: str, limit: int = 10) -> list[dict[str, Any]]:
         cursor = self.collection.find(self.scope_filters(scope_id)).sort([("created_at", DESCENDING)]).limit(limit)

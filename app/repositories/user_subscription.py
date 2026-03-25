@@ -5,12 +5,13 @@ from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.enums import SubscriptionStatus
+from app.db.collections import CoreCollections
 from app.repositories.base import BaseRepository
 from app.utils.datetime import utc_now
 
 
 class UserSubscriptionRepository(BaseRepository[dict]):
-    collection_name = "user_subscriptions"
+    collection_name = CoreCollections.USER_SUBSCRIPTIONS
 
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db)

@@ -6,12 +6,13 @@ from hashlib import sha256
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import DESCENDING
 
+from app.db.collections import CoreCollections
 from app.repositories.base import BaseRepository
 from app.utils.datetime import utc_now
 
 
 class AuthCodeRepository(BaseRepository[dict]):
-    collection_name = "auth_codes"
+    collection_name = CoreCollections.AUTH_CODES
 
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db)

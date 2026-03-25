@@ -292,6 +292,30 @@ class DailyDataCreateRequest(BaseSchema):
     method_two: DailyDataMethodTwoRequest | None = None
 
 
+
+class DailyDataFormFieldResponse(BaseSchema):
+    key: str
+    label: str
+    value_type: Literal["number", "integer", "string", "date"]
+    placeholder: str | None = None
+    section: str | None = None
+    required: bool = False
+
+
+class DailyDataManualMethodResponse(BaseSchema):
+    key: Literal["method_1", "method_2"]
+    label: str
+    description: str
+    fields: list[DailyDataFormFieldResponse] = Field(default_factory=list)
+
+
+class DailyDataManualEntryResponse(BaseSchema):
+    page_title: str = "Add Daily Business Data"
+    subtitle: str = "Enter today's revenue and expenses to track your restaurant performance."
+    save_button_label: str = "Save Daily Data"
+    methods: list[DailyDataManualMethodResponse] = Field(default_factory=list)
+
+
 class DailyDataResponse(BaseSchema):
     id: str
     business_date: str

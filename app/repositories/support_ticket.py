@@ -4,12 +4,13 @@ from app.core.exceptions import NotFoundException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.enums import SupportTicketStatus
+from app.db.collections import CoreCollections
 from app.repositories.base import BaseRepository
 from app.utils.datetime import utc_now
 
 
 class SupportTicketRepository(BaseRepository[dict]):
-    collection_name = "support_tickets"
+    collection_name = CoreCollections.SUPPORT_TICKETS
 
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db)

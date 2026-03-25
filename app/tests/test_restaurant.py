@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
+from app.db.mongodb import get_database
 from app.tests.helpers import register_and_login, seed_subscription_plan, select_subscription_plan
 
 
@@ -138,6 +140,33 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert all_months_response.json()["active_view"] == "month"
     assert all_months_response.json()["total"] >= 1
 
+    manual_entry_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "method_two": {
+                "business_date": today_iso,
+                "pos_payments": 800,
+                "cash_payments": 200,
+                "bank_transfer_payments": 100,
+                "lunch_covers": 10,
+                "dinner_covers": 12,
+                "opening_cash": 100,
+                "closing_cash": 180
+            }
+        },
+    )
+    assert manual_entry_response.status_code == 201
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    restaurant_record = asyncio.run(db["restaurant_daily_records"].find_one({"business_date": datetime.now(UTC).date().isoformat(), "uploaded_invoice_document_ids": {"$in": [confirm_response.json()["id"]]}}))
+    assert restaurant_record is not None
+    assert restaurant_record["uploaded_invoice_count"] == 1
+    assert restaurant_record["manual_entry_id"] is not None
+    assert restaurant_record["total_revenue"] == 1100.0
+    assert restaurant_record["total_expenses"] == 425.0
+
     month_data_response = client.get(f"/api/v1/restaurant/daily-data?view=month&reference_date={today_iso}", headers=headers)
     assert month_data_response.status_code == 200
     assert month_data_response.json()["summary_cards"][1]["label"] == "This Month Expenses"
@@ -218,7 +247,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     select_subscription_plan(client, headers)
 
     create_daily_response = client.post(
-        "/api/v1/restaurant/daily-data",
+        "/api/v1/restaurant/manual-entry",
         headers=headers,
         json={
             "method": "method_2",
@@ -255,7 +284,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert insights_response.json()["export_label"] == "Export"
 
     second_daily_response = client.post(
-        "/api/v1/restaurant/daily-data",
+        "/api/v1/restaurant/manual-entry",
         headers=headers,
         json={
             "method": "method_2",
@@ -288,7 +317,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert daily_list_payload["summary_cards"][3]["label"] == "Total Covers"
     assert daily_list_payload["summary_cards"][3]["value"] == 38
     assert daily_list_payload["add_button"]["label"] == "Add Daily Data"
-    assert daily_list_payload["add_button"]["endpoint"] == "/api/v1/restaurant/daily-data"
+    assert daily_list_payload["add_button"]["endpoint"] == "/api/v1/restaurant/manual-entry"
     assert daily_list_payload["items"][0]["business_date"] == "2026-03-25"
     assert daily_list_payload["items"][0]["business_date_formatted"] == "Mar 25, 2026"
     assert daily_list_payload["items"][0]["day_label"] == "YESTERDAY"

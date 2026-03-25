@@ -3,11 +3,12 @@ from __future__ import annotations
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.exceptions import NotFoundException
+from app.db.collections import CoreCollections
 from app.repositories.base import BaseRepository
 
 
 class SubscriptionPlanRepository(BaseRepository[dict]):
-    collection_name = "subscription_plan"
+    collection_name = CoreCollections.SUBSCRIPTION_PLANS
 
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db)

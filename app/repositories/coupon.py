@@ -5,11 +5,12 @@ from datetime import UTC, datetime
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.enums import CouponStatus
+from app.db.collections import CoreCollections
 from app.repositories.base import BaseRepository
 
 
 class CouponRepository(BaseRepository[dict]):
-    collection_name = "coupons"
+    collection_name = CoreCollections.COUPONS
 
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db)

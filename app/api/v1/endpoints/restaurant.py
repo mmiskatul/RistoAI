@@ -146,7 +146,7 @@ async def get_cash_management(current_user: dict = Depends(get_current_user), se
     return await service.get_cash_management(current_user)
 
 
-@router.post('/daily-data', response_model=DailyDataResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Data Management'])
+@router.post('/manual-entry', response_model=DailyDataResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Data Management'])
 async def create_daily_data(payload: DailyDataCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DailyDataResponse:
     return await service.create_daily_data(current_user, payload)
 
