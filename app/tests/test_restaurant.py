@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.tests.helpers import register_and_login, seed_subscription_plan, select_subscription_plan
 
 
@@ -25,6 +27,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     upload_payload = upload_response.json()
     assert upload_payload["supplier_name"] == "Fresh Food Supplier Ltd"
     assert upload_payload["ai_provider"] == "fallback"
+    assert upload_payload["invoice_date"] is None
     assert len(upload_payload["line_items"]) == 3
     assert "id" not in upload_payload
 
@@ -38,7 +41,6 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
         json={
             "supplier_name": "Bakery Goods Co",
             "invoice_number": upload_payload["invoice_number"],
-            "invoice_date": "10 March 2026",
             "total_amount": 425.0,
             "line_items": [
                 {"product_name": "Sourdough Loaf", "quantity": 20, "unit_price": 5.0, "total_price": 100.0},
@@ -55,7 +57,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert confirm_response.json()["supplier_name"] == "Bakery Goods Co"
     assert confirm_response.json()["confirmed_by_user_id"]
     assert confirm_response.json()["confirmed_at"]
-    assert confirm_response.json()["invoice_date"] == "2026-03-10"
+    assert confirm_response.json()["invoice_date"] == datetime.now(UTC).date().isoformat()
 
     document_id = confirm_response.json()["id"]
     list_response = client.get("/api/v1/restaurant/documents", headers=headers)
@@ -69,6 +71,30 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert detail_response.json()["created_by_user_id"]
     assert detail_response.json()["last_edited_by_user_id"]
     assert detail_response.json()["confirmed_by_user_id"]
+
+    today_iso = datetime.now(UTC).date().isoformat()
+    date_data_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={today_iso}", headers=headers)
+    assert date_data_response.status_code == 200
+    date_payload = date_data_response.json()
+    assert date_payload["summary_cards"][1]["label"] == "Total Expenses"
+    assert date_payload["summary_cards"][1]["value"] == 425.0
+    assert date_payload["items"][0]["business_date"] == today_iso
+    assert date_payload["items"][0]["total_expenses"] == 425.0
+    assert date_payload["items"][0]["total_expenses_formatted"] == "$425.00"
+    assert date_payload["items"][0]["actions"]["view_endpoint"] is None
+    assert date_payload["items"][0]["data_sources"][0]["kind"] == "uploaded_invoice"
+    assert date_payload["items"][0]["data_sources"][0]["label"] == "Uploaded invoices"
+    assert date_payload["items"][0]["data_sources"][0]["count"] == 1
+
+    week_data_response = client.get(f"/api/v1/restaurant/daily-data?view=week&reference_date={today_iso}", headers=headers)
+    assert week_data_response.status_code == 200
+    assert week_data_response.json()["summary_cards"][1]["label"] == "This Week Expenses"
+    assert week_data_response.json()["summary_cards"][1]["value"] == 425.0
+
+    month_data_response = client.get(f"/api/v1/restaurant/daily-data?view=month&reference_date={today_iso}", headers=headers)
+    assert month_data_response.status_code == 200
+    assert month_data_response.json()["summary_cards"][1]["label"] == "This Month Expenses"
+    assert month_data_response.json()["summary_cards"][1]["value"] == 425.0
 
 
 def test_restaurant_endpoints_are_scoped_per_user(client, app):
@@ -220,9 +246,11 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert daily_list_payload["items"][0]["business_date_formatted"] == "Mar 25, 2026"
     assert daily_list_payload["items"][0]["day_label"] == "YESTERDAY"
     assert daily_list_payload["items"][0]["total_covers"] == 38
+    assert daily_list_payload["items"][0]["total_expenses"] == 0.0
     assert daily_list_payload["items"][0]["total_revenue_formatted"] == "$920.00"
     assert daily_list_payload["items"][0]["avg_revenue_per_cover"] == 24.21
     assert daily_list_payload["items"][0]["avg_revenue_per_cover_formatted"] == "$24.21"
+    assert daily_list_payload["items"][0]["data_sources"][0]["kind"] == "daily_record"
     assert daily_list_payload["items"][0]["actions"]["view_endpoint"].endswith(daily_list_payload["items"][0]["id"])
     assert daily_list_payload["items"][0]["actions"]["delete_endpoint"].endswith(daily_list_payload["items"][0]["id"])
 

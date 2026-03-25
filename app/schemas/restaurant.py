@@ -315,8 +315,16 @@ class DailyDataSummaryCardResponse(BaseSchema):
 
 
 class DailyDataListItemActionResponse(BaseSchema):
-    view_endpoint: str
-    delete_endpoint: str
+    view_endpoint: str | None = None
+    delete_endpoint: str | None = None
+
+
+class DailyDataEntrySourceResponse(BaseSchema):
+    kind: Literal["daily_record", "uploaded_invoice", "manual_expense"]
+    label: str
+    count: int = 0
+    total_amount: float | None = None
+    endpoint: str | None = None
 
 
 class DailyDataListItemResponse(BaseSchema):
@@ -326,9 +334,12 @@ class DailyDataListItemResponse(BaseSchema):
     day_label: str
     total_revenue: float
     total_revenue_formatted: str
+    total_expenses: float = 0.0
+    total_expenses_formatted: str = "$0.00"
     total_covers: int
     avg_revenue_per_cover: float
     avg_revenue_per_cover_formatted: str
+    data_sources: list[DailyDataEntrySourceResponse] = Field(default_factory=list)
     actions: DailyDataListItemActionResponse
     created_at: str
 

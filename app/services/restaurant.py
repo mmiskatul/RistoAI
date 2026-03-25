@@ -28,6 +28,7 @@ from app.schemas.restaurant import (
     ChatMessageResponse,
     DailyDataCreateRequest,
     DailyDataAddButtonResponse,
+    DailyDataEntrySourceResponse,
     DailyDataListItemActionResponse,
     DailyDataListItemResponse,
     DailyDataListResponse,
@@ -186,7 +187,7 @@ class RestaurantOperationsService(BaseService):
         return DocumentExtractionResponse(
             supplier_name=extraction.get("supplier_name") or "Unknown Supplier",
             invoice_number=extraction.get("invoice_number"),
-            invoice_date=extraction.get("invoice_date"),
+            invoice_date=None,
             total_amount=float(total_amount),
             ai_provider="openai" if self.openai_service.enabled else "fallback",
             ai_summary=extraction.get("ai_summary") or "AI extraction completed.",
@@ -197,12 +198,13 @@ class RestaurantOperationsService(BaseService):
     async def create_document_from_confirmation(self, current_user: dict, payload: DocumentSaveRequest) -> DocumentDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         now = datetime.now(UTC)
+        resolved_invoice_date = payload.invoice_date or now.date()
         document = await self.document_repository.create(
             {
                 "tenant_id": scope_id,
                 "supplier_name": payload.supplier_name,
                 "invoice_number": payload.invoice_number,
-                "invoice_date": payload.invoice_date.isoformat() if payload.invoice_date else None,
+                "invoice_date": resolved_invoice_date.isoformat(),
                 "upload_date": now,
                 "total_amount": payload.total_amount,
                 "currency": "EUR",
@@ -218,6 +220,17 @@ class RestaurantOperationsService(BaseService):
                 "confirmed_at": now,
             }
         )
+        expense = await self._sync_document_expense(
+            current_user=current_user,
+            scope_id=scope_id,
+            document_id=str(document["_id"]),
+            supplier_name=payload.supplier_name,
+            invoice_number=payload.invoice_number,
+            invoice_date=resolved_invoice_date,
+            total_amount=payload.total_amount,
+            source_file_name=payload.source_file_name,
+        )
+        document = await self.document_repository.update(document["_id"], {"expense_entry_id": str(expense["_id"])})
         return self._to_document_detail(document)
 
     async def confirm_document(self, current_user: dict, document_id: str, payload: DocumentConfirmRequest) -> DocumentDetailResponse:
@@ -225,6 +238,24 @@ class RestaurantOperationsService(BaseService):
         document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
         updates = self._build_document_updates(current_user=current_user, payload=payload, mark_processed=True)
         updated = await self.document_repository.update(document["_id"], updates)
+        effective_invoice_date = payload.invoice_date
+        if effective_invoice_date is None and updated.get("invoice_date"):
+            effective_invoice_date = datetime.fromisoformat(str(updated["invoice_date"])).date()
+        if effective_invoice_date is None:
+            effective_invoice_date = datetime.now(UTC).date()
+            updated = await self.document_repository.update(updated["_id"], {"invoice_date": effective_invoice_date.isoformat()})
+        expense = await self._sync_document_expense(
+            current_user=current_user,
+            scope_id=scope_id,
+            document_id=str(updated["_id"]),
+            supplier_name=str(updated.get("supplier_name") or document.get("supplier_name") or "Uploaded Invoice"),
+            invoice_number=updated.get("invoice_number"),
+            invoice_date=effective_invoice_date,
+            total_amount=float(updated.get("total_amount", 0)),
+            source_file_name=str(updated.get("source_file_name") or document.get("source_file_name") or "invoice"),
+            existing_expense_id=updated.get("expense_entry_id"),
+        )
+        updated = await self.document_repository.update(updated["_id"], {"expense_entry_id": str(expense["_id"])})
         return self._to_document_detail(updated)
 
     async def list_documents(self, current_user: dict, *, page: int, page_size: int, status: str | None, search: str | None) -> DocumentListResponse:
@@ -242,6 +273,25 @@ class RestaurantOperationsService(BaseService):
         document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
         updates = self._build_document_updates(current_user=current_user, payload=payload, mark_processed=False)
         updated = await self.document_repository.update(document["_id"], updates)
+        if updated.get("status") == "processed" or updated.get("expense_entry_id"):
+            effective_invoice_date = payload.invoice_date
+            if effective_invoice_date is None and updated.get("invoice_date"):
+                effective_invoice_date = datetime.fromisoformat(str(updated["invoice_date"])).date()
+            if effective_invoice_date is None:
+                effective_invoice_date = datetime.now(UTC).date()
+                updated = await self.document_repository.update(updated["_id"], {"invoice_date": effective_invoice_date.isoformat()})
+            expense = await self._sync_document_expense(
+                current_user=current_user,
+                scope_id=scope_id,
+                document_id=str(updated["_id"]),
+                supplier_name=str(updated.get("supplier_name") or document.get("supplier_name") or "Uploaded Invoice"),
+                invoice_number=updated.get("invoice_number"),
+                invoice_date=effective_invoice_date,
+                total_amount=float(updated.get("total_amount", 0)),
+                source_file_name=str(updated.get("source_file_name") or document.get("source_file_name") or "invoice"),
+                existing_expense_id=updated.get("expense_entry_id"),
+            )
+            updated = await self.document_repository.update(updated["_id"], {"expense_entry_id": str(expense["_id"])})
         return self._to_document_detail(updated)
 
     async def delete_document(self, current_user: dict, document_id: str) -> None:
@@ -376,31 +426,37 @@ class RestaurantOperationsService(BaseService):
             start_date = anchor_date.replace(day=1)
             next_month = (start_date.replace(day=28) + timedelta(days=4)).replace(day=1)
             end_date = next_month - timedelta(days=1)
-        all_items, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
-        serialized_all_items = self.serialize_list(all_items)
-        filtered_items = serialized_all_items
-        if start_date or end_date:
-            filtered_items = []
-            for item in serialized_all_items:
-                item_date = datetime.fromisoformat(item["business_date"]).date()
-                if start_date and item_date < start_date:
-                    continue
-                if end_date and item_date > end_date:
-                    continue
-                filtered_items.append(item)
-        total = len(filtered_items)
+
+        all_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        serialized_records = self.serialize_list(all_records)
+        all_expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        serialized_expenses = self.serialize_list(all_expenses)
+
+        filtered_records = self._filter_daily_records_by_date_range(serialized_records, start_date=start_date, end_date=end_date)
+        filtered_expenses = self._filter_expenses_by_date_range(serialized_expenses, start_date=start_date, end_date=end_date) if (start_date or end_date) else serialized_expenses
+
+        buckets = self._build_daily_data_buckets(filtered_records, filtered_expenses, anchor_date=anchor_date)
+        total = len(buckets)
         page_start = (page - 1) * page_size
         page_end = page_start + page_size
-        page_items = filtered_items[page_start:page_end]
-        latest_item = page_items[0] if page_items else None
+        page_items = buckets[page_start:page_end]
+
+        if view == "date":
+            latest_bucket = page_items[0] if page_items else None
+            latest_revenue = float(latest_bucket.get("total_revenue", 0)) if latest_bucket else 0.0
+            latest_expenses = float(latest_bucket.get("total_expenses", 0)) if latest_bucket else 0.0
+            latest_covers = float(latest_bucket.get("total_covers", 0)) if latest_bucket else 0.0
+        else:
+            latest_bucket = None
+            latest_revenue = round(sum(float(item.get("total_revenue", 0)) for item in buckets), 2)
+            latest_expenses = round(sum(float(item.get("total_expenses", 0)) for item in buckets), 2)
+            latest_covers = float(sum(int(item.get("total_covers", 0)) for item in buckets))
+        latest_profit = round(latest_revenue - latest_expenses, 2)
+        latest_avg = round(latest_revenue / max(latest_covers, 1), 2) if latest_revenue else 0.0
+
         revenue_label = "Today's Revenue" if view == "date" else ("This Week Revenue" if view == "week" else "This Month Revenue")
         expense_label = "Total Expenses" if view == "date" else ("This Week Expenses" if view == "week" else "This Month Expenses")
         profit_label = "Profit" if view == "date" else ("This Week Profit" if view == "week" else "This Month Profit")
-        latest_revenue = float(latest_item.get("total_revenue", 0)) if latest_item else 0.0
-        latest_expenses = float(latest_item.get("total_expenses", 0)) if latest_item else 0.0
-        latest_profit = float(latest_item.get("profit", 0)) if latest_item else 0.0
-        latest_covers = float((latest_item.get("lunch_covers", 0) if latest_item else 0) + (latest_item.get("dinner_covers", 0) if latest_item else 0))
-        latest_avg = float(latest_item.get("avg_revenue_per_cover", 0)) if latest_item else 0.0
         summary_cards = [
             DailyDataSummaryCardResponse(label=revenue_label, value=latest_revenue, value_prefix="EUR", value_formatted=self._format_currency(latest_revenue), icon_key="revenue"),
             DailyDataSummaryCardResponse(label=expense_label, value=latest_expenses, value_prefix="EUR", value_formatted=self._format_currency(latest_expenses), icon_key="expenses"),
@@ -412,7 +468,7 @@ class RestaurantOperationsService(BaseService):
             active_view=view,
             summary_cards=summary_cards,
             add_button=DailyDataAddButtonResponse(endpoint="/api/v1/restaurant/daily-data"),
-            items=[self._to_daily_data_list_item(item, anchor_date=anchor_date) for item in page_items],
+            items=[self._to_daily_data_bucket_item(item, anchor_date=anchor_date) for item in page_items],
             **build_pagination_meta(total=total, page=page, page_size=page_size),
         )
 
@@ -666,6 +722,138 @@ class RestaurantOperationsService(BaseService):
             updates["confirmed_at"] = now
         return updates
 
+    @staticmethod
+    def _filter_daily_records_by_date_range(records: list[dict[str, Any]], *, start_date: date | None, end_date: date | None) -> list[dict[str, Any]]:
+        if not start_date and not end_date:
+            return records
+        filtered: list[dict[str, Any]] = []
+        for item in records:
+            item_date = datetime.fromisoformat(item["business_date"]).date()
+            if start_date and item_date < start_date:
+                continue
+            if end_date and item_date > end_date:
+                continue
+            filtered.append(item)
+        return filtered
+
+    def _build_daily_data_buckets(self, records: list[dict[str, Any]], expenses: list[dict[str, Any]], *, anchor_date: date) -> list[dict[str, Any]]:
+        buckets: dict[str, dict[str, Any]] = {}
+        for record in records:
+            bucket = buckets.setdefault(
+                record["business_date"],
+                {
+                    "id": f"date:{record['business_date']}",
+                    "business_date": record["business_date"],
+                    "total_revenue": 0.0,
+                    "total_expenses": 0.0,
+                    "total_covers": 0,
+                    "avg_revenue_per_cover": 0.0,
+                    "record_id": None,
+                    "created_at": record["created_at"],
+                    "data_sources": [],
+                },
+            )
+            covers = int(record.get("lunch_covers", 0) + record.get("dinner_covers", 0))
+            bucket["id"] = record["id"]
+            bucket["record_id"] = record["id"]
+            bucket["total_revenue"] = float(record.get("total_revenue", 0))
+            bucket["total_covers"] = covers
+            bucket["avg_revenue_per_cover"] = float(record.get("avg_revenue_per_cover", 0))
+            bucket["created_at"] = record["created_at"]
+            bucket["data_sources"].append(
+                DailyDataEntrySourceResponse(kind="daily_record", label="Daily data", count=1, endpoint=f"/api/v1/restaurant/daily-data/{record['id']}")
+            )
+
+        expense_groups: dict[str, dict[str, Any]] = {}
+        for expense in expenses:
+            expense_date = datetime.fromisoformat(expense["expense_date"].replace("Z", "+00:00")).date().isoformat()
+            group = expense_groups.setdefault(expense_date, {"uploaded_invoice": {"count": 0, "total": 0.0, "endpoint": None}, "manual_expense": {"count": 0, "total": 0.0, "endpoint": "/api/v1/restaurant/expenses"}})
+            if expense.get("source_document_id"):
+                group["uploaded_invoice"]["count"] += 1
+                group["uploaded_invoice"]["total"] += float(expense.get("amount", 0))
+                group["uploaded_invoice"]["endpoint"] = f"/api/v1/restaurant/documents/{expense['source_document_id']}"
+            else:
+                group["manual_expense"]["count"] += 1
+                group["manual_expense"]["total"] += float(expense.get("amount", 0))
+
+            bucket = buckets.setdefault(
+                expense_date,
+                {
+                    "id": f"date:{expense_date}",
+                    "business_date": expense_date,
+                    "total_revenue": 0.0,
+                    "total_expenses": 0.0,
+                    "total_covers": 0,
+                    "avg_revenue_per_cover": 0.0,
+                    "record_id": None,
+                    "created_at": expense.get("created_at", datetime.now(UTC).isoformat()),
+                    "data_sources": [],
+                },
+            )
+            bucket["total_expenses"] = round(bucket.get("total_expenses", 0.0) + float(expense.get("amount", 0)), 2)
+
+        for expense_date, grouped in expense_groups.items():
+            bucket = buckets[expense_date]
+            if grouped["uploaded_invoice"]["count"]:
+                bucket["data_sources"].append(
+                    DailyDataEntrySourceResponse(
+                        kind="uploaded_invoice",
+                        label="Uploaded invoices",
+                        count=grouped["uploaded_invoice"]["count"],
+                        total_amount=round(grouped["uploaded_invoice"]["total"], 2),
+                        endpoint=grouped["uploaded_invoice"]["endpoint"],
+                    )
+                )
+            if grouped["manual_expense"]["count"]:
+                bucket["data_sources"].append(
+                    DailyDataEntrySourceResponse(
+                        kind="manual_expense",
+                        label="Manual expenses",
+                        count=grouped["manual_expense"]["count"],
+                        total_amount=round(grouped["manual_expense"]["total"], 2),
+                        endpoint=grouped["manual_expense"]["endpoint"],
+                    )
+                )
+            if bucket["total_revenue"]:
+                bucket["avg_revenue_per_cover"] = round(bucket["total_revenue"] / max(bucket["total_covers"], 1), 2)
+
+        return sorted(buckets.values(), key=lambda item: item["business_date"], reverse=True)
+
+    async def _sync_document_expense(
+        self,
+        *,
+        current_user: dict,
+        scope_id: str,
+        document_id: str,
+        supplier_name: str,
+        invoice_number: str | None,
+        invoice_date: date | None,
+        total_amount: float,
+        source_file_name: str,
+        existing_expense_id: str | None = None,
+    ) -> dict:
+        expense_payload = {
+            "tenant_id": scope_id,
+            "category": "Uploaded Invoice",
+            "amount": float(total_amount),
+            "expense_date": datetime.combine(invoice_date or datetime.now(UTC).date(), datetime.min.time(), tzinfo=UTC),
+            "notes": f"Invoice {invoice_number or source_file_name} from {supplier_name}",
+            "created_by_user_id": str(current_user["_id"]),
+            "source_document_id": document_id,
+        }
+        if existing_expense_id:
+            return await self.expense_repository.update(existing_expense_id, expense_payload)
+        return await self.expense_repository.create(expense_payload)
+
+    @staticmethod
+    def _filter_expenses_by_date_range(expenses: list[dict[str, Any]], *, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        filtered: list[dict[str, Any]] = []
+        for item in expenses:
+            expense_date = datetime.fromisoformat(item["expense_date"].replace("Z", "+00:00")).date()
+            if start_date <= expense_date <= end_date:
+                filtered.append(item)
+        return filtered
+
     def _build_other_related_insights(self, insight: dict) -> list[dict[str, str | None]]:
         related_items: list[dict[str, str | None]] = []
         for metric in insight.get("related_metrics", []):
@@ -746,10 +934,8 @@ class RestaurantOperationsService(BaseService):
             created_at=serialized["created_at"],
         )
 
-    def _to_daily_data_list_item(self, record: dict, *, anchor_date: date | None = None) -> DailyDataListItemResponse:
-        serialized = self.serialize(record)
-        total_covers = int(serialized.get("lunch_covers", 0) + serialized.get("dinner_covers", 0))
-        business_date = datetime.fromisoformat(serialized["business_date"]).date()
+    def _to_daily_data_bucket_item(self, bucket: dict[str, Any], *, anchor_date: date | None = None) -> DailyDataListItemResponse:
+        business_date = datetime.fromisoformat(bucket["business_date"]).date()
         anchor = anchor_date or datetime.now(UTC).date()
         if business_date == anchor:
             day_label = "TODAY"
@@ -757,23 +943,28 @@ class RestaurantOperationsService(BaseService):
             day_label = "YESTERDAY"
         else:
             day_label = business_date.strftime("%A").upper()
-        revenue = float(serialized["total_revenue"])
-        avg_value = float(serialized.get("avg_revenue_per_cover", 0.0))
+        revenue = float(bucket.get("total_revenue", 0.0))
+        expenses = float(bucket.get("total_expenses", 0.0))
+        avg_value = float(bucket.get("avg_revenue_per_cover", 0.0))
+        record_id = bucket.get("record_id")
         return DailyDataListItemResponse(
-            id=serialized["id"],
-            business_date=serialized["business_date"],
+            id=str(bucket["id"]),
+            business_date=bucket["business_date"],
             business_date_formatted=business_date.strftime("%b %d, %Y"),
             day_label=day_label,
             total_revenue=revenue,
             total_revenue_formatted=self._format_currency(revenue),
-            total_covers=total_covers,
+            total_expenses=expenses,
+            total_expenses_formatted=self._format_currency(expenses),
+            total_covers=int(bucket.get("total_covers", 0)),
             avg_revenue_per_cover=avg_value,
             avg_revenue_per_cover_formatted=self._format_currency(avg_value),
+            data_sources=bucket.get("data_sources", []),
             actions=DailyDataListItemActionResponse(
-                view_endpoint=f"/api/v1/restaurant/daily-data/{serialized['id']}",
-                delete_endpoint=f"/api/v1/restaurant/daily-data/{serialized['id']}",
+                view_endpoint=f"/api/v1/restaurant/daily-data/{record_id}" if record_id else None,
+                delete_endpoint=f"/api/v1/restaurant/daily-data/{record_id}" if record_id else None,
             ),
-            created_at=serialized["created_at"],
+            created_at=str(bucket.get("created_at")),
         )
 
     def _to_inventory_item_response(self, item: dict) -> InventoryItemResponse:
