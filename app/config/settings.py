@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     subscription_plan_is_active: bool = Field(default=True, alias="SUBSCRIPTION_PLAN_IS_ACTIVE")
     subscription_plan_is_best: bool = Field(default=False, alias="SUBSCRIPTION_PLAN_IS_BEST")
 
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
+    openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
+
     @computed_field
     @property
     def openapi_url(self) -> str:
@@ -106,3 +110,5 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+

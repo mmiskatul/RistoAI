@@ -13,7 +13,7 @@ class BootstrapService:
     def __init__(
         self,
         user_repository: UserRepository,
-        subscription_plan_repository: SubscriptionPlanRepository,
+        subscription_plan_repository: SubscriptionPlanRepository | None = None,
     ) -> None:
         self.user_repository = user_repository
         self.subscription_plan_repository = subscription_plan_repository
@@ -41,11 +41,7 @@ class BootstrapService:
             )
             return
 
-        updates = {
-            key: value
-            for key, value in payload.items()
-            if existing_user.get(key) != value
-        }
+        updates = {key: value for key, value in payload.items() if existing_user.get(key) != value}
         if not password_manager.verify_password(settings.super_admin_password, existing_user['hashed_password']):
             updates['hashed_password'] = password_manager.hash_password(settings.super_admin_password)
 
@@ -53,6 +49,9 @@ class BootstrapService:
             await self.user_repository.update(existing_user['_id'], updates)
 
     async def ensure_default_subscription_plan(self, settings: Settings) -> None:
+        if self.subscription_plan_repository is None:
+            return
+
         existing_plan = await self.subscription_plan_repository.get_optional_plan()
         if existing_plan:
             return
