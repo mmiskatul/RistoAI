@@ -74,17 +74,26 @@ class InsightActionResponse(BaseSchema):
     action_label: str = "Apply"
 
 
+class InsightRelatedItemResponse(BaseSchema):
+    label: str
+    value: str
+    subtitle: str | None = None
+
+
 class InsightDetailResponse(BaseSchema):
     id: str
+    page_title: str = "AI Business Insights"
+    subtitle: str
+    badge_label: str
     title: str
-    summary: str
     priority: str
     metric_value: str
     metric_caption: str
     trend: list[ChartPointResponse]
     root_causes: list[str]
     recommended_actions: list[InsightActionResponse]
-    related_metrics: list[MetricCardResponse]
+    other_related_insights: list[InsightRelatedItemResponse]
+    export_label: str = "Export"
 
 
 class DocumentLineItemSchema(BaseSchema):
@@ -335,3 +344,4 @@ class MobileProfileUpdateRequest(BaseSchema):
     phone: str | None = Field(default=None, max_length=30)
     restaurant_name: str | None = Field(default=None, max_length=120)
     location: str | None = Field(default=None, max_length=120)
+

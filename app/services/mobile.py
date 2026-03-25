@@ -138,35 +138,43 @@ class MobileOperationsService(BaseService):
             report_ready=bool(daily_records or expenses),
         )
 
-    async def list_insights(self, current_user: dict) -> list[InsightSummaryResponse]:
+    async def list_insights(self, current_user: dict) -> InsightDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
-        return await self._get_or_generate_insights(scope_id=scope_id, daily_records=daily_records, expenses=expenses)
+        insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=daily_records, expenses=expenses)
+        return await self.get_insight_detail(current_user, insights[0].id)
 
     async def get_insight_detail(self, current_user: dict, insight_id: str) -> InsightDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         insight = self.serialize(await self.insight_repository.get_by_scope_and_id(scope_id=scope_id, insight_id=insight_id))
+        related_items = self._build_other_related_insights(insight)
         return InsightDetailResponse(
             id=insight["id"],
+            subtitle="Smart recommendations based on your restaurant data.",
+            badge_label=insight["priority"].replace("_", " ").upper() + " PRIORITY",
             title=insight["title"],
-            summary=insight["summary"],
             priority=insight["priority"],
             metric_value=insight["metric_value"],
             metric_caption=insight["metric_caption"],
             trend=[ChartPointResponse(**item) for item in insight.get("trend", [])],
             root_causes=insight.get("root_causes", []),
             recommended_actions=[InsightActionResponse(**item) for item in insight.get("recommended_actions", [])],
-            related_metrics=[MetricCardResponse(**item) for item in insight.get("related_metrics", [])],
+            other_related_insights=related_items,
         )
 
-    async def upload_and_extract_document(self, current_user: dict, payload: DocumentUploadExtractRequest) -> DocumentDetailResponse:
+    async def upload_and_extract_document(
+        self,
+        current_user: dict,
+        *,
+        file_name: str,
+        content_type: str,
+        file_bytes: bytes,
+    ) -> DocumentDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        try:
-            file_bytes = base64.b64decode(payload.file_base64, validate=True)
-        except Exception as exc:  # noqa: BLE001
-            raise ValidationException("file_base64 must be valid base64 data") from exc
-        extraction = await self.openai_service.extract_invoice(file_name=payload.file_name, content_type=payload.content_type, file_bytes=file_bytes)
+        if not file_bytes:
+            raise ValidationException("Uploaded file is empty")
+        extraction = await self.openai_service.extract_invoice(file_name=file_name, content_type=content_type, file_bytes=file_bytes)
         line_items = extraction.get("line_items") or []
         total_amount = extraction.get("total_amount")
         if total_amount is None:
@@ -183,7 +191,7 @@ class MobileOperationsService(BaseService):
                 "status": "pending_review",
                 "ai_provider": "openai" if self.openai_service.enabled else "fallback",
                 "ai_summary": extraction.get("ai_summary") or "AI extraction completed.",
-                "source_file_name": payload.file_name,
+                "source_file_name": file_name,
                 "line_items": line_items,
                 "created_by_user_id": str(current_user["_id"]),
             }
@@ -574,6 +582,21 @@ class MobileOperationsService(BaseService):
             return "low_stock"
         return "in_stock"
 
+    def _build_other_related_insights(self, insight: dict) -> list[dict[str, str | None]]:
+        related_items: list[dict[str, str | None]] = []
+        for metric in insight.get("related_metrics", []):
+            label = str(metric.get("label", "Metric"))
+            value = float(metric.get("value", 0))
+            change_percent = float(metric.get("change_percent", 0))
+            currency = str(metric.get("currency", "EUR"))
+            currency_symbol = "EUR " if currency == "EUR" else f"{currency} "
+            if label.lower() == "expenses":
+                related_items.append({"label": f"{label} increase", "value": f"+{currency_symbol}{value:,.0f}", "subtitle": None})
+            else:
+                direction = "increase" if change_percent >= 0 else "decrease"
+                related_items.append({"label": f"{label} {direction}", "value": f"{change_percent:+.1f}%", "subtitle": None})
+        return related_items[:2]
+
     def _to_document_list_item(self, document: dict) -> DocumentListItemResponse:
         serialized = self.serialize(document)
         return DocumentListItemResponse(
@@ -652,3 +675,4 @@ class MobileOperationsService(BaseService):
     def _to_chat_message_response(self, item: dict) -> ChatMessageResponse:
         serialized = self.serialize(item)
         return ChatMessageResponse(id=serialized["id"], role=serialized["role"], message=serialized["message"], created_at=serialized["created_at"])
+

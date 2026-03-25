@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-
 from app.tests.helpers import register_and_login, seed_subscription_plan, select_subscription_plan
 
 
@@ -21,11 +19,7 @@ def test_mobile_document_upload_extract_and_confirm_flow(client, app):
     upload_response = client.post(
         "/api/v1/restaurant/documents/upload-extract",
         headers=headers,
-        json={
-            "file_name": "invoice-march.png",
-            "content_type": "image/png",
-            "file_base64": base64.b64encode(b"fake-image").decode("utf-8"),
-        },
+        files={"file": ("invoice-march.png", b"fake-image", "image/png")},
     )
     assert upload_response.status_code == 201
     upload_payload = upload_response.json()
@@ -152,6 +146,13 @@ def test_mobile_daily_data_dashboard_analytics_and_chat(client, app):
     home_response = client.get("/api/v1/restaurant/home", headers=headers)
     assert home_response.status_code == 200
     assert home_response.json()["metrics"][0]["label"] == "Revenue"
+
+    insights_response = client.get("/api/v1/restaurant/insights", headers=headers)
+    assert insights_response.status_code == 200
+    assert insights_response.json()["page_title"] == "AI Business Insights"
+    assert len(insights_response.json()["root_causes"]) == 3
+    assert len(insights_response.json()["recommended_actions"]) == 3
+    assert insights_response.json()["export_label"] == "Export"
 
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200
