@@ -109,12 +109,34 @@ class DocumentUploadExtractRequest(BaseSchema):
     file_base64: str = Field(min_length=8)
 
 
+class DocumentExtractionResponse(BaseSchema):
+    supplier_name: str
+    invoice_number: str | None = None
+    invoice_date: str | None = None
+    total_amount: float
+    ai_provider: str
+    ai_summary: str
+    source_file_name: str
+    line_items: list[DocumentLineItemSchema]
+
+
 class DocumentConfirmRequest(BaseSchema):
     supplier_name: str | None = Field(default=None, min_length=2, max_length=120)
     invoice_number: str | None = Field(default=None, min_length=2, max_length=80)
     invoice_date: date | None = None
     total_amount: float | None = Field(default=None, ge=0)
     line_items: list[DocumentLineItemSchema] | None = None
+
+
+class DocumentSaveRequest(BaseSchema):
+    supplier_name: str = Field(min_length=2, max_length=120)
+    invoice_number: str | None = Field(default=None, min_length=2, max_length=80)
+    invoice_date: date | None = None
+    total_amount: float = Field(ge=0)
+    line_items: list[DocumentLineItemSchema] = Field(default_factory=list)
+    source_file_name: str = Field(min_length=1, max_length=255)
+    ai_provider: str = Field(min_length=2, max_length=50)
+    ai_summary: str = Field(default='', max_length=2000)
 
 
 class DocumentListItemResponse(BaseSchema):

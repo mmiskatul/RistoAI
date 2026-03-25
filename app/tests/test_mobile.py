@@ -21,46 +21,43 @@ def test_mobile_document_upload_extract_and_confirm_flow(client, app):
         headers=headers,
         files={"file": ("invoice-march.png", b"fake-image", "image/png")},
     )
-    assert upload_response.status_code == 201
+    assert upload_response.status_code == 200
     upload_payload = upload_response.json()
     assert upload_payload["supplier_name"] == "Fresh Food Supplier Ltd"
-    assert upload_payload["status"] == "pending_review"
     assert upload_payload["ai_provider"] == "fallback"
     assert len(upload_payload["line_items"]) == 3
+    assert "id" not in upload_payload
 
-    document_id = upload_payload["id"]
+    pre_confirm_list_response = client.get("/api/v1/restaurant/documents", headers=headers)
+    assert pre_confirm_list_response.status_code == 200
+    assert pre_confirm_list_response.json()["total"] == 0
 
-    edit_response = client.patch(
-        f"/api/v1/restaurant/documents/{document_id}",
+    confirm_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
         headers=headers,
         json={
             "supplier_name": "Bakery Goods Co",
+            "invoice_number": upload_payload["invoice_number"],
             "invoice_date": "2026-03-10",
+            "total_amount": 425.0,
             "line_items": [
                 {"product_name": "Sourdough Loaf", "quantity": 20, "unit_price": 5.0, "total_price": 100.0},
                 {"product_name": "Pastry Flour (25kg)", "quantity": 5, "unit_price": 45.0, "total_price": 225.0},
                 {"product_name": "Butter (Case)", "quantity": 2, "unit_price": 50.0, "total_price": 100.0}
             ],
-            "total_amount": 425.0,
+            "source_file_name": upload_payload["source_file_name"],
+            "ai_provider": upload_payload["ai_provider"],
+            "ai_summary": upload_payload["ai_summary"]
         },
     )
-    assert edit_response.status_code == 200
-    assert edit_response.json()["status"] == "pending_review"
-    assert edit_response.json()["supplier_name"] == "Bakery Goods Co"
-    assert edit_response.json()["last_edited_by_user_id"]
-
-    confirm_response = client.post(
-        f"/api/v1/restaurant/documents/{document_id}/confirm",
-        headers=headers,
-        json={"supplier_name": "Bakery Goods Co", "total_amount": 425.0},
-    )
-    assert confirm_response.status_code == 200
+    assert confirm_response.status_code == 201
     assert confirm_response.json()["status"] == "processed"
     assert confirm_response.json()["supplier_name"] == "Bakery Goods Co"
     assert confirm_response.json()["confirmed_by_user_id"]
     assert confirm_response.json()["confirmed_at"]
     assert confirm_response.json()["invoice_date"] == "2026-03-10"
 
+    document_id = confirm_response.json()["id"]
     list_response = client.get("/api/v1/restaurant/documents", headers=headers)
     assert list_response.status_code == 200
     assert list_response.json()["total"] == 1

@@ -31,9 +31,11 @@ from app.schemas.mobile import (
     DailyDataResponse,
     DocumentConfirmRequest,
     DocumentDetailResponse,
+    DocumentExtractionResponse,
     DocumentLineItemSchema,
     DocumentListItemResponse,
     DocumentListResponse,
+    DocumentSaveRequest,
     DocumentUploadExtractRequest,
     ExpenseCreateRequest,
     ExpenseListResponse,
@@ -169,8 +171,7 @@ class MobileOperationsService(BaseService):
         file_name: str,
         content_type: str,
         file_bytes: bytes,
-    ) -> DocumentDetailResponse:
-        scope_id = ScopedRepository.resolve_scope_id(current_user)
+    ) -> DocumentExtractionResponse:
         if not file_bytes:
             raise ValidationException("Uploaded file is empty")
         extraction = await self.openai_service.extract_invoice(file_name=file_name, content_type=content_type, file_bytes=file_bytes)
@@ -178,26 +179,39 @@ class MobileOperationsService(BaseService):
         total_amount = extraction.get("total_amount")
         if total_amount is None:
             total_amount = round(sum(float(item.get("total_price", 0)) for item in line_items), 2)
+        return DocumentExtractionResponse(
+            supplier_name=extraction.get("supplier_name") or "Unknown Supplier",
+            invoice_number=extraction.get("invoice_number"),
+            invoice_date=extraction.get("invoice_date"),
+            total_amount=float(total_amount),
+            ai_provider="openai" if self.openai_service.enabled else "fallback",
+            ai_summary=extraction.get("ai_summary") or "AI extraction completed.",
+            source_file_name=file_name,
+            line_items=[DocumentLineItemSchema(**item) for item in line_items],
+        )
+
+    async def create_document_from_confirmation(self, current_user: dict, payload: DocumentSaveRequest) -> DocumentDetailResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
         now = datetime.now(UTC)
         document = await self.document_repository.create(
             {
                 "tenant_id": scope_id,
-                "supplier_name": extraction.get("supplier_name") or "Unknown Supplier",
-                "invoice_number": extraction.get("invoice_number"),
-                "invoice_date": extraction.get("invoice_date"),
+                "supplier_name": payload.supplier_name,
+                "invoice_number": payload.invoice_number,
+                "invoice_date": payload.invoice_date.isoformat() if payload.invoice_date else None,
                 "upload_date": now,
-                "total_amount": float(total_amount),
-                "currency": extraction.get("currency", "EUR"),
-                "status": "pending_review",
-                "ai_provider": "openai" if self.openai_service.enabled else "fallback",
-                "ai_summary": extraction.get("ai_summary") or "AI extraction completed.",
-                "source_file_name": file_name,
-                "line_items": line_items,
+                "total_amount": payload.total_amount,
+                "currency": "EUR",
+                "status": "processed",
+                "ai_provider": payload.ai_provider,
+                "ai_summary": payload.ai_summary,
+                "source_file_name": payload.source_file_name,
+                "line_items": [item.model_dump(mode="json") for item in payload.line_items],
                 "created_by_user_id": str(current_user["_id"]),
                 "last_edited_by_user_id": str(current_user["_id"]),
                 "last_edited_at": now,
-                "confirmed_by_user_id": None,
-                "confirmed_at": None,
+                "confirmed_by_user_id": str(current_user["_id"]),
+                "confirmed_at": now,
             }
         )
         return self._to_document_detail(document)

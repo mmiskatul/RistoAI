@@ -17,7 +17,9 @@ from app.schemas.mobile import (
     DailyDataResponse,
     DocumentConfirmRequest,
     DocumentDetailResponse,
+    DocumentExtractionResponse,
     DocumentListResponse,
+    DocumentSaveRequest,
     ExpenseCreateRequest,
     ExpenseListResponse,
     ExpenseResponse,
@@ -69,12 +71,12 @@ ALLOWED_DOCUMENT_CONTENT_TYPES = {
 }
 
 
-@router.post('/documents/upload-extract', response_model=DocumentDetailResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Documents'])
+@router.post('/documents/upload-extract', response_model=DocumentExtractionResponse, status_code=status.HTTP_200_OK, tags=['Restaurant Documents'])
 async def upload_and_extract_document(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
     service: MobileOperationsService = Depends(get_mobile_operations_service),
-) -> DocumentDetailResponse:
+) -> DocumentExtractionResponse:
     content_type = (file.content_type or '').lower()
     if content_type not in ALLOWED_DOCUMENT_CONTENT_TYPES:
         raise ValidationException('Only PDF, CSV, PNG, JPG, JPEG, and WEBP files are supported')
@@ -85,6 +87,11 @@ async def upload_and_extract_document(
         content_type=content_type,
         file_bytes=file_bytes,
     )
+
+
+@router.post('/documents/confirm-save', response_model=DocumentDetailResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Documents'])
+async def confirm_and_save_document(payload: DocumentSaveRequest, current_user: dict = Depends(get_current_user), service: MobileOperationsService = Depends(get_mobile_operations_service)) -> DocumentDetailResponse:
+    return await service.create_document_from_confirmation(current_user, payload)
 
 
 @router.post('/documents/{document_id}/confirm', response_model=DocumentDetailResponse, tags=['Restaurant Documents'])
