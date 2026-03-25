@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.tests.helpers import register_and_login, seed_subscription_plan, select_subscription_plan
 
 
-def test_mobile_document_upload_extract_and_confirm_flow(client, app):
+def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(
         client,
@@ -71,7 +71,7 @@ def test_mobile_document_upload_extract_and_confirm_flow(client, app):
     assert detail_response.json()["confirmed_by_user_id"]
 
 
-def test_mobile_endpoints_are_scoped_per_user(client, app):
+def test_restaurant_endpoints_are_scoped_per_user(client, app):
     seed_subscription_plan(app)
     headers_user_one = register_and_login(
         client,
@@ -131,7 +131,7 @@ def test_mobile_endpoints_are_scoped_per_user(client, app):
     assert inventory_detail_user_two.status_code == 404
 
 
-def test_mobile_daily_data_dashboard_analytics_and_chat(client, app):
+def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(
         client,
@@ -180,6 +180,67 @@ def test_mobile_daily_data_dashboard_analytics_and_chat(client, app):
     assert len(insights_response.json()["root_causes"]) == 3
     assert len(insights_response.json()["recommended_actions"]) == 3
     assert insights_response.json()["export_label"] == "Export"
+
+    second_daily_response = client.post(
+        "/api/v1/restaurant/daily-data",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "method_two": {
+                "business_date": "2026-03-25",
+                "pos_payments": 600,
+                "cash_payments": 200,
+                "bank_transfer_payments": 120,
+                "lunch_covers": 20,
+                "dinner_covers": 18,
+                "opening_cash": 100,
+                "closing_cash": 220,
+            },
+        },
+    )
+    assert second_daily_response.status_code == 201
+
+    daily_list_response = client.get("/api/v1/restaurant/daily-data?view=date&reference_date=2026-03-26", headers=headers)
+    assert daily_list_response.status_code == 200
+    daily_list_payload = daily_list_response.json()
+    assert daily_list_payload["page_title"] == "Daily Data Management"
+    assert daily_list_payload["subtitle"] == "Track and manage your restaurant performance"
+    assert daily_list_payload["view_options"] == ["date", "week", "month"]
+    assert daily_list_payload["active_view"] == "date"
+    assert len(daily_list_payload["summary_cards"]) == 5
+    assert daily_list_payload["summary_cards"][0]["label"] == "Today's Revenue"
+    assert daily_list_payload["summary_cards"][0]["value"] == 920
+    assert daily_list_payload["summary_cards"][3]["label"] == "Total Covers"
+    assert daily_list_payload["summary_cards"][3]["value"] == 38
+    assert daily_list_payload["items"][0]["business_date"] == "2026-03-25"
+    assert daily_list_payload["items"][0]["day_label"] == "YESTERDAY"
+    assert daily_list_payload["items"][0]["total_covers"] == 38
+    assert daily_list_payload["items"][0]["avg_revenue_per_cover"] == 24.21
+
+    week_list_response = client.get("/api/v1/restaurant/daily-data?view=week&reference_date=2026-03-26", headers=headers)
+    assert week_list_response.status_code == 200
+    week_payload = week_list_response.json()
+    assert week_payload["active_view"] == "week"
+    assert week_payload["summary_cards"][0]["label"] == "This Week Revenue"
+    assert week_payload["total"] == 2
+
+    detail_id = daily_list_payload["items"][0]["id"]
+    detail_response = client.get(f"/api/v1/restaurant/daily-data/{detail_id}", headers=headers)
+    assert detail_response.status_code == 200
+    assert detail_response.json()["business_date"] == "2026-03-25"
+
+    month_list_response = client.get("/api/v1/restaurant/daily-data?view=month&reference_date=2026-03-26", headers=headers)
+    assert month_list_response.status_code == 200
+    month_payload = month_list_response.json()
+    assert month_payload["active_view"] == "month"
+    assert month_payload["summary_cards"][0]["label"] == "This Month Revenue"
+    assert month_payload["total"] == 2
+
+    delete_response = client.delete(f"/api/v1/restaurant/daily-data/{detail_id}", headers=headers)
+    assert delete_response.status_code == 204
+    after_delete_response = client.get("/api/v1/restaurant/daily-data?view=date&reference_date=2026-03-26", headers=headers)
+    assert after_delete_response.status_code == 200
+    assert after_delete_response.json()["total"] == 1
 
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200

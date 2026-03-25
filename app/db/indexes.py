@@ -48,40 +48,40 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
             IndexModel([("status", ASCENDING)], name="idx_support_tickets_status"),
         ],
     )
-    await db["mobile_documents"].create_indexes(
+    await db["restaurant_documents"].create_indexes(
         [
-            IndexModel([("tenant_id", ASCENDING), ("created_at", ASCENDING)], name="idx_mobile_documents_tenant_created"),
-            IndexModel([("tenant_id", ASCENDING), ("status", ASCENDING)], name="idx_mobile_documents_tenant_status"),
+            IndexModel([("tenant_id", ASCENDING), ("created_at", ASCENDING)], name="idx_restaurant_documents_tenant_created"),
+            IndexModel([("tenant_id", ASCENDING), ("status", ASCENDING)], name="idx_restaurant_documents_tenant_status"),
         ],
     )
-    await db["mobile_expenses"].create_indexes(
+    await db["restaurant_expenses"].create_indexes(
         [
-            IndexModel([("tenant_id", ASCENDING), ("expense_date", ASCENDING)], name="idx_mobile_expenses_tenant_date"),
+            IndexModel([("tenant_id", ASCENDING), ("expense_date", ASCENDING)], name="idx_restaurant_expenses_tenant_date"),
         ],
     )
-    await db["mobile_cash_deposits"].create_indexes(
+    await db["restaurant_cash_deposits"].create_indexes(
         [
-            IndexModel([("tenant_id", ASCENDING), ("deposit_date", ASCENDING)], name="idx_mobile_cash_tenant_date"),
+            IndexModel([("tenant_id", ASCENDING), ("deposit_date", ASCENDING)], name="idx_restaurant_cash_tenant_date"),
         ],
     )
-    await db["mobile_daily_records"].create_indexes(
+    await db["restaurant_daily_records"].create_indexes(
         [
-            IndexModel([("tenant_id", ASCENDING), ("business_date", ASCENDING)], unique=True, name="uq_mobile_daily_records_tenant_date"),
+            IndexModel([("tenant_id", ASCENDING), ("business_date", ASCENDING)], unique=True, name="uq_restaurant_daily_records_tenant_date"),
         ],
     )
-    await db["mobile_inventory_items"].create_indexes(
+    await db["restaurant_inventory_items"].create_indexes(
         [
-            IndexModel([("tenant_id", ASCENDING), ("product_name", ASCENDING)], name="idx_mobile_inventory_tenant_name"),
-            IndexModel([("tenant_id", ASCENDING), ("stock_status", ASCENDING)], name="idx_mobile_inventory_tenant_status"),
+            IndexModel([("tenant_id", ASCENDING), ("product_name", ASCENDING)], name="idx_restaurant_inventory_tenant_name"),
+            IndexModel([("tenant_id", ASCENDING), ("stock_status", ASCENDING)], name="idx_restaurant_inventory_tenant_status"),
         ],
     )
-    await db["mobile_chat_messages"].create_indexes(
+    await db["restaurant_chat_messages"].create_indexes(
         [
-            IndexModel([("tenant_id", ASCENDING), ("created_at", ASCENDING)], name="idx_mobile_chat_tenant_created"),
+            IndexModel([("tenant_id", ASCENDING), ("created_at", ASCENDING)], name="idx_restaurant_chat_tenant_created"),
         ],
     )
-    await db["mobile_ai_insights"].create_indexes(
+    await db["restaurant_ai_insights"].create_indexes(
         [
-            IndexModel([("tenant_id", ASCENDING), ("created_at", ASCENDING)], name="idx_mobile_insights_tenant_created"),
+            IndexModel([("tenant_id", ASCENDING), ("created_at", ASCENDING)], name="idx_restaurant_insights_tenant_created"),
         ],
     )

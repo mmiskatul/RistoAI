@@ -33,8 +33,8 @@ class ScopedRepository(BaseRepository[dict]):
         return document
 
 
-class MobileDocumentRepository(ScopedRepository):
-    collection_name = "mobile_documents"
+class RestaurantDocumentRepository(ScopedRepository):
+    collection_name = "restaurant_documents"
 
     async def list_by_scope(
         self,
@@ -58,8 +58,8 @@ class MobileDocumentRepository(ScopedRepository):
         return await self.get_multi(filters=filters, page=page, page_size=page_size, sort=[("invoice_date", DESCENDING), ("created_at", DESCENDING)])
 
 
-class MobileExpenseRepository(ScopedRepository):
-    collection_name = "mobile_expenses"
+class RestaurantExpenseRepository(ScopedRepository):
+    collection_name = "restaurant_expenses"
 
     async def list_by_scope(
         self,
@@ -81,19 +81,35 @@ class MobileExpenseRepository(ScopedRepository):
         return await self.get_multi(filters=filters, page=page, page_size=page_size)
 
 
-class MobileCashDepositRepository(ScopedRepository):
-    collection_name = "mobile_cash_deposits"
+class RestaurantCashDepositRepository(ScopedRepository):
+    collection_name = "restaurant_cash_deposits"
 
     async def list_by_scope(self, *, scope_id: str, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
         return await self.get_multi(filters=self.scope_filters(scope_id), page=page, page_size=page_size)
 
 
-class MobileDailyRecordRepository(ScopedRepository):
-    collection_name = "mobile_daily_records"
+class RestaurantDailyRecordRepository(ScopedRepository):
+    collection_name = "restaurant_daily_records"
 
-    async def list_by_scope(self, *, scope_id: str, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
+    async def list_by_scope(
+        self,
+        *,
+        scope_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        filters = self.scope_filters(scope_id)
+        if start_date or end_date:
+            date_filters: dict[str, Any] = {}
+            if start_date:
+                date_filters["$gte"] = start_date
+            if end_date:
+                date_filters["$lte"] = end_date
+            filters["business_date"] = date_filters
         return await self.get_multi(
-            filters=self.scope_filters(scope_id),
+            filters=filters,
             page=page,
             page_size=page_size,
             sort=[("business_date", DESCENDING), ("created_at", DESCENDING)],
@@ -103,8 +119,8 @@ class MobileDailyRecordRepository(ScopedRepository):
         return await self.get_one(self.scope_filters(scope_id, {"business_date": business_date}))
 
 
-class MobileInventoryRepository(ScopedRepository):
-    collection_name = "mobile_inventory_items"
+class RestaurantInventoryRepository(ScopedRepository):
+    collection_name = "restaurant_inventory_items"
 
     async def list_by_scope(
         self,
@@ -131,16 +147,16 @@ class MobileInventoryRepository(ScopedRepository):
         return await self.get_multi(filters=filters, page=page, page_size=page_size)
 
 
-class MobileChatRepository(ScopedRepository):
-    collection_name = "mobile_chat_messages"
+class RestaurantChatRepository(ScopedRepository):
+    collection_name = "restaurant_chat_messages"
 
     async def list_recent_by_scope(self, *, scope_id: str, limit: int = 20) -> list[dict[str, Any]]:
         cursor = self.collection.find(self.scope_filters(scope_id)).sort([("created_at", ASCENDING)]).limit(limit)
         return await cursor.to_list(length=limit)
 
 
-class MobileInsightRepository(ScopedRepository):
-    collection_name = "mobile_ai_insights"
+class RestaurantInsightRepository(ScopedRepository):
+    collection_name = "restaurant_ai_insights"
 
     async def list_by_scope(self, *, scope_id: str, limit: int = 10) -> list[dict[str, Any]]:
         cursor = self.collection.find(self.scope_filters(scope_id)).sort([("created_at", DESCENDING)]).limit(limit)

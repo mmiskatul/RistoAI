@@ -4,18 +4,18 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.exceptions import ValidationException
-from app.repositories.mobile_ops import (
-    MobileCashDepositRepository,
-    MobileChatRepository,
-    MobileDailyRecordRepository,
-    MobileDocumentRepository,
-    MobileExpenseRepository,
-    MobileInsightRepository,
-    MobileInventoryRepository,
+from app.repositories.restaurant_ops import (
+    RestaurantCashDepositRepository,
+    RestaurantChatRepository,
+    RestaurantDailyRecordRepository,
+    RestaurantDocumentRepository,
+    RestaurantExpenseRepository,
+    RestaurantInsightRepository,
+    RestaurantInventoryRepository,
     ScopedRepository,
 )
 from app.repositories.user import UserRepository
-from app.schemas.mobile import (
+from app.schemas.restaurant import (
     ActivityItemResponse,
     AnalyticsOverviewResponse,
     CashDepositCreateRequest,
@@ -27,8 +27,10 @@ from app.schemas.mobile import (
     ChatMessageCreateRequest,
     ChatMessageResponse,
     DailyDataCreateRequest,
+    DailyDataListItemResponse,
     DailyDataListResponse,
     DailyDataResponse,
+    DailyDataSummaryCardResponse,
     DocumentConfirmRequest,
     DocumentDetailResponse,
     DocumentExtractionResponse,
@@ -50,9 +52,9 @@ from app.schemas.mobile import (
     InventoryListResponse,
     InventoryStockUpdateRequest,
     MetricCardResponse,
-    MobileHomeResponse,
-    MobileProfileResponse,
-    MobileProfileUpdateRequest,
+    RestaurantHomeResponse,
+    RestaurantProfileResponse,
+    RestaurantProfileUpdateRequest,
     QuickActionResponse,
     VatOverviewResponse,
 )
@@ -61,19 +63,19 @@ from app.services.openai_ops import OpenAIOperationsService
 from app.utils.pagination import build_pagination_meta
 
 
-class MobileOperationsService(BaseService):
+class RestaurantOperationsService(BaseService):
     VAT_RATE = 0.1
 
     def __init__(
         self,
         user_repository: UserRepository,
-        document_repository: MobileDocumentRepository,
-        expense_repository: MobileExpenseRepository,
-        cash_repository: MobileCashDepositRepository,
-        daily_record_repository: MobileDailyRecordRepository,
-        inventory_repository: MobileInventoryRepository,
-        chat_repository: MobileChatRepository,
-        insight_repository: MobileInsightRepository,
+        document_repository: RestaurantDocumentRepository,
+        expense_repository: RestaurantExpenseRepository,
+        cash_repository: RestaurantCashDepositRepository,
+        daily_record_repository: RestaurantDailyRecordRepository,
+        inventory_repository: RestaurantInventoryRepository,
+        chat_repository: RestaurantChatRepository,
+        insight_repository: RestaurantInsightRepository,
         openai_service: OpenAIOperationsService,
     ) -> None:
         self.user_repository = user_repository
@@ -86,7 +88,7 @@ class MobileOperationsService(BaseService):
         self.insight_repository = insight_repository
         self.openai_service = openai_service
 
-    async def get_home(self, current_user: dict) -> MobileHomeResponse:
+    async def get_home(self, current_user: dict) -> RestaurantHomeResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
@@ -94,7 +96,7 @@ class MobileOperationsService(BaseService):
         insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=daily_records, expenses=expenses)
         metrics_context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
         recent_activity = self._build_recent_activity(daily_records=daily_records, expenses=expenses, cash_deposits=cash_deposits)
-        return MobileHomeResponse(
+        return RestaurantHomeResponse(
             greeting_name=current_user["full_name"].split()[0],
             restaurant_name=current_user.get("restaurant_name"),
             preferred_language=str(current_user.get("preferred_language", "en")),
@@ -360,15 +362,61 @@ class MobileOperationsService(BaseService):
             document = await self.daily_record_repository.create(final_payload)
         return self._to_daily_data_response(document)
 
-    async def list_daily_data(self, current_user: dict, *, page: int, page_size: int) -> DailyDataListResponse:
+    async def list_daily_data(self, current_user: dict, *, page: int, page_size: int, view: str, reference_date: date | None) -> DailyDataListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        items, total = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=page, page_size=page_size)
-        return DailyDataListResponse(items=[self._to_daily_data_response(item) for item in items], **build_pagination_meta(total=total, page=page, page_size=page_size))
+        anchor_date = reference_date or datetime.now(UTC).date()
+        start_date: date | None = None
+        end_date: date | None = None
+        if view == "week":
+            start_date = anchor_date - timedelta(days=anchor_date.weekday())
+            end_date = start_date + timedelta(days=6)
+        elif view == "month":
+            start_date = anchor_date.replace(day=1)
+            next_month = (start_date.replace(day=28) + timedelta(days=4)).replace(day=1)
+            end_date = next_month - timedelta(days=1)
+        all_items, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        serialized_all_items = self.serialize_list(all_items)
+        filtered_items = serialized_all_items
+        if start_date or end_date:
+            filtered_items = []
+            for item in serialized_all_items:
+                item_date = datetime.fromisoformat(item["business_date"]).date()
+                if start_date and item_date < start_date:
+                    continue
+                if end_date and item_date > end_date:
+                    continue
+                filtered_items.append(item)
+        total = len(filtered_items)
+        page_start = (page - 1) * page_size
+        page_end = page_start + page_size
+        page_items = filtered_items[page_start:page_end]
+        latest_item = page_items[0] if page_items else None
+        revenue_label = "Today's Revenue" if view == "date" else ("This Week Revenue" if view == "week" else "This Month Revenue")
+        expense_label = "Total Expenses" if view == "date" else ("This Week Expenses" if view == "week" else "This Month Expenses")
+        profit_label = "Profit" if view == "date" else ("This Week Profit" if view == "week" else "This Month Profit")
+        summary_cards = [
+            DailyDataSummaryCardResponse(label=revenue_label, value=float(latest_item.get("total_revenue", 0)) if latest_item else 0.0, value_prefix="EUR"),
+            DailyDataSummaryCardResponse(label=expense_label, value=float(latest_item.get("total_expenses", 0)) if latest_item else 0.0, value_prefix="EUR"),
+            DailyDataSummaryCardResponse(label=profit_label, value=float(latest_item.get("profit", 0)) if latest_item else 0.0, value_prefix="EUR"),
+            DailyDataSummaryCardResponse(label="Total Covers", value=float((latest_item.get("lunch_covers", 0) if latest_item else 0) + (latest_item.get("dinner_covers", 0) if latest_item else 0))),
+            DailyDataSummaryCardResponse(label="Avg. Rev/Cover", value=float(latest_item.get("avg_revenue_per_cover", 0)) if latest_item else 0.0, value_prefix="USD"),
+        ]
+        return DailyDataListResponse(
+            active_view=view,
+            summary_cards=summary_cards,
+            items=[self._to_daily_data_list_item(item, anchor_date=anchor_date) for item in page_items],
+            **build_pagination_meta(total=total, page=page, page_size=page_size),
+        )
 
     async def get_daily_data_detail(self, current_user: dict, record_id: str) -> DailyDataResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         record = await self.daily_record_repository.get_scoped_by_id(record_id, scope_id)
         return self._to_daily_data_response(record)
+
+    async def delete_daily_data(self, current_user: dict, record_id: str) -> None:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        record = await self.daily_record_repository.get_scoped_by_id(record_id, scope_id)
+        await self.daily_record_repository.delete(record["_id"])
 
     async def create_inventory_item(self, current_user: dict, payload: Any) -> InventoryItemResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -456,9 +504,9 @@ class MobileOperationsService(BaseService):
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
         return ChatConversationResponse(messages=[self._to_chat_message_response(item) for item in items])
 
-    async def get_profile(self, current_user: dict) -> MobileProfileResponse:
+    async def get_profile(self, current_user: dict) -> RestaurantProfileResponse:
         serialized = self.serialize(current_user)
-        return MobileProfileResponse(
+        return RestaurantProfileResponse(
             full_name=serialized["full_name"],
             email=serialized["email"],
             phone=serialized.get("phone"),
@@ -467,7 +515,7 @@ class MobileOperationsService(BaseService):
             preferred_language=serialized.get("preferred_language", "en"),
         )
 
-    async def update_profile(self, current_user: dict, payload: MobileProfileUpdateRequest) -> MobileProfileResponse:
+    async def update_profile(self, current_user: dict, payload: RestaurantProfileUpdateRequest) -> RestaurantProfileResponse:
         updates = payload.model_dump(exclude_none=True)
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
         return await self.get_profile(user)
@@ -671,6 +719,7 @@ class MobileOperationsService(BaseService):
 
     def _to_daily_data_response(self, record: dict) -> DailyDataResponse:
         serialized = self.serialize(record)
+        total_covers = int(serialized.get("lunch_covers", 0) + serialized.get("dinner_covers", 0))
         return DailyDataResponse(
             id=serialized["id"],
             business_date=serialized["business_date"],
@@ -680,6 +729,28 @@ class MobileOperationsService(BaseService):
             profit=serialized["profit"],
             lunch_covers=serialized.get("lunch_covers", 0),
             dinner_covers=serialized.get("dinner_covers", 0),
+            total_covers=total_covers,
+            avg_revenue_per_cover=serialized.get("avg_revenue_per_cover", 0.0),
+            created_at=serialized["created_at"],
+        )
+
+    def _to_daily_data_list_item(self, record: dict, *, anchor_date: date | None = None) -> DailyDataListItemResponse:
+        serialized = self.serialize(record)
+        total_covers = int(serialized.get("lunch_covers", 0) + serialized.get("dinner_covers", 0))
+        business_date = datetime.fromisoformat(serialized["business_date"]).date()
+        anchor = anchor_date or datetime.now(UTC).date()
+        if business_date == anchor:
+            day_label = "TODAY"
+        elif business_date == anchor - timedelta(days=1):
+            day_label = "YESTERDAY"
+        else:
+            day_label = business_date.strftime("%A").upper()
+        return DailyDataListItemResponse(
+            id=serialized["id"],
+            business_date=serialized["business_date"],
+            day_label=day_label,
+            total_revenue=serialized["total_revenue"],
+            total_covers=total_covers,
             avg_revenue_per_cover=serialized.get("avg_revenue_per_cover", 0.0),
             created_at=serialized["created_at"],
         )

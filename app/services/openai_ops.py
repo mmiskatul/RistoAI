@@ -73,7 +73,7 @@ class OpenAIOperationsService:
                         {
                             "type": "input_text",
                             "text": (
-                                "You are an operations copilot for a restaurant back office mobile app. "
+                                "You are an operations copilot for a restaurant back office app. "
                                 "Keep replies concise, practical, and grounded in the supplied metrics."
                             ),
                         }

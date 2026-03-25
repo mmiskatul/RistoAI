@@ -47,7 +47,7 @@ class InsightSummaryResponse(BaseSchema):
     metric_caption: str
 
 
-class MobileHomeResponse(BaseSchema):
+class RestaurantHomeResponse(BaseSchema):
     greeting_name: str
     restaurant_name: str | None = None
     preferred_language: str
@@ -275,16 +275,38 @@ class DailyDataResponse(BaseSchema):
     profit: float
     lunch_covers: int
     dinner_covers: int
+    total_covers: int
+    avg_revenue_per_cover: float
+    created_at: str
+
+
+class DailyDataSummaryCardResponse(BaseSchema):
+    label: str
+    value: float
+    value_prefix: str | None = None
+
+
+class DailyDataListItemResponse(BaseSchema):
+    id: str
+    business_date: str
+    day_label: str
+    total_revenue: float
+    total_covers: int
     avg_revenue_per_cover: float
     created_at: str
 
 
 class DailyDataListResponse(BaseSchema):
+    page_title: str = "Daily Data Management"
+    subtitle: str = "Track and manage your restaurant performance"
+    view_options: list[str] = Field(default_factory=lambda: ["date", "week", "month"])
+    active_view: Literal["date", "week", "month"] = "date"
+    summary_cards: list[DailyDataSummaryCardResponse]
     total: int
     page: int
     page_size: int
     pages: int
-    items: list[DailyDataResponse]
+    items: list[DailyDataListItemResponse]
 
 
 class InventoryCreateRequest(BaseSchema):
@@ -362,7 +384,7 @@ class ChatConversationResponse(BaseSchema):
     messages: list[ChatMessageResponse]
 
 
-class MobileProfileResponse(BaseSchema):
+class RestaurantProfileResponse(BaseSchema):
     full_name: str
     email: str
     phone: str | None = None
@@ -371,7 +393,7 @@ class MobileProfileResponse(BaseSchema):
     preferred_language: str
 
 
-class MobileProfileUpdateRequest(BaseSchema):
+class RestaurantProfileUpdateRequest(BaseSchema):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     phone: str | None = Field(default=None, max_length=30)
     restaurant_name: str | None = Field(default=None, max_length=120)

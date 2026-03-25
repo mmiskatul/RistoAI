@@ -6,14 +6,14 @@ from app.config.settings import get_settings
 from app.db.mongodb import get_database
 from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.coupon import CouponRepository
-from app.repositories.mobile_ops import (
-    MobileCashDepositRepository,
-    MobileChatRepository,
-    MobileDailyRecordRepository,
-    MobileDocumentRepository,
-    MobileExpenseRepository,
-    MobileInsightRepository,
-    MobileInventoryRepository,
+from app.repositories.restaurant_ops import (
+    RestaurantCashDepositRepository,
+    RestaurantChatRepository,
+    RestaurantDailyRecordRepository,
+    RestaurantDocumentRepository,
+    RestaurantExpenseRepository,
+    RestaurantInsightRepository,
+    RestaurantInventoryRepository,
 )
 from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.subscription_plan import SubscriptionPlanRepository
@@ -23,7 +23,7 @@ from app.repositories.user_subscription import UserSubscriptionRepository
 from app.services.auth import AuthService
 from app.services.dashboard import DashboardService
 from app.services.email import EmailService
-from app.services.mobile import MobileOperationsService
+from app.services.restaurant import RestaurantOperationsService
 from app.services.onboarding import OnboardingService
 from app.services.openai_ops import OpenAIOperationsService
 from app.services.subscription import SubscriptionService
@@ -55,16 +55,16 @@ async def get_support_service(db=Depends(get_database)) -> SupportService:
     return SupportService(SupportTicketRepository(db))
 
 
-async def get_mobile_operations_service(db=Depends(get_database)) -> MobileOperationsService:
-    return MobileOperationsService(
+async def get_restaurant_operations_service(db=Depends(get_database)) -> RestaurantOperationsService:
+    return RestaurantOperationsService(
         UserRepository(db),
-        MobileDocumentRepository(db),
-        MobileExpenseRepository(db),
-        MobileCashDepositRepository(db),
-        MobileDailyRecordRepository(db),
-        MobileInventoryRepository(db),
-        MobileChatRepository(db),
-        MobileInsightRepository(db),
+        RestaurantDocumentRepository(db),
+        RestaurantExpenseRepository(db),
+        RestaurantCashDepositRepository(db),
+        RestaurantDailyRecordRepository(db),
+        RestaurantInventoryRepository(db),
+        RestaurantChatRepository(db),
+        RestaurantInsightRepository(db),
         OpenAIOperationsService(),
     )
 
