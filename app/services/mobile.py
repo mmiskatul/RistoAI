@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -179,13 +178,14 @@ class MobileOperationsService(BaseService):
         total_amount = extraction.get("total_amount")
         if total_amount is None:
             total_amount = round(sum(float(item.get("total_price", 0)) for item in line_items), 2)
+        now = datetime.now(UTC)
         document = await self.document_repository.create(
             {
                 "tenant_id": scope_id,
                 "supplier_name": extraction.get("supplier_name") or "Unknown Supplier",
                 "invoice_number": extraction.get("invoice_number"),
                 "invoice_date": extraction.get("invoice_date"),
-                "upload_date": datetime.now(UTC),
+                "upload_date": now,
                 "total_amount": float(total_amount),
                 "currency": extraction.get("currency", "EUR"),
                 "status": "pending_review",
@@ -194,6 +194,10 @@ class MobileOperationsService(BaseService):
                 "source_file_name": file_name,
                 "line_items": line_items,
                 "created_by_user_id": str(current_user["_id"]),
+                "last_edited_by_user_id": str(current_user["_id"]),
+                "last_edited_at": now,
+                "confirmed_by_user_id": None,
+                "confirmed_at": None,
             }
         )
         return self._to_document_detail(document)
@@ -201,12 +205,7 @@ class MobileOperationsService(BaseService):
     async def confirm_document(self, current_user: dict, document_id: str, payload: DocumentConfirmRequest) -> DocumentDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
-        updates = payload.model_dump(exclude_none=True)
-        if "invoice_date" in updates and updates["invoice_date"] is not None:
-            updates["invoice_date"] = updates["invoice_date"].isoformat()
-        if "line_items" in updates and updates["line_items"] is not None:
-            updates["line_items"] = [item.model_dump(mode="json") for item in payload.line_items or []]
-        updates["status"] = "processed"
+        updates = self._build_document_updates(current_user=current_user, payload=payload, mark_processed=True)
         updated = await self.document_repository.update(document["_id"], updates)
         return self._to_document_detail(updated)
 
@@ -223,11 +222,7 @@ class MobileOperationsService(BaseService):
     async def update_document(self, current_user: dict, document_id: str, payload: DocumentConfirmRequest) -> DocumentDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
-        updates = payload.model_dump(exclude_none=True)
-        if "invoice_date" in updates and updates["invoice_date"] is not None:
-            updates["invoice_date"] = updates["invoice_date"].isoformat()
-        if "line_items" in updates and updates["line_items"] is not None:
-            updates["line_items"] = [item.model_dump(mode="json") for item in payload.line_items or []]
+        updates = self._build_document_updates(current_user=current_user, payload=payload, mark_processed=False)
         updated = await self.document_repository.update(document["_id"], updates)
         return self._to_document_detail(updated)
 
@@ -582,6 +577,21 @@ class MobileOperationsService(BaseService):
             return "low_stock"
         return "in_stock"
 
+    def _build_document_updates(self, *, current_user: dict, payload: DocumentConfirmRequest, mark_processed: bool) -> dict[str, Any]:
+        updates = payload.model_dump(exclude_none=True)
+        if "invoice_date" in updates and updates["invoice_date"] is not None:
+            updates["invoice_date"] = updates["invoice_date"].isoformat()
+        if "line_items" in updates and updates["line_items"] is not None:
+            updates["line_items"] = [item.model_dump(mode="json") for item in payload.line_items or []]
+        now = datetime.now(UTC)
+        updates["last_edited_by_user_id"] = str(current_user["_id"])
+        updates["last_edited_at"] = now
+        if mark_processed:
+            updates["status"] = "processed"
+            updates["confirmed_by_user_id"] = str(current_user["_id"])
+            updates["confirmed_at"] = now
+        return updates
+
     def _build_other_related_insights(self, insight: dict) -> list[dict[str, str | None]]:
         related_items: list[dict[str, str | None]] = []
         for metric in insight.get("related_metrics", []):
@@ -609,6 +619,9 @@ class MobileOperationsService(BaseService):
             status=serialized["status"],
             line_item_count=len(serialized.get("line_items", [])),
             source_file_name=serialized["source_file_name"],
+            created_by_user_id=serialized.get("created_by_user_id"),
+            last_edited_by_user_id=serialized.get("last_edited_by_user_id"),
+            confirmed_at=serialized.get("confirmed_at"),
         )
 
     def _to_document_detail(self, document: dict) -> DocumentDetailResponse:
@@ -625,6 +638,13 @@ class MobileOperationsService(BaseService):
             ai_summary=serialized.get("ai_summary", ""),
             source_file_name=serialized["source_file_name"],
             line_items=[DocumentLineItemSchema(**item) for item in serialized.get("line_items", [])],
+            created_at=serialized["created_at"],
+            updated_at=serialized["updated_at"],
+            created_by_user_id=serialized.get("created_by_user_id"),
+            last_edited_by_user_id=serialized.get("last_edited_by_user_id"),
+            last_edited_at=serialized.get("last_edited_at"),
+            confirmed_by_user_id=serialized.get("confirmed_by_user_id"),
+            confirmed_at=serialized.get("confirmed_at"),
         )
 
     def _to_expense_response(self, expense: dict) -> ExpenseResponse:

@@ -29,6 +29,26 @@ def test_mobile_document_upload_extract_and_confirm_flow(client, app):
     assert len(upload_payload["line_items"]) == 3
 
     document_id = upload_payload["id"]
+
+    edit_response = client.patch(
+        f"/api/v1/restaurant/documents/{document_id}",
+        headers=headers,
+        json={
+            "supplier_name": "Bakery Goods Co",
+            "invoice_date": "2026-03-10",
+            "line_items": [
+                {"product_name": "Sourdough Loaf", "quantity": 20, "unit_price": 5.0, "total_price": 100.0},
+                {"product_name": "Pastry Flour (25kg)", "quantity": 5, "unit_price": 45.0, "total_price": 225.0},
+                {"product_name": "Butter (Case)", "quantity": 2, "unit_price": 50.0, "total_price": 100.0}
+            ],
+            "total_amount": 425.0,
+        },
+    )
+    assert edit_response.status_code == 200
+    assert edit_response.json()["status"] == "pending_review"
+    assert edit_response.json()["supplier_name"] == "Bakery Goods Co"
+    assert edit_response.json()["last_edited_by_user_id"]
+
     confirm_response = client.post(
         f"/api/v1/restaurant/documents/{document_id}/confirm",
         headers=headers,
@@ -37,11 +57,21 @@ def test_mobile_document_upload_extract_and_confirm_flow(client, app):
     assert confirm_response.status_code == 200
     assert confirm_response.json()["status"] == "processed"
     assert confirm_response.json()["supplier_name"] == "Bakery Goods Co"
+    assert confirm_response.json()["confirmed_by_user_id"]
+    assert confirm_response.json()["confirmed_at"]
+    assert confirm_response.json()["invoice_date"] == "2026-03-10"
 
     list_response = client.get("/api/v1/restaurant/documents", headers=headers)
     assert list_response.status_code == 200
     assert list_response.json()["total"] == 1
     assert list_response.json()["items"][0]["source_file_name"] == "invoice-march.png"
+    assert list_response.json()["items"][0]["confirmed_at"]
+
+    detail_response = client.get(f"/api/v1/restaurant/documents/{document_id}", headers=headers)
+    assert detail_response.status_code == 200
+    assert detail_response.json()["created_by_user_id"]
+    assert detail_response.json()["last_edited_by_user_id"]
+    assert detail_response.json()["confirmed_by_user_id"]
 
 
 def test_mobile_endpoints_are_scoped_per_user(client, app):

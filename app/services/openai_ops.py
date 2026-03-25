@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +10,8 @@ from typing import Any
 import httpx
 
 from app.config.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIOperationsService:
@@ -29,40 +32,20 @@ class OpenAIOperationsService:
         if not self.enabled:
             return self._fallback_invoice(file_name=file_name)
 
-        payload = {
-            "model": self.settings.openai_model,
-            "input": [
-                {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": (
-                                "Extract the supplier invoice into JSON with keys: supplier_name, invoice_number, "
-                                "invoice_date, total_amount, currency, ai_summary, and line_items. "
-                                "Each line item must include product_name, quantity, unit_price, total_price. "
-                                "Return only JSON."
-                            ),
-                        }
-                    ],
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": f"Filename: {file_name}. Content type: {content_type}."},
-                        {
-                            "type": "input_file",
-                            "filename": file_name,
-                            "file_data": base64.b64encode(file_bytes).decode("utf-8"),
-                        },
-                    ],
-                },
-            ],
-        }
-        response_payload = await self._responses_create(payload)
-        parsed = self._try_parse_json(response_payload.get("output_text", ""))
-        if parsed:
-            return parsed
+        try:
+            payload = await self._build_invoice_payload(
+                file_name=file_name,
+                content_type=content_type,
+                file_bytes=file_bytes,
+            )
+            response_payload = await self._responses_create(payload)
+            parsed = self._try_parse_json(response_payload.get("output_text", ""))
+            if parsed:
+                return parsed
+        except httpx.HTTPStatusError as exc:
+            logger.warning("OpenAI invoice extraction rejected request for %s (%s): %s", file_name, content_type, exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("OpenAI invoice extraction failed for %s", file_name, exc_info=exc)
         return self._fallback_invoice(file_name=file_name)
 
     async def generate_chat_reply(
@@ -111,8 +94,17 @@ class OpenAIOperationsService:
                 },
             ],
         }
-        response_payload = await self._responses_create(payload)
-        return response_payload.get("output_text") or "I could not generate a response."
+        try:
+            response_payload = await self._responses_create(payload)
+            return response_payload.get("output_text") or "I could not generate a response."
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("OpenAI chat generation failed", exc_info=exc)
+            revenue = metrics_context.get("revenue_total", 0.0)
+            expenses = metrics_context.get("expenses_total", 0.0)
+            return (
+                f"Current revenue is EUR {revenue:,.2f} and expenses are EUR {expenses:,.2f}. "
+                f"Focus on supplier spend, daily cash reconciliation, and the weakest weekday trend."
+            )
 
     async def _responses_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=45.0) as client:
@@ -128,6 +120,61 @@ class OpenAIOperationsService:
             data = response.json()
             data["output_text"] = self._extract_output_text(data)
             return data
+
+    async def _upload_file(self, *, file_name: str, file_bytes: bytes) -> str:
+        async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=45.0) as client:
+            response = await client.post(
+                "/files",
+                headers={"Authorization": f"Bearer {self.settings.openai_api_key}"},
+                data={"purpose": "user_data"},
+                files={"file": (file_name, file_bytes)},
+            )
+            response.raise_for_status()
+            return response.json()["id"]
+
+    async def _build_invoice_payload(
+        self,
+        *,
+        file_name: str,
+        content_type: str,
+        file_bytes: bytes,
+    ) -> dict[str, Any]:
+        system_prompt = (
+            "Extract the supplier invoice into JSON with keys: supplier_name, invoice_number, "
+            "invoice_date, total_amount, currency, ai_summary, and line_items. "
+            "Each line item must include product_name, quantity, unit_price, total_price. "
+            "Return only valid JSON."
+        )
+        user_content: list[dict[str, Any]] = [
+            {
+                "type": "input_text",
+                "text": f"Filename: {file_name}. Content type: {content_type}. Extract invoice data.",
+            }
+        ]
+
+        if content_type.startswith("image/"):
+            data_url = f"data:{content_type};base64,{base64.b64encode(file_bytes).decode('utf-8')}"
+            user_content.append({"type": "input_image", "image_url": data_url, "detail": "high"})
+        elif content_type in {"text/csv", "application/csv"}:
+            csv_text = file_bytes.decode("utf-8", errors="replace")
+            user_content.append({"type": "input_text", "text": f"CSV invoice content:\n{csv_text[:12000]}"})
+        else:
+            file_id = await self._upload_file(file_name=file_name, file_bytes=file_bytes)
+            user_content.append({"type": "input_file", "file_id": file_id})
+
+        return {
+            "model": self.settings.openai_model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": system_prompt}],
+                },
+                {
+                    "role": "user",
+                    "content": user_content,
+                },
+            ],
+        }
 
     @staticmethod
     def _extract_output_text(payload: dict[str, Any]) -> str:

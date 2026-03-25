@@ -127,6 +127,9 @@ class DocumentListItemResponse(BaseSchema):
     status: str
     line_item_count: int
     source_file_name: str
+    created_by_user_id: str | None = None
+    last_edited_by_user_id: str | None = None
+    confirmed_at: str | None = None
 
 
 class DocumentDetailResponse(BaseSchema):
@@ -141,6 +144,13 @@ class DocumentDetailResponse(BaseSchema):
     ai_summary: str
     source_file_name: str
     line_items: list[DocumentLineItemSchema]
+    created_at: str
+    updated_at: str
+    created_by_user_id: str | None = None
+    last_edited_by_user_id: str | None = None
+    last_edited_at: str | None = None
+    confirmed_by_user_id: str | None = None
+    confirmed_at: str | None = None
 
 
 class DocumentListResponse(BaseSchema):

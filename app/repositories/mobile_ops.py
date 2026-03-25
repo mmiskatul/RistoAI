@@ -55,7 +55,7 @@ class MobileDocumentRepository(ScopedRepository):
                 {"invoice_number": regex},
                 {"source_file_name": regex},
             ]
-        return await self.get_multi(filters=filters, page=page, page_size=page_size)
+        return await self.get_multi(filters=filters, page=page, page_size=page_size, sort=[("invoice_date", DESCENDING), ("created_at", DESCENDING)])
 
 
 class MobileExpenseRepository(ScopedRepository):
