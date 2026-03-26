@@ -50,7 +50,7 @@ class LoginRequest(BaseSchema):
 
 class VerifyCodeRequest(BaseSchema):
     email: EmailStr
-    code: str = Field(min_length=6, max_length=6)
+    code: str = Field(min_length=4, max_length=4)
 
     @field_validator('code')
     @classmethod
@@ -66,7 +66,7 @@ class ForgotPasswordRequest(BaseSchema):
 
 class ResetPasswordRequest(BaseSchema):
     email: EmailStr
-    code: str = Field(min_length=6, max_length=6)
+    code: str = Field(min_length=4, max_length=4)
     new_password: str = Field(min_length=8, max_length=72)
     confirm_password: str = Field(min_length=8, max_length=72)
 

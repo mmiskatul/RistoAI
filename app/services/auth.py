@@ -188,7 +188,7 @@ class AuthService(BaseService):
         return user
 
     async def _issue_challenge(self, *, user: dict, purpose: str) -> AuthChallengeResponse:
-        code = f'{secrets.randbelow(10**6):06d}'
+        code = f'{secrets.randbelow(10**4):04d}'
         await self.auth_code_repository.create_code(
             user_id=user['_id'],
             email=user['email'],

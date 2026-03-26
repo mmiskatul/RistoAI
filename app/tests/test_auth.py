@@ -89,7 +89,7 @@ def test_reject_invalid_restaurant_verification_code(client, owner_credentials):
     client.post('/api/v1/auth/restaurant/register', json=owner_credentials)
     response = client.post(
         '/api/v1/auth/restaurant/verify-registration',
-        json={'email': owner_credentials['email'], 'code': '000000'},
+        json={'email': owner_credentials['email'], 'code': '0000'},
     )
     assert response.status_code == 422
 
