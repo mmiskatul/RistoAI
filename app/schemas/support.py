@@ -41,6 +41,7 @@ class SupportTicketMessageResponse(BaseSchema):
 class SupportManagementFilterChipResponse(BaseSchema):
     key: str
     label: str
+    is_active: bool = False
 
 
 class SupportManagementSummaryCardResponse(BaseSchema):
@@ -48,6 +49,8 @@ class SupportManagementSummaryCardResponse(BaseSchema):
     label: str
     value: int
     value_formatted: str
+    subtitle: str | None = None
+    icon_key: str | None = None
 
 
 class SupportManagementTableColumnResponse(BaseSchema):
@@ -60,6 +63,7 @@ class SupportManagementRowActionResponse(BaseSchema):
     label: str
     method: str
     endpoint: str
+    variant: str | None = None
 
 
 class SupportTicketListItemResponse(BaseSchema):
@@ -74,9 +78,11 @@ class SupportTicketListItemResponse(BaseSchema):
     user_restaurant_label: str | None = None
     issue_subject_label: str | None = None
     status_label: str | None = None
+    status_variant: str | None = None
     priority_label: str | None = None
     date_formatted: str | None = None
     view_endpoint: str | None = None
+    action_button_label: str | None = None
     actions_menu: list[SupportManagementRowActionResponse] = Field(default_factory=list)
 
 
@@ -86,9 +92,9 @@ class SupportTicketSummaryResponse(BaseSchema):
 
 
 class SupportTicketManagementResponse(BaseSchema):
-    page_title: str = "Support Management"
-    page_subtitle: str = "Track and resolve restaurant support requests across the platform."
-    search_placeholder: str = "Search tickets, restaurants..."
+    page_title: str = "Support"
+    page_subtitle: str = "Manage support requests from users."
+    search_placeholder: str = "Search support requests..."
     filter_button_label: str = "Filters"
     filter_chips: list[SupportManagementFilterChipResponse] = Field(default_factory=list)
     summary_cards: list[SupportManagementSummaryCardResponse] = Field(default_factory=list)

@@ -46,7 +46,7 @@ async def get_user_support_ticket_detail(
     return await service.get_user_ticket_detail(current_user, ticket_id)
 
 
-@router.get('/management', response_model=SupportTicketManagementResponse, tags=['Support Management'])
+@router.get('/management', response_model=SupportTicketManagementResponse, tags=['Support Management'], summary='Admin Support Management', description='Returns the admin support page payload including ticket summary cards, status tabs, search metadata, and support table rows.')
 async def get_support_management(
     query: SupportTicketQuery = Depends(),
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -55,7 +55,7 @@ async def get_support_management(
     return await service.get_management_page(query)
 
 
-@router.get('/tickets/{ticket_id}', response_model=SupportTicketDetailResponse, tags=['Support Management'])
+@router.get('/tickets/{ticket_id}', response_model=SupportTicketDetailResponse, tags=['Support Management'], summary='Support Ticket Detail', description='Returns the full support ticket conversation and customer details for the selected ticket.')
 async def get_support_ticket_detail(
     ticket_id: str,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -64,7 +64,7 @@ async def get_support_ticket_detail(
     return await service.get_ticket_detail(ticket_id)
 
 
-@router.post('/tickets/{ticket_id}/reply', response_model=SupportTicketActionResponse, tags=['Support Management'])
+@router.post('/tickets/{ticket_id}/reply', response_model=SupportTicketActionResponse, tags=['Support Management'], summary='Reply To Support Ticket', description='Adds an admin reply to the selected support ticket conversation.')
 async def reply_support_ticket(
     ticket_id: str,
     payload: SupportTicketReplyRequest,
@@ -74,7 +74,7 @@ async def reply_support_ticket(
     return await service.reply_to_ticket(ticket_id, current_user, payload)
 
 
-@router.post('/tickets/{ticket_id}/resolve', response_model=SupportTicketActionResponse, tags=['Support Management'])
+@router.post('/tickets/{ticket_id}/resolve', response_model=SupportTicketActionResponse, tags=['Support Management'], summary='Resolve Support Ticket', description='Marks the selected support ticket as resolved.')
 async def resolve_support_ticket(
     ticket_id: str,
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),

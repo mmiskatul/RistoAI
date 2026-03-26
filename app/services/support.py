@@ -73,25 +73,28 @@ class SupportService(BaseService):
             open_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.OPEN),
             resolved_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.RESOLVED),
         )
+        start = ((query.page - 1) * query.page_size) + 1 if total else 0
+        end = min(query.page * query.page_size, total) if total else 0
+        active_filter = str(query.status) if query.status else 'open'
         return SupportTicketManagementResponse(
             filter_chips=[
-                SupportManagementFilterChipResponse(key='all', label='All'),
-                SupportManagementFilterChipResponse(key='open', label='Open'),
-                SupportManagementFilterChipResponse(key='resolved', label='Resolved'),
+                SupportManagementFilterChipResponse(key='open', label='Open', is_active=active_filter == 'open'),
+                SupportManagementFilterChipResponse(key='resolved', label='Resolved', is_active=active_filter == 'resolved'),
+                SupportManagementFilterChipResponse(key='all', label='All Tickets', is_active=active_filter == 'all'),
             ],
             summary_cards=[
-                SupportManagementSummaryCardResponse(key='open_tickets', label='Open Tickets', value=summary.open_tickets, value_formatted=str(summary.open_tickets)),
-                SupportManagementSummaryCardResponse(key='resolved_tickets', label='Resolved Tickets', value=summary.resolved_tickets, value_formatted=str(summary.resolved_tickets)),
+                SupportManagementSummaryCardResponse(key='active_tickets', label='Active Tickets', value=summary.open_tickets, value_formatted=str(summary.open_tickets), subtitle='Active tickets', icon_key='support_open'),
+                SupportManagementSummaryCardResponse(key='tickets_resolved', label='Tickets Resolved', value=summary.resolved_tickets, value_formatted=str(summary.resolved_tickets), subtitle='Tickets resolved', icon_key='support_resolved'),
             ],
             table_columns=[
-                SupportManagementTableColumnResponse(key='user_restaurant', label='User & Restaurant'),
-                SupportManagementTableColumnResponse(key='issue_subject', label='Issue'),
+                SupportManagementTableColumnResponse(key='user_name', label='User Name'),
+                SupportManagementTableColumnResponse(key='restaurant', label='Restaurant'),
+                SupportManagementTableColumnResponse(key='issue_subject', label='Issue/Subject'),
                 SupportManagementTableColumnResponse(key='status', label='Status'),
-                SupportManagementTableColumnResponse(key='priority', label='Priority'),
                 SupportManagementTableColumnResponse(key='date', label='Date'),
                 SupportManagementTableColumnResponse(key='actions', label='Actions'),
             ],
-            pagination_label=f"Showing 1 to {len(tickets)} of {total} tickets" if total else 'No support tickets found',
+            pagination_label=f"Showing {start}-{end} of {total} tickets" if total else 'Showing 0-0 of 0 tickets',
             summary=summary,
             items=[self._to_ticket_list_item(ticket) for ticket in tickets],
             **pagination,
@@ -155,9 +158,11 @@ class SupportService(BaseService):
             user_restaurant_label=serialized['user_name'],
             issue_subject_label=serialized['subject'],
             status_label=str(serialized['status']).capitalize(),
+            status_variant=self._status_variant(serialized['status']),
             priority_label=str(serialized['priority']).capitalize(),
             date_formatted=self._format_date(serialized['created_at']),
             view_endpoint=f"/api/v1/support/tickets/{serialized['id']}",
+            action_button_label='View Ticket',
             actions_menu=self._build_row_actions(serialized['id'], serialized['status']),
         )
 
@@ -199,7 +204,13 @@ class SupportService(BaseService):
 
     @staticmethod
     def _build_row_actions(ticket_id: str, status: str) -> list[SupportManagementRowActionResponse]:
-        actions = [SupportManagementRowActionResponse(key='view', label='View', method='GET', endpoint=f'/api/v1/support/tickets/{ticket_id}')]
+        actions = [SupportManagementRowActionResponse(key='view', label='View Ticket', method='GET', endpoint=f'/api/v1/support/tickets/{ticket_id}', variant='outline')]
         if status != SupportTicketStatus.RESOLVED:
-            actions.append(SupportManagementRowActionResponse(key='resolve', label='Resolve Ticket', method='POST', endpoint=f'/api/v1/support/tickets/{ticket_id}/resolve'))
+            actions.append(SupportManagementRowActionResponse(key='resolve', label='Resolve Ticket', method='POST', endpoint=f'/api/v1/support/tickets/{ticket_id}/resolve', variant='ghost'))
         return actions
+
+    @staticmethod
+    def _status_variant(status: str) -> str:
+        if status == SupportTicketStatus.RESOLVED:
+            return 'success'
+        return 'warning'
