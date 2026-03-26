@@ -169,4 +169,8 @@ def create_socketio_app(fastapi_app: FastAPI):
     if not gateway.enabled:
         logger.warning("python-socketio is not installed; Socket.IO chat is disabled")
         return fastapi_app
-    return gateway.wrap_app(fastapi_app)
+    wrapped_app = gateway.wrap_app(fastapi_app)
+    setattr(wrapped_app, "fastapi_app", fastapi_app)
+    setattr(wrapped_app, "dependency_overrides", fastapi_app.dependency_overrides)
+    setattr(wrapped_app, "state", fastapi_app.state)
+    return wrapped_app

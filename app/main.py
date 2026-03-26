@@ -183,6 +183,8 @@ def create_fastapi_app(*, testing: bool = False) -> FastAPI:
 
 def create_app(*, testing: bool = False):
     fastapi_app = create_fastapi_app(testing=testing)
+    if testing:
+        return fastapi_app
     return create_socketio_app(fastapi_app)
 
 
