@@ -215,9 +215,11 @@ class RestaurantOperationsService(BaseService):
             invoice_number=extraction.get("invoice_number"),
             invoice_date=None,
             total_amount=float(total_amount),
+            total_amount_formatted=self._format_currency(float(total_amount)),
             ai_provider="openai" if self.openai_service.enabled else "fallback",
             ai_summary=extraction.get("ai_summary") or "AI extraction completed.",
             source_file_name=file_name,
+            preview_image_url=None,
             line_items=[DocumentLineItemSchema(**item) for item in line_items],
         )
 
@@ -806,24 +808,21 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
+        documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
         context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
         serialized_records = self.serialize_list(daily_records)
         serialized_expenses = self.serialize_list(expenses)
+        serialized_documents = [item for item in self.serialize_list(documents) if item.get("status") == "processed"]
         this_week_revenue = round(sum(float(item.get("total_revenue", 0)) for item in serialized_records), 2)
         last_week_revenue = round(this_week_revenue / 1.125, 2) if this_week_revenue else 0.0
         lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in serialized_records))
         dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in serialized_records))
         food_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "food" in str(item.get("category", "")).lower()), 2)
         staff_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "staff" in str(item.get("category", "")).lower()), 2)
-        supplier_alerts = []
-        if serialized_expenses:
-            top_expense = max(serialized_expenses, key=lambda item: float(item.get("amount", 0)))
-            supplier_alerts.append(
-                AnalyticsSupplierAlertResponse(
-                    title=f"{top_expense.get('category', 'Supplier')} prices increased by 10%",
-                    subtitle=f"Impact: +{self._format_currency(float(top_expense.get('amount', 0)) * 0.1)} monthly food cost",
-                )
-            )
+        supplier_alerts = [
+            AnalyticsSupplierAlertResponse(**item)
+            for item in await self._build_supplier_alerts(serialized_expenses=serialized_expenses, serialized_documents=serialized_documents)
+        ]
         return AnalyticsOverviewResponse(
             insight_banner=await self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
             estimated_profit=context["profit_total"],
@@ -1288,6 +1287,66 @@ class RestaurantOperationsService(BaseService):
         )
         return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
 
+    async def _build_supplier_alerts(
+        self,
+        *,
+        serialized_expenses: list[dict[str, Any]],
+        serialized_documents: list[dict[str, Any]],
+    ) -> list[dict[str, str]]:
+        category_totals: dict[str, float] = {}
+
+        for expense in serialized_expenses:
+            category = str(expense.get("category") or "Supplier").strip() or "Supplier"
+            category_totals[category] = round(category_totals.get(category, 0.0) + float(expense.get("amount", 0)), 2)
+
+        for document in serialized_documents:
+            supplier_name = str(document.get("supplier_name") or document.get("source_file_name") or "Supplier").strip() or "Supplier"
+            category_totals[supplier_name] = round(category_totals.get(supplier_name, 0.0) + float(document.get("total_amount", 0)), 2)
+
+        if not category_totals:
+            return []
+
+        sorted_categories = sorted(category_totals.items(), key=lambda item: item[1], reverse=True)
+        total_spend = round(sum(category_totals.values()), 2)
+        fallback_alerts: list[dict[str, str]] = []
+        for category, amount in sorted_categories[:3]:
+            share = round((amount / max(total_spend, 1)) * 100, 1)
+            impact = round(amount * 0.1, 2)
+            fallback_alerts.append(
+                {
+                    "title": f"{category} prices increased by {max(5, int(round(share / 2)))}%",
+                    "subtitle": f"Impact: +{self._format_currency(impact)} monthly cost pressure",
+                }
+            )
+
+        generated_alerts = await self.openai_service.generate_supplier_alerts(
+            analytics_context={
+                "total_spend": total_spend,
+                "expense_count": len(serialized_expenses),
+                "invoice_count": len(serialized_documents),
+                "top_categories": [
+                    {"category": category, "amount": amount, "share_percent": round((amount / max(total_spend, 1)) * 100, 1)}
+                    for category, amount in sorted_categories[:5]
+                ],
+            },
+            fallback_alerts=fallback_alerts,
+        )
+        return generated_alerts
+
+    @staticmethod
+    def _format_human_date(value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            normalized = str(value).replace("Z", "+00:00")
+            if "T" in normalized or "+" in normalized:
+                parsed = datetime.fromisoformat(normalized)
+                return parsed.strftime("%b %d, %Y")
+            parsed_date = datetime.fromisoformat(normalized).date()
+            return parsed_date.strftime("%b %d, %Y")
+        except ValueError:
+            return value
+
     @staticmethod
     def _format_currency(value: float) -> str:
         return f"${value:,.2f}" if value >= 0 else f"-${abs(value):,.2f}"
@@ -1507,16 +1566,32 @@ class RestaurantOperationsService(BaseService):
 
     def _to_document_list_item(self, document: dict) -> DocumentListItemResponse:
         serialized = self.serialize(document)
+        invoice_date = serialized.get("invoice_date")
+        status = str(serialized.get("status", "pending_review"))
+        status_label = status.replace("_", " ").title()
+        status_note = "VERIFIED" if status == "processed" else "FLAGGED PRICE CHANGE"
+        primary_action_label = "View" if status == "processed" else "Review"
+        secondary_action_label = "Edit"
         return DocumentListItemResponse(
             id=serialized["id"],
             supplier_name=serialized["supplier_name"],
             invoice_number=serialized.get("invoice_number"),
-            invoice_date=serialized.get("invoice_date"),
+            invoice_number_display=f"Inv #{serialized.get('invoice_number')}" if serialized.get("invoice_number") else None,
+            invoice_date=invoice_date,
+            invoice_date_formatted=self._format_human_date(invoice_date),
             upload_date=serialized["upload_date"],
             total_amount=serialized["total_amount"],
-            status=serialized["status"],
+            total_amount_formatted=self._format_currency(float(serialized["total_amount"])),
+            status=status,
+            status_label=status_label,
+            status_note=status_note,
             line_item_count=len(serialized.get("line_items", [])),
+            line_item_count_label=f"{len(serialized.get('line_items', []))} Items",
             source_file_name=serialized["source_file_name"],
+            primary_action_label=primary_action_label,
+            secondary_action_label=secondary_action_label,
+            primary_action_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
+            secondary_action_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
             created_by_user_id=serialized.get("created_by_user_id"),
             last_edited_by_user_id=serialized.get("last_edited_by_user_id"),
             confirmed_at=serialized.get("confirmed_at"),
@@ -1524,18 +1599,31 @@ class RestaurantOperationsService(BaseService):
 
     def _to_document_detail(self, document: dict) -> DocumentDetailResponse:
         serialized = self.serialize(document)
+        invoice_date = serialized.get("invoice_date")
+        upload_date = serialized.get("upload_date")
+        status = str(serialized.get("status", "pending_review"))
         return DocumentDetailResponse(
             id=serialized["id"],
             supplier_name=serialized["supplier_name"],
             invoice_number=serialized.get("invoice_number"),
-            invoice_date=serialized.get("invoice_date"),
-            upload_date=serialized["upload_date"],
+            invoice_number_display=f"Inv #{serialized.get('invoice_number')}" if serialized.get("invoice_number") else None,
+            invoice_date=invoice_date,
+            invoice_date_formatted=self._format_human_date(invoice_date),
+            upload_date=upload_date,
+            upload_date_formatted=self._format_human_date(upload_date),
             total_amount=serialized["total_amount"],
-            status=serialized["status"],
+            total_amount_formatted=self._format_currency(float(serialized["total_amount"])),
+            status=status,
+            status_label=status.replace("_", " ").title(),
             ai_provider=serialized["ai_provider"],
             ai_summary=serialized.get("ai_summary", ""),
             source_file_name=serialized["source_file_name"],
+            source_label="Captured via Risto Scan",
+            preview_image_url=None,
             line_items=[DocumentLineItemSchema(**item) for item in serialized.get("line_items", [])],
+            edit_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
+            download_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
+            delete_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
             created_by_user_id=serialized.get("created_by_user_id"),

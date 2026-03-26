@@ -105,6 +105,114 @@ class OpenAIOperationsService:
             logger.exception("OpenAI business insight generation failed", exc_info=exc)
         return {"title": fallback_title, "subtitle": fallback_subtitle}
 
+    async def generate_supplier_alerts(
+        self,
+        *,
+        analytics_context: dict[str, Any],
+        fallback_alerts: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        if not self.enabled:
+            return fallback_alerts
+
+        payload = {
+            "model": self.settings.openai_model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "You generate concise supplier price alerts for a restaurant analytics dashboard from structured metrics. "
+                                "Return only valid JSON with key alerts. "
+                                "alerts must be an array of 1 to 3 objects, each with title and subtitle. "
+                                "Keep each alert short, numeric when possible, and grounded only in the supplied data."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"Supplier analytics context: {json.dumps(analytics_context)}\n"
+                                f"Fallback alerts: {json.dumps(fallback_alerts)}\n"
+                                "Generate the strongest supplier price alerts for the dashboard."
+                            ),
+                        }
+                    ],
+                },
+            ],
+        }
+        try:
+            response_payload = await self._responses_create(payload)
+            parsed = self._try_parse_json(response_payload.get("output_text", ""))
+            if isinstance(parsed, dict):
+                alerts = parsed.get("alerts")
+                if isinstance(alerts, list):
+                    normalized: list[dict[str, str]] = []
+                    for item in alerts[:3]:
+                        if not isinstance(item, dict):
+                            continue
+                        title = str(item.get("title") or "").strip()
+                        subtitle = str(item.get("subtitle") or "").strip()
+                        if title and subtitle:
+                            normalized.append({"title": title, "subtitle": subtitle})
+                    if normalized:
+                        return normalized
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("OpenAI supplier alert generation failed", exc_info=exc)
+        return fallback_alerts
+
+        payload = {
+            "model": self.settings.openai_model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "You generate one concise restaurant analytics banner from structured business metrics. "
+                                "Return only valid JSON with keys title and subtitle. "
+                                "The title must start with 'Optimization Tip:'. "
+                                "Be specific, numeric when possible, and grounded only in the supplied data."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"Analytics context: {json.dumps(analytics_context)}\n"
+                                f"Fallback title: {fallback_title}\n"
+                                f"Fallback subtitle: {fallback_subtitle}\n"
+                                "Generate the strongest single optimization insight banner."
+                            ),
+                        }
+                    ],
+                },
+            ],
+        }
+        try:
+            response_payload = await self._responses_create(payload)
+            parsed = self._try_parse_json(response_payload.get("output_text", ""))
+            if isinstance(parsed, dict):
+                title = str(parsed.get("title") or "").strip()
+                subtitle = str(parsed.get("subtitle") or "").strip()
+                if title and subtitle:
+                    if not title.startswith("Optimization Tip:"):
+                        title = f"Optimization Tip: {title}"
+                    return {"title": title, "subtitle": subtitle}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("OpenAI business insight generation failed", exc_info=exc)
+        return {"title": fallback_title, "subtitle": fallback_subtitle}
+
     async def generate_chat_reply(
         self,
         *,

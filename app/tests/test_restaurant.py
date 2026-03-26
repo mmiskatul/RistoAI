@@ -27,9 +27,13 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     )
     assert upload_response.status_code == 200
     upload_payload = upload_response.json()
+    assert upload_payload["page_title"] == "Review Extracted Invoice"
+    assert upload_payload["preview_title"] == "Invoice Preview"
+    assert upload_payload["confirm_button_label"] == "Confirm & Save"
     assert upload_payload["supplier_name"] == "Fresh Food Supplier Ltd"
     assert upload_payload["ai_provider"] == "fallback"
     assert upload_payload["invoice_date"] is None
+    assert upload_payload["total_amount_formatted"] == "$165.00"
     assert len(upload_payload["line_items"]) == 3
     assert "id" not in upload_payload
 
@@ -57,9 +61,43 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert confirm_response.json()["confirmed_at"]
     assert confirm_response.json()["invoice_date"] == datetime.now(UTC).date().isoformat()
 
+    assert confirm_response.json()["page_title"] == "Document Details"
+    assert confirm_response.json()["preview_title"] == "Document Preview"
+    assert confirm_response.json()["status_label"] == "Processed"
+    assert confirm_response.json()["edit_button_label"] == "Edit Data"
+    assert confirm_response.json()["download_button_label"] == "Download"
+    assert confirm_response.json()["delete_button_label"] == "Delete Document"
+    assert confirm_response.json()["total_amount_formatted"] == "$425.00"
     assert confirm_response.json()["created_by_user_id"]
     assert confirm_response.json()["last_edited_by_user_id"]
     assert confirm_response.json()["confirmed_by_user_id"]
+
+    documents_response = client.get("/api/v1/restaurant/documents", headers=headers)
+    assert documents_response.status_code == 200
+    documents_payload = documents_response.json()
+    assert documents_payload["page_title"] == "Documents"
+    assert documents_payload["search_placeholder"] == "Search invoices, suppliers..."
+    assert documents_payload["upload_button_label"] == "Upload Invoice"
+    assert documents_payload["ai_banner_title"] == "AI Data Extraction Active"
+    assert documents_payload["recent_documents_title"] == "Recent Documents"
+    assert documents_payload["items"][0]["supplier_name"] == "Bakery Goods Co"
+    assert documents_payload["items"][0]["status_label"] == "Processed"
+    assert documents_payload["items"][0]["primary_action_label"] == "View"
+    assert documents_payload["items"][0]["secondary_action_label"] == "Edit"
+    assert documents_payload["items"][0]["line_item_count_label"] == "3 Items"
+    assert documents_payload["items"][0]["total_amount_formatted"] == "$425.00"
+
+    document_detail_response = client.get(f"/api/v1/restaurant/documents/{confirm_response.json()['id']}", headers=headers)
+    assert document_detail_response.status_code == 200
+    document_detail_payload = document_detail_response.json()
+    assert document_detail_payload["page_title"] == "Document Details"
+    assert document_detail_payload["document_information_title"] == "Document Information"
+    assert document_detail_payload["extracted_data_title"] == "Extracted Data"
+    assert document_detail_payload["supplier_name"] == "Bakery Goods Co"
+    assert document_detail_payload["invoice_date_formatted"]
+    assert document_detail_payload["upload_date_formatted"]
+    assert document_detail_payload["edit_endpoint"].endswith(confirm_response.json()["id"])
+    assert document_detail_payload["delete_endpoint"].endswith(confirm_response.json()["id"])
 
     today_iso = datetime.now(UTC).date().isoformat()
     date_data_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={today_iso}", headers=headers)
@@ -171,6 +209,12 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert month_data_response.status_code == 200
     assert month_data_response.json()["summary_cards"][1]["label"] == "This Month Expenses"
     assert month_data_response.json()["summary_cards"][1]["value"] == 425.0
+
+    analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
+    assert analytics_response.status_code == 200
+    analytics_payload = analytics_response.json()
+    assert len(analytics_payload["supplier_price_alerts"]) >= 1
+    assert "Bakery Goods Co" in analytics_payload["supplier_price_alerts"][0]["title"] or analytics_payload["supplier_price_alerts"][0]["title"]
 
 
 def test_restaurant_endpoints_are_scoped_per_user(client, app):
@@ -466,6 +510,9 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert analytics_payload["revenue_comparison"][0]["label"] == "This Week Revenue"
     assert analytics_payload["covers_activity"][0]["label"] == "Lunch"
     assert analytics_payload["cost_breakdown"][0]["label"] == "Food Cost"
+    assert len(analytics_payload["supplier_price_alerts"]) >= 1
+    assert analytics_payload["supplier_price_alerts"][0]["title"]
+    assert analytics_payload["supplier_price_alerts"][0]["subtitle"]
 
     chat_response = client.post("/api/v1/restaurant/chat/messages", headers=headers, json={"message": "How can I improve profit?"})
     assert chat_response.status_code == 201

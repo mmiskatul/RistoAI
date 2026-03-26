@@ -126,10 +126,22 @@ class DocumentUploadExtractRequest(BaseSchema):
 
 
 class DocumentExtractionResponse(BaseSchema):
+    page_title: str = "Review Extracted Invoice"
+    preview_title: str = "Invoice Preview"
+    preview_subtitle: str = "Captured via Risto Scan"
+    preview_image_url: str | None = None
+    extracted_data_title: str = "Extracted Data"
+    supplier_name_label: str = "Supplier Name"
+    invoice_date_label: str = "Invoice Date"
+    line_items_title: str = "Line Items"
+    add_item_label: str = "Add Item"
+    grand_total_label: str = "Grand Total"
+    confirm_button_label: str = "Confirm & Save"
     supplier_name: str
     invoice_number: str | None = None
     invoice_date: str | None = None
     total_amount: float
+    total_amount_formatted: str | None = None
     ai_provider: str
     ai_summary: str
     source_file_name: str
@@ -169,29 +181,60 @@ class DocumentListItemResponse(BaseSchema):
     id: str
     supplier_name: str
     invoice_number: str | None = None
+    invoice_number_display: str | None = None
     invoice_date: str | None = None
+    invoice_date_formatted: str | None = None
     upload_date: str
     total_amount: float
+    total_amount_formatted: str | None = None
     status: str
+    status_label: str | None = None
+    status_note: str | None = None
     line_item_count: int
+    line_item_count_label: str | None = None
     source_file_name: str
+    primary_action_label: str | None = None
+    secondary_action_label: str | None = None
+    primary_action_endpoint: str | None = None
+    secondary_action_endpoint: str | None = None
     created_by_user_id: str | None = None
     last_edited_by_user_id: str | None = None
     confirmed_at: str | None = None
 
 
 class DocumentDetailResponse(BaseSchema):
+    page_title: str = "Document Details"
+    preview_title: str = "Document Preview"
+    preview_image_url: str | None = None
+    document_information_title: str = "Document Information"
+    extracted_data_title: str = "Extracted Data"
+    supplier_name_label: str = "Supplier Name"
+    total_amount_label: str = "Total Amount"
+    invoice_date_label: str = "Invoice Date"
+    upload_date_label: str = "Upload Date"
+    edit_button_label: str = "Edit Data"
+    download_button_label: str = "Download"
+    delete_button_label: str = "Delete Document"
     id: str
     supplier_name: str
     invoice_number: str | None = None
+    invoice_number_display: str | None = None
     invoice_date: str | None = None
+    invoice_date_formatted: str | None = None
     upload_date: str
+    upload_date_formatted: str | None = None
     total_amount: float
+    total_amount_formatted: str | None = None
     status: str
+    status_label: str | None = None
     ai_provider: str
     ai_summary: str
     source_file_name: str
+    source_label: str | None = None
     line_items: list[DocumentLineItemSchema]
+    edit_endpoint: str | None = None
+    download_endpoint: str | None = None
+    delete_endpoint: str | None = None
     created_at: str
     updated_at: str
     created_by_user_id: str | None = None
@@ -202,6 +245,14 @@ class DocumentDetailResponse(BaseSchema):
 
 
 class DocumentListResponse(BaseSchema):
+    page_title: str = "Documents"
+    search_placeholder: str = "Search invoices, suppliers..."
+    filter_labels: list[str] = Field(default_factory=lambda: ["Date", "Supplier", "Status"])
+    upload_button_label: str = "Upload Invoice"
+    upload_endpoint: str = "/api/v1/restaurant/documents/upload-extract"
+    ai_banner_title: str = "AI Data Extraction Active"
+    ai_banner_subtitle: str = "Risto AI automatically extracts supplier, date, line items, quantities, and unit prices from your uploads."
+    recent_documents_title: str = "Recent Documents"
     total: int
     page: int
     page_size: int
