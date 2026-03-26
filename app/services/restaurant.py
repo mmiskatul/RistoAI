@@ -58,6 +58,7 @@ from app.schemas.restaurant import (
     DocumentSaveRequest,
     DocumentUploadExtractRequest,
     ExpenseCreateRequest,
+    ExpenseDistributionItemResponse,
     ExpenseListResponse,
     ExpenseResponse,
     ExpenseSummaryResponse,
@@ -331,14 +332,42 @@ class RestaurantOperationsService(BaseService):
         today = datetime.now(UTC).date()
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
+        year_start = today.replace(month=1, day=1)
         serialized_items = self.serialize_list(items)
+        today_total = round(sum(item["amount"] for item in serialized_items if item["expense_date"][:10] == today.isoformat()), 2)
+        week_total = round(sum(item["amount"] for item in serialized_items if week_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()), 2)
+        month_total = round(sum(item["amount"] for item in serialized_items if month_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()), 2)
+        year_total = round(sum(item["amount"] for item in serialized_items if year_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()), 2)
+        category_totals: dict[str, float] = {}
+        for item in serialized_items:
+            category = str(item.get("category") or "Other")
+            category_totals[category] = round(category_totals.get(category, 0.0) + float(item.get("amount", 0)), 2)
+        total_spend = round(sum(category_totals.values()), 2)
+        distribution = [
+            ExpenseDistributionItemResponse(
+                label=category,
+                percentage=round((amount / max(total_spend, 1)) * 100, 1),
+                percentage_label=f"{round((amount / max(total_spend, 1)) * 100):.0f}%",
+            )
+            for category, amount in sorted(category_totals.items(), key=lambda item: item[1], reverse=True)[:3]
+        ]
         summary = ExpenseSummaryResponse(
-            today_total=round(sum(item["amount"] for item in serialized_items if item["expense_date"][:10] == today.isoformat()), 2),
-            week_total=round(sum(item["amount"] for item in serialized_items if item["expense_date"][:10] >= week_start.isoformat()), 2),
-            month_total=round(sum(item["amount"] for item in serialized_items if item["expense_date"][:10] >= month_start.isoformat()), 2),
+            today_total=today_total,
+            today_total_formatted=self._format_currency(today_total),
+            week_total=week_total,
+            week_total_formatted=self._format_currency(week_total),
+            month_total=month_total,
+            month_total_formatted=self._format_currency(month_total),
             top_category=self._top_category(serialized_items),
         )
-        return ExpenseListResponse(summary=summary, items=[self._to_expense_response(item) for item in items], **build_pagination_meta(total=total, page=page, page_size=page_size))
+        return ExpenseListResponse(
+            active_period="Today",
+            summary=summary,
+            distribution_total_label=distribution[0].percentage_label if distribution else None,
+            expense_distribution=distribution,
+            items=[self._to_expense_response(item) for item in items],
+            **build_pagination_meta(total=total, page=page, page_size=page_size),
+        )
 
     async def create_cash_deposit(self, current_user: dict, payload: CashDepositCreateRequest) -> CashDepositResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1698,7 +1727,20 @@ class RestaurantOperationsService(BaseService):
 
     def _to_expense_response(self, expense: dict) -> ExpenseResponse:
         serialized = self.serialize(expense)
-        return ExpenseResponse(id=serialized["id"], category=serialized["category"], amount=serialized["amount"], expense_date=serialized["expense_date"], notes=serialized.get("notes"), created_at=serialized["created_at"])
+        amount = float(serialized["amount"])
+        category = str(serialized.get("category") or "Expense")
+        subtitle = serialized.get("notes") or category
+        return ExpenseResponse(
+            id=serialized["id"],
+            category=category,
+            amount=amount,
+            amount_formatted=self._format_currency(amount),
+            expense_date=serialized["expense_date"],
+            expense_date_formatted=self._format_human_date(serialized.get("expense_date")),
+            notes=serialized.get("notes"),
+            subtitle=subtitle,
+            created_at=serialized["created_at"],
+        )
 
     def _to_cash_deposit_response(self, deposit: dict) -> CashDepositResponse:
         serialized = self.serialize(deposit)
