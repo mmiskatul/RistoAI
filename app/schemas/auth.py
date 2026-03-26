@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import EmailStr, Field, field_validator, model_validator
+from pydantic import ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.core.enums import AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
 from app.schemas.common import BaseSchema
@@ -16,24 +16,17 @@ def validate_password_strength(value: str) -> str:
 
 
 class RegisterRequest(BaseSchema):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True, populate_by_name=True)
+
     restaurant_name: str | None = Field(default=None, min_length=2, max_length=160)
     owner_full_name: str | None = Field(default=None, min_length=2, max_length=120)
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(min_length=8, max_length=72)
-    confirm_password: str | None = Field(default=None, min_length=8, max_length=72)
-    phone: str | None = Field(default=None, max_length=30)
 
     @field_validator('password')
     @classmethod
     def validate_password(cls, value: str) -> str:
-        return validate_password_strength(value)
-
-    @field_validator('confirm_password')
-    @classmethod
-    def validate_confirm_password(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
         return validate_password_strength(value)
 
     @model_validator(mode='after')
@@ -41,8 +34,6 @@ class RegisterRequest(BaseSchema):
         resolved_name = self.owner_full_name or self.full_name
         if not resolved_name:
             raise ValueError('Owner full name is required')
-        if self.confirm_password is not None and self.password != self.confirm_password:
-            raise ValueError('Password and confirm password must match')
         self.full_name = resolved_name
         self.owner_full_name = resolved_name
         return self

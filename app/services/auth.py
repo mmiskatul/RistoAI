@@ -63,7 +63,6 @@ class AuthService(BaseService):
                 user['_id'],
                 {
                     'full_name': payload.full_name,
-                    'phone': payload.phone,
                     'hashed_password': password_manager.hash_password(payload.password),
                     'role': UserRole.RESTAURANT_OWNER,
                     'preferred_language': user.get('preferred_language', AppLanguage.ENGLISH),
@@ -81,13 +80,12 @@ class AuthService(BaseService):
                 {
                     'email': payload.email.lower(),
                     'full_name': payload.full_name,
-                    'phone': payload.phone,
                     'hashed_password': password_manager.hash_password(payload.password),
                     'role': UserRole.RESTAURANT_OWNER,
                     'preferred_language': AppLanguage.ENGLISH,
                     'is_active': True,
                     'email_verified': False,
-                    'restaurant_name': None,
+                    'restaurant_name': payload.restaurant_name,
                     'location': None,
                     'subscription_plan_name': None,
                     'subscription_plan': None,
