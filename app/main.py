@@ -21,6 +21,7 @@ from app.db.indexes import ensure_indexes
 from app.db.mongodb import MongoDB
 from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.subscription_guard import SubscriptionGuardMiddleware
+from app.realtime.socketio_app import create_socketio_app
 from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 from app.services.bootstrap import BootstrapService
@@ -95,7 +96,7 @@ def _split_http_detail(detail: Any) -> tuple[str, dict[str, Any]]:
 
 
 
-def create_app(*, testing: bool = False) -> FastAPI:
+def create_fastapi_app(*, testing: bool = False) -> FastAPI:
     settings = get_settings()
     settings.testing = testing
     if testing:
@@ -178,6 +179,11 @@ def create_app(*, testing: bool = False) -> FastAPI:
         return HTMLResponse(content=landing_page_html())
 
     return app
+
+
+def create_app(*, testing: bool = False):
+    fastapi_app = create_fastapi_app(testing=testing)
+    return create_socketio_app(fastapi_app)
 
 
 app = create_app()

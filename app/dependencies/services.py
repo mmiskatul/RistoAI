@@ -58,7 +58,7 @@ async def get_support_service(db=Depends(get_database)) -> SupportService:
     return SupportService(SupportTicketRepository(db))
 
 
-async def get_restaurant_operations_service(db=Depends(get_database)) -> RestaurantOperationsService:
+def build_restaurant_operations_service(db) -> RestaurantOperationsService:
     return RestaurantOperationsService(
         UserRepository(db),
         RestaurantDocumentRepository(db),
@@ -73,4 +73,8 @@ async def get_restaurant_operations_service(db=Depends(get_database)) -> Restaur
         RestaurantInsightRepository(db),
         OpenAIOperationsService(),
     )
+
+
+async def get_restaurant_operations_service(db=Depends(get_database)) -> RestaurantOperationsService:
+    return build_restaurant_operations_service(db)
 

@@ -568,11 +568,41 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert analytics_payload["supplier_price_alerts"][0]["title"]
     assert analytics_payload["supplier_price_alerts"][0]["subtitle"]
 
+    chat_list_response = client.get("/api/v1/restaurant/chat/messages", headers=headers)
+    assert chat_list_response.status_code == 200
+    chat_list_payload = chat_list_response.json()
+    assert chat_list_payload["page_title"] == "AI Chat"
+    assert chat_list_payload["quick_prompts"][0]["label"] == "How can I increase revenue?"
+    assert chat_list_payload["attachment_options"][0]["label"] == "Attach"
+    assert chat_list_payload["attachment_options"][1]["label"] == "Camera"
+    assert chat_list_payload["attachment_options"][2]["label"] == "Gallery"
+    assert chat_list_payload["attachment_options"][3]["label"] == "Docs"
+    assert chat_list_payload["realtime"]["provider"] == "socket.io"
+    assert chat_list_payload["realtime"]["namespace"] == "/restaurant-chat"
+
     chat_response = client.post("/api/v1/restaurant/chat/messages", headers=headers, json={"message": "How can I improve profit?"})
     assert chat_response.status_code == 201
-    messages = chat_response.json()["messages"]
+    chat_payload = chat_response.json()
+    assert chat_payload["page_title"] == "AI Chat"
+    assert chat_payload["input_placeholder"] == "Ask AI about your restaurant business..."
+    messages = chat_payload["messages"]
+    assert any(message["role"] == "insight" for message in messages)
     assert messages[-1]["role"] == "assistant"
     assert "revenue" in messages[-1]["message"].lower()
+
+    chat_attachment_response = client.post(
+        "/api/v1/restaurant/chat/messages/attachments",
+        headers=headers,
+        data={"message": "Please review this supplier file", "attachment_source": "docs"},
+        files={"file": ("suppliers.csv", b"supplier,amount\nBakery Goods Co,425", "text/csv")},
+    )
+    assert chat_attachment_response.status_code == 201
+    chat_attachment_payload = chat_attachment_response.json()
+    attachment_messages = [message for message in chat_attachment_payload["messages"] if message.get("attachment_name")]
+    assert attachment_messages[-1]["attachment_name"] == "suppliers.csv"
+    assert attachment_messages[-1]["attachment_source"] == "docs"
+    assert attachment_messages[-1]["attachment_summary"]
+    assert chat_attachment_payload["messages"][-1]["role"] == "assistant"
 
 
     settings_response = client.get("/api/v1/restaurant/settings/profile", headers=headers)

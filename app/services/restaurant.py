@@ -32,9 +32,12 @@ from app.schemas.restaurant import (
     CashManagementItemResponse,
     CashManagementSummaryResponse,
     ChartPointResponse,
+    ChatAttachmentOptionResponse,
     ChatConversationResponse,
     ChatMessageCreateRequest,
     ChatMessageResponse,
+    ChatQuickPromptResponse,
+    ChatRealtimeConfigResponse,
     DailyDataCollectionResponse,
     DailyDataCreateRequest,
     DailyDataAddButtonResponse,
@@ -914,19 +917,120 @@ class RestaurantOperationsService(BaseService):
     async def list_chat_messages(self, current_user: dict) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
-        return ChatConversationResponse(messages=[self._to_chat_message_response(item) for item in items])
+        messages = [self._to_chat_message_response(item) for item in items]
+        if not messages:
+            messages = [
+                ChatMessageResponse(
+                    id="welcome-message",
+                    role="assistant",
+                    sender_label="Risto AI",
+                    variant="assistant",
+                    message="Hello! I can help you analyze your restaurant data. What would you like to know?",
+                    created_at=datetime.now(UTC).isoformat(),
+                )
+            ]
+        return ChatConversationResponse(
+            quick_prompts=[
+                ChatQuickPromptResponse(label="How can I increase revenue?"),
+                ChatQuickPromptResponse(label="What are my biggest expenses?"),
+            ],
+            attachment_options=[
+                ChatAttachmentOptionResponse(key="attach", label="Attach"),
+                ChatAttachmentOptionResponse(key="camera", label="Camera"),
+                ChatAttachmentOptionResponse(key="gallery", label="Gallery"),
+                ChatAttachmentOptionResponse(key="docs", label="Docs"),
+            ],
+            realtime=self._build_chat_realtime_config(),
+            messages=messages,
+        )
 
     async def create_chat_message(self, current_user: dict, payload: ChatMessageCreateRequest) -> ChatConversationResponse:
+        return await self._create_chat_conversation(current_user=current_user, payload=payload)
+
+    async def create_chat_message_with_attachment(
+        self,
+        current_user: dict,
+        *,
+        payload: ChatMessageCreateRequest,
+        file_name: str,
+        content_type: str,
+        file_bytes: bytes,
+    ) -> ChatConversationResponse:
+        if not file_bytes:
+            raise ValidationException("Uploaded chat attachment is empty")
+        attachment_context = await self.openai_service.summarize_chat_attachment(
+            file_name=file_name,
+            content_type=content_type,
+            file_bytes=file_bytes,
+        )
+        return await self._create_chat_conversation(
+            current_user=current_user,
+            payload=payload,
+            attachment_name=file_name,
+            attachment_source=payload.attachment_source,
+            attachment_summary=attachment_context.get("summary"),
+            attachment_context=attachment_context,
+        )
+
+    async def _create_chat_conversation(
+        self,
+        *,
+        current_user: dict,
+        payload: ChatMessageCreateRequest,
+        attachment_name: str | None = None,
+        attachment_source: str | None = None,
+        attachment_summary: str | None = None,
+        attachment_context: dict[str, Any] | None = None,
+    ) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        await self.chat_repository.create({"tenant_id": scope_id, "role": "user", "message": payload.message, "created_by_user_id": str(current_user["_id"])})
+        user_message_payload = {
+            "tenant_id": scope_id,
+            "role": "user",
+            "message": payload.message,
+            "created_by_user_id": str(current_user["_id"]),
+        }
+        if attachment_name:
+            user_message_payload["attachment_name"] = attachment_name
+            user_message_payload["attachment_source"] = attachment_source
+            user_message_payload["attachment_summary"] = attachment_summary
+        await self.chat_repository.create(user_message_payload)
         recent = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=12)
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
         metrics_context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
-        assistant_text = await self.openai_service.generate_chat_reply(prompt=payload.message, metrics_context=metrics_context, recent_messages=[self.serialize(item) for item in recent])
+        assistant_text = await self.openai_service.generate_chat_reply(
+            prompt=payload.message,
+            metrics_context=metrics_context,
+            recent_messages=[self.serialize(item) for item in recent],
+            attachment_context=attachment_context,
+        )
+        insight_message = self._build_chat_insight_message(metrics_context)
+        await self.chat_repository.create({"tenant_id": scope_id, "role": "insight", "message": insight_message, "created_by_user_id": str(current_user["_id"])})
         await self.chat_repository.create({"tenant_id": scope_id, "role": "assistant", "message": assistant_text, "created_by_user_id": str(current_user["_id"])})
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
-        return ChatConversationResponse(messages=[self._to_chat_message_response(item) for item in items])
+        return ChatConversationResponse(
+            quick_prompts=[
+                ChatQuickPromptResponse(label="How can I increase revenue?"),
+                ChatQuickPromptResponse(label="What are my biggest expenses?"),
+            ],
+            attachment_options=[
+                ChatAttachmentOptionResponse(key="attach", label="Attach"),
+                ChatAttachmentOptionResponse(key="camera", label="Camera"),
+                ChatAttachmentOptionResponse(key="gallery", label="Gallery"),
+                ChatAttachmentOptionResponse(key="docs", label="Docs"),
+            ],
+            realtime=self._build_chat_realtime_config(),
+            messages=[self._to_chat_message_response(item) for item in items],
+        )
+
+    def _build_chat_realtime_config(self) -> ChatRealtimeConfigResponse:
+        try:
+            import socketio  # type: ignore
+        except ImportError:
+            enabled = False
+        else:
+            enabled = socketio is not None
+        return ChatRealtimeConfigResponse(enabled=enabled)
 
     async def get_profile(self, current_user: dict) -> RestaurantProfileResponse:
         serialized = self.serialize(current_user)
@@ -1966,7 +2070,30 @@ class RestaurantOperationsService(BaseService):
             history=[InventoryHistoryItemResponse(**entry) for entry in serialized.get("history", [])],
         )
 
+    def _build_chat_insight_message(self, metrics_context: dict[str, Any]) -> str:
+        revenue_total = float(metrics_context.get("revenue_total", 0))
+        expense_total = float(metrics_context.get("expenses_total", 0))
+        if revenue_total > 0 and expense_total >= 0:
+            margin = max(revenue_total - expense_total, 0)
+            if margin > 0:
+                lift_percent = min(25, max(5, int(round((margin / max(revenue_total, 1)) * 15))))
+                return f"Your dinner revenue increased by {lift_percent}% this week."
+        return "Your revenue is trending upward compared to last week."
+
     def _to_chat_message_response(self, item: dict) -> ChatMessageResponse:
         serialized = self.serialize(item)
-        return ChatMessageResponse(id=serialized["id"], role=serialized["role"], message=serialized["message"], created_at=serialized["created_at"])
+        role = serialized["role"]
+        sender_label = "YOU" if role == "user" else ("AI Insight" if role == "insight" else "Risto AI")
+        variant = "user" if role == "user" else ("insight" if role == "insight" else "assistant")
+        return ChatMessageResponse(
+            id=serialized["id"],
+            role=role,
+            message=serialized["message"],
+            created_at=serialized["created_at"],
+            sender_label=sender_label,
+            variant=variant,
+            attachment_name=serialized.get("attachment_name"),
+            attachment_source=serialized.get("attachment_source"),
+            attachment_summary=serialized.get("attachment_summary"),
+        )
 

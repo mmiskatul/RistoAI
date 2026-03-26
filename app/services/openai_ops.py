@@ -219,13 +219,16 @@ class OpenAIOperationsService:
         prompt: str,
         metrics_context: dict[str, Any],
         recent_messages: Sequence[dict[str, Any]],
+        attachment_context: dict[str, Any] | None = None,
     ) -> str:
         if not self.enabled:
             revenue = metrics_context.get("revenue_total", 0.0)
             expenses = metrics_context.get("expenses_total", 0.0)
+            attachment_note = f" Attached file summary: {attachment_context.get('summary')}" if attachment_context else ""
             return (
                 f"Current revenue is EUR {revenue:,.2f} and expenses are EUR {expenses:,.2f}. "
                 f"Focus on supplier spend, daily cash reconciliation, and the weakest weekday trend."
+                f"{attachment_note}"
             )
 
         transcript = "\n".join(f"{item['role']}: {item['message']}" for item in recent_messages[-6:])
@@ -252,6 +255,7 @@ class OpenAIOperationsService:
                             "text": (
                                 f"Metrics context: {json.dumps(metrics_context)}\n"
                                 f"Recent messages:\n{transcript}\n"
+                                f"Attachment context: {json.dumps(attachment_context) if attachment_context else "none"}\n"
                                 f"User question: {prompt}"
                             ),
                         }
@@ -266,10 +270,72 @@ class OpenAIOperationsService:
             logger.exception("OpenAI chat generation failed", exc_info=exc)
             revenue = metrics_context.get("revenue_total", 0.0)
             expenses = metrics_context.get("expenses_total", 0.0)
+            attachment_note = f" Attached file summary: {attachment_context.get('summary')}" if attachment_context else ""
             return (
                 f"Current revenue is EUR {revenue:,.2f} and expenses are EUR {expenses:,.2f}. "
                 f"Focus on supplier spend, daily cash reconciliation, and the weakest weekday trend."
+                f"{attachment_note}"
             )
+
+    async def summarize_chat_attachment(
+        self,
+        *,
+        file_name: str,
+        content_type: str,
+        file_bytes: bytes,
+    ) -> dict[str, str]:
+        fallback = self._fallback_attachment_summary(file_name=file_name, content_type=content_type, file_bytes=file_bytes)
+        if not self.enabled:
+            return fallback
+
+        user_content: list[dict[str, Any]] = [
+            {
+                "type": "input_text",
+                "text": f"Filename: {file_name}. Content type: {content_type}. Summarize this attachment for restaurant operations chat.",
+            }
+        ]
+        if content_type.startswith("image/"):
+            data_url = f"data:{content_type};base64,{base64.b64encode(file_bytes).decode('utf-8')}"
+            user_content.append({"type": "input_image", "image_url": data_url, "detail": "high"})
+        elif content_type in {"text/csv", "application/csv", "text/plain"}:
+            user_content.append({"type": "input_text", "text": file_bytes.decode("utf-8", errors="replace")[:12000]})
+        else:
+            file_id = await self._upload_file(file_name=file_name, file_bytes=file_bytes)
+            user_content.append({"type": "input_file", "file_id": file_id})
+
+        payload = {
+            "model": self.settings.openai_model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "Return only valid JSON with keys title and summary. "
+                                "Summarize the attached restaurant-related document briefly and practically. "
+                                "Do not invent missing facts."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": user_content,
+                },
+            ],
+        }
+        try:
+            response_payload = await self._responses_create(payload)
+            parsed = self._try_parse_json(response_payload.get("output_text", ""))
+            if isinstance(parsed, dict):
+                title = str(parsed.get("title") or "").strip()
+                summary = str(parsed.get("summary") or "").strip()
+                if title and summary:
+                    return {"title": title, "summary": summary}
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("OpenAI attachment summarization failed", exc_info=exc)
+        return fallback
 
     async def _responses_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=45.0) as client:
@@ -364,6 +430,24 @@ class OpenAIOperationsService:
         except json.JSONDecodeError:
             return None
         return parsed if isinstance(parsed, dict) else None
+
+    @staticmethod
+    def _fallback_attachment_summary(*, file_name: str, content_type: str, file_bytes: bytes) -> dict[str, str]:
+        stem = file_name.rsplit('.', 1)[0].replace('_', ' ').replace('-', ' ').title() or 'Uploaded File'
+        if content_type in {'text/csv', 'application/csv'}:
+            preview = file_bytes.decode('utf-8', errors='replace').strip().splitlines()[:3]
+            snippet = ' | '.join(line[:80] for line in preview if line)
+            summary = f'CSV attachment uploaded. Preview: {snippet}' if snippet else 'CSV attachment uploaded for review.'
+        elif content_type == 'text/plain':
+            preview = file_bytes.decode('utf-8', errors='replace').strip()[:160]
+            summary = f'Text attachment uploaded. Preview: {preview}' if preview else 'Text attachment uploaded for review.'
+        elif content_type == 'application/pdf':
+            summary = 'PDF document uploaded for restaurant review.'
+        elif content_type.startswith('image/'):
+            summary = 'Image attachment uploaded for restaurant review.'
+        else:
+            summary = 'Document attachment uploaded for restaurant review.'
+        return {'title': stem, 'summary': summary}
 
     @staticmethod
     def _fallback_invoice(*, file_name: str) -> dict[str, Any]:

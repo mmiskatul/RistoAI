@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
 from app.core.exceptions import ValidationException
 from app.dependencies.auth import get_current_user
@@ -75,6 +75,9 @@ ALLOWED_DOCUMENT_CONTENT_TYPES = {
     'image/jpg',
     'image/webp',
 }
+
+
+ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES = ALLOWED_DOCUMENT_CONTENT_TYPES | {'text/plain'}
 
 
 @router.post('/documents/upload-extract', response_model=DocumentExtractionResponse, status_code=status.HTTP_200_OK, tags=['Restaurant Invoice AI'], summary='Upload And Extract Invoice', description='Uploads an invoice file and returns extracted preview JSON without saving to the database.')
@@ -298,6 +301,27 @@ async def list_chat_messages(current_user: dict = Depends(get_current_user), ser
 @router.post('/chat/messages', response_model=ChatConversationResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Chat'], summary='Create Chat Message', description='Sends a user message and returns the updated AI chat conversation.')
 async def create_chat_message(payload: ChatMessageCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ChatConversationResponse:
     return await service.create_chat_message(current_user, payload)
+
+
+@router.post('/chat/messages/attachments', response_model=ChatConversationResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Chat'], summary='Create Chat Message With Attachment', description='Sends a user message with a shared document and returns the updated personalized AI chat conversation.')
+async def create_chat_message_with_attachment(
+    message: str = Form(...),
+    attachment_source: str | None = Form(default=None),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> ChatConversationResponse:
+    content_type = (file.content_type or '').lower()
+    if content_type not in ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES:
+        raise ValidationException('Only PDF, CSV, TXT, PNG, JPG, JPEG, and WEBP files are supported for chat attachments')
+    file_bytes = await file.read()
+    return await service.create_chat_message_with_attachment(
+        current_user,
+        payload=ChatMessageCreateRequest(message=message, attachment_source=attachment_source),
+        file_name=file.filename or 'chat-attachment',
+        content_type=content_type,
+        file_bytes=file_bytes,
+    )
 
 
 @router.get('/settings/profile', response_model=RestaurantProfileResponse, tags=['Restaurant Settings'], summary='Profile Detail', description='Returns the restaurant profile and settings data.')

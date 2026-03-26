@@ -694,16 +694,46 @@ class AnalyticsOverviewResponse(BaseSchema):
 
 class ChatMessageCreateRequest(BaseSchema):
     message: str = Field(min_length=2, max_length=1000)
+    attachment_source: str | None = Field(default=None, max_length=40)
+
+
+class ChatAttachmentOptionResponse(BaseSchema):
+    key: str
+    label: str
+
+
+class ChatQuickPromptResponse(BaseSchema):
+    label: str
 
 
 class ChatMessageResponse(BaseSchema):
     id: str
-    role: Literal["user", "assistant"]
+    role: Literal["user", "assistant", "insight"]
     message: str
     created_at: str
+    sender_label: str | None = None
+    variant: str | None = None
+    attachment_name: str | None = None
+    attachment_source: str | None = None
+    attachment_summary: str | None = None
+
+
+class ChatRealtimeConfigResponse(BaseSchema):
+    enabled: bool = False
+    provider: str = "socket.io"
+    path: str = "/socket.io"
+    namespace: str = "/restaurant-chat"
+    transports: list[str] = Field(default_factory=lambda: ["websocket", "polling"])
+    auth_type: str = "bearer_or_auth_token"
 
 
 class ChatConversationResponse(BaseSchema):
+    page_title: str = "AI Chat"
+    subtitle: str = "Ask AI about your restaurant performance and insights."
+    quick_prompts: list[ChatQuickPromptResponse] = Field(default_factory=list)
+    input_placeholder: str = "Ask AI about your restaurant business..."
+    attachment_options: list[ChatAttachmentOptionResponse] = Field(default_factory=list)
+    realtime: ChatRealtimeConfigResponse = Field(default_factory=ChatRealtimeConfigResponse)
     messages: list[ChatMessageResponse]
 
 
