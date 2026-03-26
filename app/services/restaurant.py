@@ -391,9 +391,13 @@ class RestaurantOperationsService(BaseService):
         bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposits), 2)
         return CashManagementSummaryResponse(
             total_collected=total_collected,
+            total_collected_formatted=self._format_currency(total_collected),
             cash_available=cash_available,
+            cash_available_formatted=self._format_currency(cash_available),
             withdrawals_total=withdrawals_total,
+            withdrawals_total_formatted=self._format_currency(withdrawals_total),
             bank_deposits_total=bank_deposits_total,
+            bank_deposits_total_formatted=self._format_currency(bank_deposits_total),
             recent_deposits=[self._to_cash_deposit_response(item) for item in deposits[:10]],
         )
 
@@ -1742,7 +1746,20 @@ class RestaurantOperationsService(BaseService):
 
     def _to_cash_deposit_response(self, deposit: dict) -> CashDepositResponse:
         serialized = self.serialize(deposit)
-        return CashDepositResponse(id=serialized["id"], deposit_date=serialized["deposit_date"], amount=serialized["amount"], deposit_type=serialized["deposit_type"], notes=serialized.get("notes"), created_at=serialized["created_at"])
+        amount = float(serialized["amount"])
+        title = serialized.get("notes") or serialized.get("deposit_type")
+        return CashDepositResponse(
+            id=serialized["id"],
+            deposit_date=serialized["deposit_date"],
+            deposit_date_formatted=self._format_human_date(serialized.get("deposit_date")),
+            amount=amount,
+            amount_formatted=self._format_currency(amount),
+            deposit_type=serialized["deposit_type"],
+            display_title=title,
+            display_subtitle=self._format_human_date(serialized.get("deposit_date")),
+            notes=serialized.get("notes"),
+            created_at=serialized["created_at"],
+        )
 
     def _to_daily_data_response(self, record: dict) -> DailyDataResponse:
         serialized = self.serialize(record)

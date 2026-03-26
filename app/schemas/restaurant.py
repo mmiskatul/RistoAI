@@ -313,17 +313,37 @@ class CashDepositCreateRequest(BaseSchema):
 class CashDepositResponse(BaseSchema):
     id: str
     deposit_date: str
+    deposit_date_formatted: str | None = None
     amount: float
+    amount_formatted: str | None = None
     deposit_type: str
+    display_title: str | None = None
+    display_subtitle: str | None = None
     notes: str | None = None
     created_at: str
 
 
 class CashManagementSummaryResponse(BaseSchema):
+    page_title: str = "Cash Management"
+    subtitle: str = "Track and manage your restaurant's physical cash flow and bank deposits."
+    add_button_label: str = "Add Bank Deposit"
+    add_button_endpoint: str = "/api/v1/restaurant/cash/deposits"
+    period_filters: list[str] = Field(default_factory=lambda: ["Today", "This Week", "This Month", "This Year"])
+    active_period: str = "Today"
     total_collected: float
+    total_collected_formatted: str | None = None
+    total_collected_status: str = "TODAY"
     cash_available: float
+    cash_available_formatted: str | None = None
+    cash_available_status: str = "IN SAFE"
     withdrawals_total: float
+    withdrawals_total_formatted: str | None = None
+    withdrawals_status: str = "TODAY"
     bank_deposits_total: float
+    bank_deposits_total_formatted: str | None = None
+    bank_deposits_status: str = "TODAY"
+    recent_deposits_title: str = "Recent Deposits"
+    recent_deposits_view_all_label: str = "View All"
     recent_deposits: list[CashDepositResponse]
 
 

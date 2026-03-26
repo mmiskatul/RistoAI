@@ -382,6 +382,33 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert home_response.status_code == 200
     assert home_response.json()["metrics"][0]["label"] == "Revenue"
 
+    cash_deposit_response = client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={
+            "deposit_date": "2026-03-24",
+            "amount": 450.0,
+            "deposit_type": "Cash & Coins",
+            "notes": "Chase Bank - Main",
+        },
+    )
+    assert cash_deposit_response.status_code == 201
+    assert cash_deposit_response.json()["amount_formatted"] == "$450.00"
+    assert cash_deposit_response.json()["deposit_date_formatted"] == "Mar 24, 2026"
+    assert cash_deposit_response.json()["display_title"] == "Chase Bank - Main"
+
+    cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
+    assert cash_overview_response.status_code == 200
+    cash_overview_payload = cash_overview_response.json()
+    assert cash_overview_payload["page_title"] == "Cash Management"
+    assert cash_overview_payload["add_button_label"] == "Add Bank Deposit"
+    assert cash_overview_payload["period_filters"] == ["Today", "This Week", "This Month", "This Year"]
+    assert cash_overview_payload["recent_deposits_title"] == "Recent Deposits"
+    assert cash_overview_payload["recent_deposits_view_all_label"] == "View All"
+    assert cash_overview_payload["bank_deposits_total"] == 450.0
+    assert cash_overview_payload["bank_deposits_total_formatted"] == "$450.00"
+    assert cash_overview_payload["recent_deposits"][0]["display_title"] == "Chase Bank - Main"
+
     insights_response = client.get("/api/v1/restaurant/insights", headers=headers)
     assert insights_response.status_code == 200
     assert insights_response.json()["page_title"] == "AI Business Insights"
