@@ -13,7 +13,7 @@ from app.services.dashboard import DashboardService
 router = APIRouter()
 
 
-@router.get('/overview', response_model=DashboardOverviewResponse, summary='Admin Dashboard Overview', description='Returns the full admin dashboard page payload including sidebar, header, KPI cards, revenue growth, and user growth sections.')
+@router.get('/overview', response_model=DashboardOverviewResponse, tags=['Admin Dashboard'], summary='Admin Dashboard Overview', description='Returns the admin dashboard page payload including sidebar, header, KPI cards, revenue growth, and user growth sections.')
 async def get_dashboard_overview(
     year: int = Query(default_factory=lambda: datetime.now(UTC).year, ge=2000, le=2100),
     current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
@@ -22,7 +22,7 @@ async def get_dashboard_overview(
     return await service.get_overview(current_user, year)
 
 
-@router.get('/users/metrics', response_model=DashboardUserMetricsResponse)
+@router.get('/users/metrics', response_model=DashboardUserMetricsResponse, tags=['Admin Dashboard'], summary='Admin Dashboard User Metrics', description='Returns the compact user metrics block used by the admin dashboard.')
 async def get_user_metrics(
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
     service: DashboardService = Depends(get_dashboard_service),

@@ -47,7 +47,7 @@ OPENAPI_TAGS = [
     {'name': 'Onboarding', 'description': 'Restaurant onboarding profile and setup progress.'},
     {'name': 'User Subscription', 'description': 'Current subscription and subscription selection for restaurant users.'},
     {'name': 'Admin Authentication', 'description': 'Admin login and password reset endpoints.'},
-    {'name': 'Dashboard', 'description': 'Admin dashboard aggregate metrics.'},
+    {'name': 'Admin Dashboard', 'description': 'Admin dashboard overview, KPI cards, revenue growth, and user growth metrics.'},
     {'name': 'Users', 'description': 'Admin user management and filtering.'},
     {'name': 'Subscription Management', 'description': 'Admin subscription plan, coupon, and revenue management.'},
     {'name': 'Support Management', 'description': 'Admin support ticket list, replies, and resolution.'},
