@@ -38,6 +38,30 @@ class SupportTicketMessageResponse(BaseSchema):
     created_at: datetime
 
 
+class SupportManagementFilterChipResponse(BaseSchema):
+    key: str
+    label: str
+
+
+class SupportManagementSummaryCardResponse(BaseSchema):
+    key: str
+    label: str
+    value: int
+    value_formatted: str
+
+
+class SupportManagementTableColumnResponse(BaseSchema):
+    key: str
+    label: str
+
+
+class SupportManagementRowActionResponse(BaseSchema):
+    key: str
+    label: str
+    method: str
+    endpoint: str
+
+
 class SupportTicketListItemResponse(BaseSchema):
     id: str
     ticket_number: str
@@ -47,6 +71,13 @@ class SupportTicketListItemResponse(BaseSchema):
     status: SupportTicketStatus
     priority: SupportTicketPriority
     date: datetime
+    user_restaurant_label: str | None = None
+    issue_subject_label: str | None = None
+    status_label: str | None = None
+    priority_label: str | None = None
+    date_formatted: str | None = None
+    view_endpoint: str | None = None
+    actions_menu: list[SupportManagementRowActionResponse] = Field(default_factory=list)
 
 
 class SupportTicketSummaryResponse(BaseSchema):
@@ -55,6 +86,14 @@ class SupportTicketSummaryResponse(BaseSchema):
 
 
 class SupportTicketManagementResponse(BaseSchema):
+    page_title: str = "Support Management"
+    page_subtitle: str = "Track and resolve restaurant support requests across the platform."
+    search_placeholder: str = "Search tickets, restaurants..."
+    filter_button_label: str = "Filters"
+    filter_chips: list[SupportManagementFilterChipResponse] = Field(default_factory=list)
+    summary_cards: list[SupportManagementSummaryCardResponse] = Field(default_factory=list)
+    table_columns: list[SupportManagementTableColumnResponse] = Field(default_factory=list)
+    pagination_label: str | None = None
     summary: SupportTicketSummaryResponse
     total: int
     page: int

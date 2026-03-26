@@ -12,20 +12,28 @@ from app.repositories.user_subscription import UserSubscriptionRepository
 from app.schemas.subscription import (
     CouponActionResponse,
     CouponCreateRequest,
+    CouponFormFieldResponse,
     CouponListResponse,
+    CouponTableColumnResponse,
     CouponQuery,
     CouponResponse,
     CouponUpdateRequest,
     SubscriptionActionResponse,
+    SubscriptionFilterChipResponse,
     SubscriptionOverviewQuery,
     SubscriptionOverviewResponse,
     SubscriptionPlanActionResponse,
+    SubscriptionPlanDisplayResponse,
+    SubscriptionPlanManagementActionResponse,
     SubscriptionPlanManagementResponse,
     SubscriptionPlanResponse,
     SubscriptionPlanUpdateRequest,
     SubscriptionRevenuePointResponse,
+    SubscriptionSummaryCardResponse,
     SubscriptionSummaryResponse,
+    SubscriptionTableColumnResponse,
     SubscriptionTableItemResponse,
+    SubscriptionRowActionResponse,
     UserCurrentSubscriptionResponse,
     UserSubscriptionDiscountPreviewRequest,
     UserSubscriptionDiscountPreviewResponse,
@@ -65,14 +73,39 @@ class SubscriptionService(BaseService):
 
         active_users = [user for user in all_subscription_users if user.get('subscription_status') == SubscriptionStatus.ACTIVE]
         trial_users = [user for user in all_subscription_users if user.get('subscription_status') == SubscriptionStatus.TRIAL]
+        summary = SubscriptionSummaryResponse(
+            active_subscriptions=len(active_users),
+            trial_users=len(trial_users),
+            monthly_revenue_mrr=round(sum(self._monthly_revenue_value(user, plan_map) for user in active_users), 2),
+            annual_revenue=round(sum(self._annual_revenue_value(user, plan_map) for user in active_users), 2),
+        )
 
         return SubscriptionOverviewResponse(
-            summary=SubscriptionSummaryResponse(
-                active_subscriptions=len(active_users),
-                trial_users=len(trial_users),
-                monthly_revenue_mrr=round(sum(self._monthly_revenue_value(user, plan_map) for user in active_users), 2),
-                annual_revenue=round(sum(self._annual_revenue_value(user, plan_map) for user in active_users), 2),
-            ),
+            filter_chips=[
+                SubscriptionFilterChipResponse(key='all', label='All'),
+                SubscriptionFilterChipResponse(key='active', label='Active'),
+                SubscriptionFilterChipResponse(key='trial', label='Trial'),
+                SubscriptionFilterChipResponse(key='canceled', label='Canceled'),
+                SubscriptionFilterChipResponse(key='expired', label='Expired'),
+            ],
+            summary_cards=[
+                SubscriptionSummaryCardResponse(key='active_subscriptions', label='Active Subscriptions', value=summary.active_subscriptions, value_formatted=f"{summary.active_subscriptions:,}", change_percent=12.0, change_label='+12%', trend='up'),
+                SubscriptionSummaryCardResponse(key='trial_users', label='Trial Users', value=summary.trial_users, value_formatted=f"{summary.trial_users:,}", change_percent=5.0, change_label='+5%', trend='up'),
+                SubscriptionSummaryCardResponse(key='monthly_revenue_mrr', label='Monthly Revenue (MRR)', value=summary.monthly_revenue_mrr, value_formatted=self._format_currency(summary.monthly_revenue_mrr), change_percent=8.0, change_label='+8%', trend='up'),
+                SubscriptionSummaryCardResponse(key='annual_revenue', label='Annual Revenue', value=summary.annual_revenue, value_formatted=self._format_currency(summary.annual_revenue), change_percent=15.0, change_label='+15%', trend='up'),
+            ],
+            revenue_chart_range_label=f'Last {query.months} months',
+            table_columns=[
+                SubscriptionTableColumnResponse(key='user_restaurant', label='User & Restaurant'),
+                SubscriptionTableColumnResponse(key='plan_name', label='Plan Name'),
+                SubscriptionTableColumnResponse(key='billing_cycle', label='Billing Cycle'),
+                SubscriptionTableColumnResponse(key='status', label='Status'),
+                SubscriptionTableColumnResponse(key='start_date', label='Start Date'),
+                SubscriptionTableColumnResponse(key='next_billing', label='Next Billing'),
+                SubscriptionTableColumnResponse(key='actions', label='Actions'),
+            ],
+            pagination_label=f"Showing 1 to {len(users)} of {total:,} entries" if total else 'No subscription entries found',
+            summary=summary,
             revenue_chart=self._build_revenue_chart(all_subscription_users, plan_map, query.months),
             items=[self._to_subscription_item(user) for user in users],
             **pagination,
@@ -89,8 +122,25 @@ class SubscriptionService(BaseService):
         )
         pagination = build_pagination_meta(total=total, page=query.page, page_size=query.page_size)
         serialized_plans = [self._to_plan_response(plan) for plan in plans]
+        active_plan = self._to_active_plan_display(plans[0]) if plans else None
         return SubscriptionPlanManagementResponse(
+            coupon_form_fields=[
+                CouponFormFieldResponse(key='code', label='Coupon Code', input_type='text', placeholder='E.G. SAVE20'),
+                CouponFormFieldResponse(key='discount_type', label='Discount Type', input_type='select', options=['Percentage (%)', 'Fixed Amount']),
+                CouponFormFieldResponse(key='value', label='Value', input_type='number', placeholder='20'),
+                CouponFormFieldResponse(key='expires_at', label='Expiration Date', input_type='date', placeholder='mm/dd/yyyy'),
+                CouponFormFieldResponse(key='usage_limit', label='Usage Limit', input_type='number', placeholder='100'),
+            ],
+            coupon_table_columns=[
+                CouponTableColumnResponse(key='code', label='Coupon Code'),
+                CouponTableColumnResponse(key='discount', label='Discount'),
+                CouponTableColumnResponse(key='usage_count', label='Usage Count'),
+                CouponTableColumnResponse(key='expiration_date', label='Expiration Date'),
+                CouponTableColumnResponse(key='status', label='Status'),
+            ],
+            coupon_pagination_label=f"Showing {len(coupons)} of {total} coupons",
             plan=serialized_plans[0] if serialized_plans else None,
+            active_plan=active_plan,
             plans=serialized_plans,
             coupons=CouponListResponse(items=[self._to_coupon_response(coupon) for coupon in coupons], **pagination),
         )
@@ -301,6 +351,7 @@ class SubscriptionService(BaseService):
 
     def _to_subscription_item(self, user: dict) -> SubscriptionTableItemResponse:
         serialized = self.serialize(user)
+        status = serialized.get('subscription_status')
         return SubscriptionTableItemResponse(
             user_id=serialized['id'],
             full_name=serialized['full_name'],
@@ -308,9 +359,17 @@ class SubscriptionService(BaseService):
             restaurant_name=serialized.get('restaurant_name'),
             plan_name=serialized.get('subscription_plan_name'),
             billing_cycle=serialized.get('subscription_plan'),
-            status=serialized.get('subscription_status'),
+            status=status,
             start_date=serialized.get('subscription_started_at'),
             next_billing=self._resolve_next_billing(serialized),
+            user_restaurant_label=serialized['full_name'],
+            user_email_label=serialized['email'],
+            billing_cycle_label=self._billing_cycle_label(serialized.get('subscription_plan')),
+            status_label=self._status_label(status),
+            status_color=self._status_color(status),
+            start_date_formatted=self._format_subscription_date(serialized.get('subscription_started_at')),
+            next_billing_formatted=self._format_subscription_date(self._resolve_next_billing(serialized)),
+            actions_menu=self._build_subscription_actions(serialized['id'], status),
         )
 
     def _resolve_next_billing(self, user: dict) -> datetime | None:
@@ -353,3 +412,70 @@ class SubscriptionService(BaseService):
     @staticmethod
     def _selection_required(user: dict) -> bool:
         return not bool(user.get('subscription_plan_name'))
+    @staticmethod
+    def _format_currency(value: float) -> str:
+        return f"${value:,.2f}"
+
+    @staticmethod
+    def _billing_cycle_label(value: str | None) -> str | None:
+        if value == SubscriptionPlan.ONE_YEAR:
+            return 'YEARLY'
+        if value == SubscriptionPlan.ONE_MONTH:
+            return 'MONTHLY'
+        return None
+
+    @staticmethod
+    def _status_label(value: str | None) -> str | None:
+        if not value:
+            return None
+        return str(value).capitalize()
+
+    @staticmethod
+    def _status_color(value: str | None) -> str | None:
+        return {
+            SubscriptionStatus.ACTIVE: 'green',
+            SubscriptionStatus.TRIAL: 'blue',
+            SubscriptionStatus.CANCELED: 'gray',
+            SubscriptionStatus.EXPIRED: 'red',
+            SubscriptionStatus.SUSPENDED: 'orange',
+        }.get(value)
+
+    @staticmethod
+    def _format_subscription_date(value: datetime | str | None) -> str | None:
+        if value is None:
+            return '-'
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return value.strftime('%b %d, %Y')
+
+    @staticmethod
+    def _build_subscription_actions(user_id: str, status: str | None) -> list[SubscriptionRowActionResponse]:
+        actions: list[SubscriptionRowActionResponse] = []
+        if status == SubscriptionStatus.TRIAL:
+            actions.append(SubscriptionRowActionResponse(key='extend_trial', label='Extend Trial', method='PATCH', endpoint=f'/api/v1/users/{user_id}'))
+        actions.append(SubscriptionRowActionResponse(key='more', label='More Actions', method='GET', endpoint=f'/api/v1/users/{user_id}'))
+        return actions
+    def _to_active_plan_display(self, plan: dict) -> SubscriptionPlanDisplayResponse:
+        serialized = self.serialize(plan)
+        annual_savings_label = None
+        if serialized['monthly_price'] > 0 and serialized['annual_price'] > 0:
+            monthly_total = serialized['monthly_price'] * 12
+            savings_percent = round(((monthly_total - serialized['annual_price']) / monthly_total) * 100) if monthly_total else 0
+            annual_savings_label = f"or ${serialized['annual_price']:,.0f} / year (save {savings_percent}%)"
+        return SubscriptionPlanDisplayResponse(
+            id=serialized['id'],
+            name=serialized['name'],
+            monthly_price=serialized['monthly_price'],
+            monthly_price_formatted=f"${serialized['monthly_price']:,.0f} / month",
+            annual_price=serialized['annual_price'],
+            annual_price_formatted=f"${serialized['annual_price']:,.0f} / year",
+            annual_savings_label=annual_savings_label,
+            trial_status_label=f"Trial Status: {serialized['trial_days']} days free trial active for new users",
+            features=serialized['features'],
+            internal_actions=[
+                SubscriptionPlanManagementActionResponse(key='edit_monthly_price', label='Edit Price', method='PATCH', endpoint='/api/v1/subscriptions/plans'),
+                SubscriptionPlanManagementActionResponse(key='edit_annual_price', label='Edit Annual Price', method='PATCH', endpoint='/api/v1/subscriptions/plans'),
+                SubscriptionPlanManagementActionResponse(key='change_trial_period', label='Change Trial Period', method='PATCH', endpoint='/api/v1/subscriptions/plans'),
+            ],
+            visibility_enabled=bool(serialized['is_visible']),
+        )

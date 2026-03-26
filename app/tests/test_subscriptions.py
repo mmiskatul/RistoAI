@@ -204,15 +204,35 @@ def test_subscription_overview_returns_page_data():
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload['page_title'] == 'Subscriptions Management'
+    assert payload['page_subtitle'] == 'Manage restaurant subscriptions and track platform revenue.'
+    assert payload['export_button_label'] == 'Export Data'
+    assert payload['plan_button_label'] == 'Our Subscriptions Plan'
+    assert payload['search_placeholder'] == 'Search by name, restaurant or email...'
+    assert payload['filter_button_label'] == 'Advanced Filters'
+    assert payload['filter_chips'][0] == {'key': 'all', 'label': 'All'}
     assert payload['summary'] == {
         'active_subscriptions': 1,
         'trial_users': 1,
         'monthly_revenue_mrr': 24.17,
         'annual_revenue': 290.0,
     }
+    assert payload['summary_cards'][0]['label'] == 'Active Subscriptions'
+    assert payload['summary_cards'][1]['label'] == 'Trial Users'
+    assert payload['summary_cards'][2]['label'] == 'Monthly Revenue (MRR)'
+    assert payload['summary_cards'][2]['value_formatted'] == '$24.17'
+    assert payload['summary_cards'][3]['label'] == 'Annual Revenue'
+    assert payload['revenue_chart_title'] == 'Monthly Subscription Revenue'
+    assert payload['revenue_chart_subtitle'] == 'Revenue growth across all subscription tiers.'
+    assert payload['revenue_chart_range_label'] == 'Last 6 months'
+    assert payload['table_columns'][0] == {'key': 'user_restaurant', 'label': 'User & Restaurant'}
+    assert payload['pagination_label'] == 'Showing 1 to 3 of 3 entries'
     assert payload['total'] == 3
     assert len(payload['revenue_chart']) == 6
     assert payload['items'][0]['plan_name'] is not None
+    assert payload['items'][0]['billing_cycle_label'] is not None
+    assert payload['items'][0]['status_label'] is not None
+    assert payload['items'][0]['start_date_formatted'] is not None
 
 
 def test_subscription_plan_management_returns_plans_and_coupons():
@@ -224,11 +244,24 @@ def test_subscription_plan_management_returns_plans_and_coupons():
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload['page_title'] == 'Subscriptions Plan Management'
+    assert payload['active_plan_section_title'] == 'Active Subscription Plans'
+    assert payload['create_coupon_section_title'] == 'Create Coupon'
+    assert payload['coupon_management_section_title'] == 'Coupon Management'
+    assert payload['create_coupon_button_label'] == 'Create Coupon Code'
+    assert payload['coupon_form_fields'][0]['key'] == 'code'
+    assert payload['coupon_table_columns'][0] == {'key': 'code', 'label': 'Coupon Code'}
+    assert payload['coupon_pagination_label'] == 'Showing 2 of 2 coupons'
     assert payload['plan']['name'] == 'Core Plan'
     assert payload['plan']['monthly_price'] == 29.0
     assert payload['plan']['annual_price'] == 290.0
     assert payload['plan']['trial_days'] == 7
     assert payload['plan']['is_visible'] is True
+    assert payload['active_plan']['name'] == 'Core Plan'
+    assert payload['active_plan']['monthly_price_formatted'] == '$29 / month'
+    assert payload['active_plan']['trial_status_label'] == 'Trial Status: 7 days free trial active for new users'
+    assert payload['active_plan']['internal_actions'][0]['label'] == 'Edit Price'
+    assert payload['active_plan']['visibility_enabled'] is True
     assert len(payload['plans']) == 1
     assert payload['plans'][0]['name'] == 'Core Plan'
     assert payload['coupons']['total'] == 2

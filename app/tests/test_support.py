@@ -150,9 +150,37 @@ def test_restaurant_can_create_support_ticket_and_admin_can_manage_it():
 
     assert management_response.status_code == 200
     management_payload = management_response.json()
+    assert management_payload['page_title'] == 'Support Management'
+    assert management_payload['page_subtitle'] == 'Track and resolve restaurant support requests across the platform.'
+    assert management_payload['search_placeholder'] == 'Search tickets, restaurants...'
+    assert management_payload['filter_button_label'] == 'Filters'
+    assert management_payload['filter_chips'][0] == {'key': 'all', 'label': 'All'}
     assert management_payload['summary']['open_tickets'] == 1
     assert management_payload['summary']['resolved_tickets'] == 0
+    assert management_payload['summary_cards'][0] == {
+        'key': 'open_tickets',
+        'label': 'Open Tickets',
+        'value': 1,
+        'value_formatted': '1',
+    }
+    assert management_payload['summary_cards'][1] == {
+        'key': 'resolved_tickets',
+        'label': 'Resolved Tickets',
+        'value': 0,
+        'value_formatted': '0',
+    }
+    assert management_payload['table_columns'][0] == {'key': 'user_restaurant', 'label': 'User & Restaurant'}
+    assert management_payload['pagination_label'] == 'Showing 1 to 1 of 1 tickets'
+    assert management_payload['items'][0]['user_name'] == 'Alex Rivera'
+    assert management_payload['items'][0]['user_restaurant_label'] == 'Alex Rivera'
     assert management_payload['items'][0]['issue_subject'] == 'Order not received'
+    assert management_payload['items'][0]['issue_subject_label'] == 'Order not received'
+    assert management_payload['items'][0]['status_label'] == 'Open'
+    assert management_payload['items'][0]['priority_label'] == 'High'
+    assert management_payload['items'][0]['date_formatted'] == 'Mar 26, 2026'
+    assert management_payload['items'][0]['view_endpoint'].endswith(ticket_id)
+    assert management_payload['items'][0]['actions_menu'][0]['label'] == 'View'
+    assert management_payload['items'][0]['actions_menu'][1]['label'] == 'Resolve Ticket'
 
     assert detail_response.status_code == 200
     detail_payload = detail_response.json()

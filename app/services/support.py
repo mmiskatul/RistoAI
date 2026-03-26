@@ -8,6 +8,10 @@ from app.core.enums import SupportTicketStatus
 from app.core.exceptions import NotFoundException
 from app.repositories.support_ticket import SupportTicketRepository
 from app.schemas.support import (
+    SupportManagementFilterChipResponse,
+    SupportManagementRowActionResponse,
+    SupportManagementSummaryCardResponse,
+    SupportManagementTableColumnResponse,
     SupportTicketActionResponse,
     SupportTicketCreateRequest,
     SupportTicketCustomerResponse,
@@ -65,11 +69,30 @@ class SupportService(BaseService):
             page_size=query.page_size,
         )
         pagination = build_pagination_meta(total=total, page=query.page, page_size=query.page_size)
+        summary = SupportTicketSummaryResponse(
+            open_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.OPEN),
+            resolved_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.RESOLVED),
+        )
         return SupportTicketManagementResponse(
-            summary=SupportTicketSummaryResponse(
-                open_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.OPEN),
-                resolved_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.RESOLVED),
-            ),
+            filter_chips=[
+                SupportManagementFilterChipResponse(key='all', label='All'),
+                SupportManagementFilterChipResponse(key='open', label='Open'),
+                SupportManagementFilterChipResponse(key='resolved', label='Resolved'),
+            ],
+            summary_cards=[
+                SupportManagementSummaryCardResponse(key='open_tickets', label='Open Tickets', value=summary.open_tickets, value_formatted=str(summary.open_tickets)),
+                SupportManagementSummaryCardResponse(key='resolved_tickets', label='Resolved Tickets', value=summary.resolved_tickets, value_formatted=str(summary.resolved_tickets)),
+            ],
+            table_columns=[
+                SupportManagementTableColumnResponse(key='user_restaurant', label='User & Restaurant'),
+                SupportManagementTableColumnResponse(key='issue_subject', label='Issue'),
+                SupportManagementTableColumnResponse(key='status', label='Status'),
+                SupportManagementTableColumnResponse(key='priority', label='Priority'),
+                SupportManagementTableColumnResponse(key='date', label='Date'),
+                SupportManagementTableColumnResponse(key='actions', label='Actions'),
+            ],
+            pagination_label=f"Showing 1 to {len(tickets)} of {total} tickets" if total else 'No support tickets found',
+            summary=summary,
             items=[self._to_ticket_list_item(ticket) for ticket in tickets],
             **pagination,
         )
@@ -129,6 +152,13 @@ class SupportService(BaseService):
             status=serialized['status'],
             priority=serialized['priority'],
             date=serialized['created_at'],
+            user_restaurant_label=serialized['user_name'],
+            issue_subject_label=serialized['subject'],
+            status_label=str(serialized['status']).capitalize(),
+            priority_label=str(serialized['priority']).capitalize(),
+            date_formatted=self._format_date(serialized['created_at']),
+            view_endpoint=f"/api/v1/support/tickets/{serialized['id']}",
+            actions_menu=self._build_row_actions(serialized['id'], serialized['status']),
         )
 
     def _to_ticket_detail(self, ticket: dict) -> SupportTicketDetailResponse:
@@ -162,3 +192,14 @@ class SupportService(BaseService):
             ),
             messages=messages,
         )
+
+    @staticmethod
+    def _format_date(value: str) -> str:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).strftime('%b %d, %Y')
+
+    @staticmethod
+    def _build_row_actions(ticket_id: str, status: str) -> list[SupportManagementRowActionResponse]:
+        actions = [SupportManagementRowActionResponse(key='view', label='View', method='GET', endpoint=f'/api/v1/support/tickets/{ticket_id}')]
+        if status != SupportTicketStatus.RESOLVED:
+            actions.append(SupportManagementRowActionResponse(key='resolve', label='Resolve Ticket', method='POST', endpoint=f'/api/v1/support/tickets/{ticket_id}/resolve'))
+        return actions
