@@ -126,26 +126,14 @@ class DocumentUploadExtractRequest(BaseSchema):
 
 
 class DocumentExtractionResponse(BaseSchema):
-    page_title: str = "Review Extracted Invoice"
-    preview_title: str = "Invoice Preview"
-    preview_subtitle: str = "Captured via Risto Scan"
-    preview_image_url: str | None = None
-    extracted_data_title: str = "Extracted Data"
-    supplier_name_label: str = "Supplier Name"
-    invoice_date_label: str = "Invoice Date"
-    line_items_title: str = "Line Items"
-    add_item_label: str = "Add Item"
-    grand_total_label: str = "Grand Total"
-    confirm_button_label: str = "Confirm & Save"
     supplier_name: str
     invoice_number: str | None = None
     invoice_date: str | None = None
     total_amount: float
-    total_amount_formatted: str | None = None
+    line_items: list[DocumentLineItemSchema]
+    source_file_name: str
     ai_provider: str
     ai_summary: str
-    source_file_name: str
-    line_items: list[DocumentLineItemSchema]
 
 
 class DocumentConfirmRequest(BaseSchema):

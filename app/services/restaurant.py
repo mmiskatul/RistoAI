@@ -217,11 +217,9 @@ class RestaurantOperationsService(BaseService):
             invoice_number=extraction.get("invoice_number"),
             invoice_date=None,
             total_amount=float(total_amount),
-            total_amount_formatted=self._format_currency(float(total_amount)),
             ai_provider="openai" if self.openai_service.enabled else "fallback",
             ai_summary=extraction.get("ai_summary") or "AI extraction completed.",
             source_file_name=file_name,
-            preview_image_url=None,
             line_items=[DocumentLineItemSchema(**item) for item in line_items],
         )
 

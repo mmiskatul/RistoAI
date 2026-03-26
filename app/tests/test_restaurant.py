@@ -27,13 +27,20 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     )
     assert upload_response.status_code == 200
     upload_payload = upload_response.json()
-    assert upload_payload["page_title"] == "Review Extracted Invoice"
-    assert upload_payload["preview_title"] == "Invoice Preview"
-    assert upload_payload["confirm_button_label"] == "Confirm & Save"
+    assert set(upload_payload.keys()) == {
+        "supplier_name",
+        "invoice_number",
+        "invoice_date",
+        "total_amount",
+        "line_items",
+        "source_file_name",
+        "ai_provider",
+        "ai_summary",
+    }
     assert upload_payload["supplier_name"] == "Fresh Food Supplier Ltd"
     assert upload_payload["ai_provider"] == "fallback"
     assert upload_payload["invoice_date"] is None
-    assert upload_payload["total_amount_formatted"] == "$165.00"
+    assert upload_payload["total_amount"] == 165.0
     assert len(upload_payload["line_items"]) == 3
     assert "id" not in upload_payload
 
