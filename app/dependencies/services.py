@@ -32,6 +32,7 @@ from app.services.restaurant import RestaurantOperationsService
 from app.services.onboarding import OnboardingService
 from app.services.openai_ops import OpenAIOperationsService
 from app.services.subscription import SubscriptionService
+from app.services.stripe_billing import StripeBillingService
 from app.services.support import SupportService
 from app.services.user_management import UserManagementService
 
@@ -53,7 +54,7 @@ async def get_user_management_service(db=Depends(get_database)) -> UserManagemen
 
 
 async def get_subscription_service(db=Depends(get_database)) -> SubscriptionService:
-    return SubscriptionService(UserRepository(db), SubscriptionPlanRepository(db), CouponRepository(db), UserSubscriptionRepository(db))
+    return SubscriptionService(UserRepository(db), SubscriptionPlanRepository(db), CouponRepository(db), UserSubscriptionRepository(db), StripeBillingService(get_settings()))
 
 
 async def get_support_service(db=Depends(get_database)) -> SupportService:

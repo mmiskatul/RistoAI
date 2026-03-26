@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
 
+    stripe_secret_key: str | None = Field(default=None, alias="STRIPE_SECRET_KEY")
+    stripe_publishable_key: str | None = Field(default=None, alias="STRIPE_PUBLISHABLE_KEY")
+    stripe_webhook_secret: str | None = Field(default=None, alias="STRIPE_WEBHOOK_SECRET")
+    stripe_price_id_monthly: str | None = Field(default=None, alias="STRIPE_PRICE_ID_MONTHLY")
+    stripe_price_id_yearly: str | None = Field(default=None, alias="STRIPE_PRICE_ID_YEARLY")
+    stripe_checkout_success_url: str = Field(default="http://localhost:3000/subscription/success", alias="STRIPE_CHECKOUT_SUCCESS_URL")
+    stripe_checkout_cancel_url: str = Field(default="http://localhost:3000/subscription/cancel", alias="STRIPE_CHECKOUT_CANCEL_URL")
+    stripe_customer_portal_return_url: str = Field(default="http://localhost:3000/settings/subscription", alias="STRIPE_CUSTOMER_PORTAL_RETURN_URL")
+
     @computed_field
     @property
     def openapi_url(self) -> str:

@@ -11,10 +11,14 @@ from app.config.settings import Settings
 from app.core.enums import CouponDiscountType, CouponStatus, SubscriptionPlan, SubscriptionStatus, UserRole
 from app.core.security import token_manager
 from app.db.mongodb import get_database
+from app.dependencies.services import get_subscription_service
 from app.main import create_app
+from app.repositories.coupon import CouponRepository
 from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
+from app.repositories.user_subscription import UserSubscriptionRepository
 from app.services.bootstrap import BootstrapService
+from app.services.subscription import SubscriptionService
 
 
 def _build_app_with_mock_db():
@@ -337,3 +341,112 @@ def test_subscriptions_requires_super_admin():
     assert response.status_code == 403
     assert response.json()['error']['code'] == 'forbidden'
 
+
+
+class _FakeStripeBillingService:
+    def __init__(self) -> None:
+        self.settings = type('Settings', (), {'stripe_publishable_key': 'pk_test_123', 'stripe_price_id_monthly': 'price_month', 'stripe_price_id_yearly': 'price_year'})()
+
+    async def create_customer(self, *, email: str, name: str, metadata: dict[str, str]):
+        return {'id': 'cus_test_123', 'email': email, 'name': name, 'metadata': metadata}
+
+    async def create_checkout_session(self, *, customer_id: str, billing_cycle, metadata: dict[str, str], trial_days: int = 0):
+        return {'id': 'cs_test_123', 'url': 'https://checkout.stripe.test/session', 'customer': customer_id, 'metadata': metadata, 'trial_days': trial_days}
+
+    async def create_customer_portal_session(self, *, customer_id: str):
+        return {'url': 'https://billing.stripe.test/portal', 'customer': customer_id}
+
+    def construct_event(self, payload: bytes, sig_header: str | None):
+        return {'type': 'checkout.session.completed', 'data': {'object': {'subscription': 'sub_test_123', 'customer': 'cus_test_123', 'metadata': {'user_id': self.user_id}}}}
+
+    async def retrieve_subscription(self, subscription_id: str):
+        return {
+            'id': subscription_id,
+            'customer': 'cus_test_123',
+            'status': 'active',
+            'metadata': {'user_id': self.user_id, 'plan_name': 'Core Plan'},
+            'current_period_start': 1772486400,
+            'current_period_end': 1775164800,
+            'items': {'data': [{'price': {'id': 'price_month'}}]},
+        }
+
+
+def test_user_can_create_stripe_checkout_session_and_customer_portal():
+    app, mock_db = _build_app_with_mock_db()
+    _, owner_id = _seed_subscription_data(mock_db)
+    owner_token = token_manager.create_access_token(str(owner_id), UserRole.RESTAURANT_OWNER)
+    fake_stripe = _FakeStripeBillingService()
+    fake_stripe.user_id = str(owner_id)
+
+    async def override_subscription_service():
+        return SubscriptionService(
+            UserRepository(mock_db),
+            SubscriptionPlanRepository(mock_db),
+            CouponRepository(mock_db),
+            UserSubscriptionRepository(mock_db),
+            fake_stripe,
+        )
+
+    app.dependency_overrides[get_subscription_service] = override_subscription_service
+
+    with TestClient(app) as client:
+        checkout_response = client.post(
+            '/api/v1/subscriptions/user/checkout-session',
+            headers={'Authorization': f'Bearer {owner_token}'},
+            json={'billing_cycle': '1_month', 'start_trial': False},
+        )
+        portal_response = client.post(
+            '/api/v1/subscriptions/user/customer-portal',
+            headers={'Authorization': f'Bearer {owner_token}'},
+        )
+
+    assert checkout_response.status_code == 200
+    assert checkout_response.json() == {
+        'session_id': 'cs_test_123',
+        'checkout_url': 'https://checkout.stripe.test/session',
+        'publishable_key': 'pk_test_123',
+    }
+    assert portal_response.status_code == 200
+    assert portal_response.json() == {'portal_url': 'https://billing.stripe.test/portal'}
+
+    user = asyncio.run(mock_db['users'].find_one({'_id': owner_id}))
+    assert user['stripe_customer_id'] == 'cus_test_123'
+
+
+def test_stripe_webhook_syncs_subscription_into_database():
+    app, mock_db = _build_app_with_mock_db()
+    _, owner_id = _seed_subscription_data(mock_db)
+    fake_stripe = _FakeStripeBillingService()
+    fake_stripe.user_id = str(owner_id)
+
+    async def override_subscription_service():
+        return SubscriptionService(
+            UserRepository(mock_db),
+            SubscriptionPlanRepository(mock_db),
+            CouponRepository(mock_db),
+            UserSubscriptionRepository(mock_db),
+            fake_stripe,
+        )
+
+    app.dependency_overrides[get_subscription_service] = override_subscription_service
+
+    with TestClient(app) as client:
+        response = client.post(
+            '/api/v1/subscriptions/webhook',
+            headers={'Stripe-Signature': 'sig_test'},
+            content=b'{}',
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {'received': True, 'event_type': 'checkout.session.completed'}
+
+    user = asyncio.run(mock_db['users'].find_one({'_id': owner_id}))
+    assert user['stripe_customer_id'] == 'cus_test_123'
+    assert user['stripe_subscription_id'] == 'sub_test_123'
+    assert user['stripe_price_id'] == 'price_month'
+    assert user['subscription_status'] == 'active'
+
+    current_subscription = asyncio.run(mock_db['user_subscriptions'].find_one({'user_id': owner_id, 'stripe_subscription_id': 'sub_test_123'}))
+    assert current_subscription is not None
+    assert current_subscription['payment_provider'] == 'stripe'
+    assert current_subscription['status'] == 'active'

@@ -253,6 +253,21 @@ class UserSubscriptionSelectRequest(BaseSchema):
     start_trial: bool = True
 
 
+class UserSubscriptionCheckoutSessionResponse(BaseSchema):
+    session_id: str
+    checkout_url: str
+    publishable_key: str | None = None
+
+
+class UserSubscriptionPortalResponse(BaseSchema):
+    portal_url: str
+
+
+class StripeWebhookResponse(BaseSchema):
+    received: bool = True
+    event_type: str
+
+
 class UserSubscriptionDiscountPreviewRequest(BaseSchema):
     billing_cycle: SubscriptionPlan
     coupon_code: str = Field(min_length=2, max_length=50)

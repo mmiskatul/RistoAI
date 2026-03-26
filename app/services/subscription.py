@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.core.enums import CouponStatus, SubscriptionPlan, SubscriptionStatus
 from app.core.exceptions import ConflictException, ValidationException
@@ -9,6 +10,7 @@ from app.repositories.coupon import CouponRepository
 from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 from app.repositories.user_subscription import UserSubscriptionRepository
+from app.services.stripe_billing import StripeBillingService
 from app.schemas.subscription import (
     CouponActionResponse,
     CouponCreateRequest,
@@ -38,9 +40,12 @@ from app.schemas.subscription import (
     UserSubscriptionDiscountPreviewRequest,
     UserSubscriptionDiscountPreviewResponse,
     UserSubscriptionActionResponse,
+    UserSubscriptionCheckoutSessionResponse,
     UserSubscriptionPlanListResponse,
     UserSubscriptionPlanResponse,
+    UserSubscriptionPortalResponse,
     UserSubscriptionSelectRequest,
+    StripeWebhookResponse,
 )
 from app.services.base import BaseService
 from app.utils.pagination import build_pagination_meta
@@ -53,11 +58,13 @@ class SubscriptionService(BaseService):
         subscription_plan_repository: SubscriptionPlanRepository,
         coupon_repository: CouponRepository,
         user_subscription_repository: UserSubscriptionRepository,
+        stripe_billing_service: StripeBillingService | None = None,
     ) -> None:
         self.user_repository = user_repository
         self.subscription_plan_repository = subscription_plan_repository
         self.coupon_repository = coupon_repository
         self.user_subscription_repository = user_subscription_repository
+        self.stripe_billing_service = stripe_billing_service
 
     async def get_overview(self, query: SubscriptionOverviewQuery) -> SubscriptionOverviewResponse:
         users, total = await self.user_repository.get_filtered_subscription_users(
@@ -220,6 +227,198 @@ class SubscriptionService(BaseService):
             message='Subscription plan selected successfully',
             subscription=self._to_user_current_subscription(updated_user),
         )
+
+    async def create_checkout_session(self, current_user: dict, payload: UserSubscriptionSelectRequest) -> UserSubscriptionCheckoutSessionResponse:
+        if self.stripe_billing_service is None:
+            raise ValidationException('Stripe billing is not available')
+        plan = await self._get_single_visible_plan()
+        customer_id = current_user.get('stripe_customer_id')
+        if not customer_id:
+            customer = await self.stripe_billing_service.create_customer(
+                email=current_user['email'],
+                name=current_user['full_name'],
+                metadata={'user_id': str(current_user['_id'])},
+            )
+            customer_id = customer['id']
+            await self.user_repository.update(current_user['_id'], {'stripe_customer_id': customer_id})
+        session = await self.stripe_billing_service.create_checkout_session(
+            customer_id=customer_id,
+            billing_cycle=payload.billing_cycle,
+            metadata={
+                'user_id': str(current_user['_id']),
+                'billing_cycle': str(payload.billing_cycle),
+                'plan_name': str(plan['name']),
+            },
+            trial_days=int(plan.get('trial_days', 0)) if payload.start_trial else 0,
+        )
+        return UserSubscriptionCheckoutSessionResponse(
+            session_id=session['id'],
+            checkout_url=session['url'],
+            publishable_key=getattr(self.stripe_billing_service.settings, 'stripe_publishable_key', None),
+        )
+
+    async def create_customer_portal(self, current_user: dict) -> UserSubscriptionPortalResponse:
+        if self.stripe_billing_service is None:
+            raise ValidationException('Stripe billing is not available')
+        customer_id = current_user.get('stripe_customer_id')
+        if not customer_id:
+            raise ValidationException('Stripe customer does not exist for this user')
+        session = await self.stripe_billing_service.create_customer_portal_session(customer_id=customer_id)
+        return UserSubscriptionPortalResponse(portal_url=session['url'])
+
+    async def handle_stripe_webhook(self, payload: bytes, signature: str | None) -> StripeWebhookResponse:
+        if self.stripe_billing_service is None:
+            raise ValidationException('Stripe billing is not available')
+        event = self.stripe_billing_service.construct_event(payload, signature)
+        event_type = event['type']
+        data = event['data']['object']
+
+        if event_type == 'checkout.session.completed' and data.get('subscription'):
+            await self._sync_stripe_subscription(user_id=data.get('metadata', {}).get('user_id'), stripe_subscription_id=data['subscription'], stripe_customer_id=data.get('customer'))
+        elif event_type in {'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'}:
+            await self._sync_stripe_subscription_object(data)
+        elif event_type == 'invoice.paid' and data.get('subscription'):
+            await self._sync_stripe_subscription(user_id=None, stripe_subscription_id=data['subscription'], stripe_customer_id=data.get('customer'))
+        elif event_type == 'invoice.payment_failed' and data.get('subscription'):
+            await self._mark_failed_subscription(data['subscription'])
+
+        return StripeWebhookResponse(received=True, event_type=event_type)
+
+
+    async def _sync_stripe_subscription(
+        self,
+        *,
+        user_id: str | None,
+        stripe_subscription_id: str,
+        stripe_customer_id: str | None = None,
+    ) -> None:
+        if self.stripe_billing_service is None:
+            return
+        subscription = await self.stripe_billing_service.retrieve_subscription(stripe_subscription_id)
+        if stripe_customer_id and not subscription.get('customer'):
+            subscription['customer'] = stripe_customer_id
+        metadata = subscription.get('metadata') or {}
+        if user_id and not metadata.get('user_id'):
+            metadata['user_id'] = user_id
+            subscription['metadata'] = metadata
+        await self._sync_stripe_subscription_object(subscription)
+
+    async def _sync_stripe_subscription_object(self, subscription: dict[str, Any]) -> None:
+        metadata = subscription.get('metadata') or {}
+        user = None
+        user_id = metadata.get('user_id')
+        if user_id:
+            user = await self.user_repository.get_by_id(user_id)
+        if user is None and subscription.get('customer'):
+            user = await self.user_repository.get_by_stripe_customer_id(str(subscription['customer']))
+        if user is None and subscription.get('id'):
+            user = await self.user_repository.get_by_stripe_subscription_id(str(subscription['id']))
+        if user is None:
+            return
+
+        started_at = self._from_unix_timestamp(subscription.get('current_period_start'))
+        expires_at = self._from_unix_timestamp(subscription.get('current_period_end'))
+        price_id = self._extract_price_id(subscription)
+        billing_cycle = self._billing_cycle_from_price_id(price_id)
+        status = self._map_stripe_status(subscription.get('status'))
+
+        plan_name = metadata.get('plan_name') or user.get('subscription_plan_name')
+        if not plan_name:
+            plan = await self._get_single_visible_plan()
+            plan_name = str(plan['name'])
+
+        user_updates = {
+            'stripe_customer_id': subscription.get('customer'),
+            'stripe_subscription_id': subscription.get('id'),
+            'stripe_price_id': price_id,
+            'subscription_plan_name': plan_name,
+            'subscription_plan': billing_cycle,
+            'subscription_status': status,
+            'subscription_started_at': started_at,
+            'subscription_expires_at': expires_at,
+        }
+        updated_user = await self.user_repository.update(user['_id'], user_updates)
+
+        current_subscription = await self.user_subscription_repository.get_current_by_stripe_subscription_id(str(subscription['id']))
+        payload = {
+            'user_id': updated_user['_id'],
+            'subscription_plan_id': None,
+            'plan_name': plan_name,
+            'billing_cycle': billing_cycle,
+            'status': status,
+            'start_trial': status == SubscriptionStatus.TRIAL,
+            'trial_days': 0,
+            'amount': 0.0,
+            'is_current': status != SubscriptionStatus.CANCELED,
+            'started_at': started_at,
+            'ended_at': None if status != SubscriptionStatus.CANCELED else datetime.now(UTC),
+            'expires_at': expires_at,
+            'payment_provider': 'stripe',
+            'stripe_checkout_session_id': None,
+            'stripe_subscription_id': subscription.get('id'),
+            'stripe_customer_id': subscription.get('customer'),
+            'stripe_price_id': price_id,
+            'stripe_invoice_id': None,
+        }
+        if current_subscription:
+            await self.user_subscription_repository.update(current_subscription['_id'], payload)
+        else:
+            await self.user_subscription_repository.close_current_for_user(
+                str(updated_user['_id']),
+                ended_at=datetime.now(UTC),
+                final_status=SubscriptionStatus.CANCELED,
+            )
+            await self.user_subscription_repository.create(payload)
+
+    async def _mark_failed_subscription(self, stripe_subscription_id: str) -> None:
+        user = await self.user_repository.get_by_stripe_subscription_id(stripe_subscription_id)
+        if user is not None:
+            await self.user_repository.update(
+                user['_id'],
+                {'subscription_status': SubscriptionStatus.SUSPENDED},
+            )
+        current_subscription = await self.user_subscription_repository.get_current_by_stripe_subscription_id(stripe_subscription_id)
+        if current_subscription is not None:
+            await self.user_subscription_repository.update(
+                current_subscription['_id'],
+                {'status': SubscriptionStatus.SUSPENDED},
+            )
+
+    def _extract_price_id(self, subscription: dict[str, Any]) -> str | None:
+        items = subscription.get('items', {}).get('data') or []
+        if not items:
+            return None
+        return items[0].get('price', {}).get('id')
+
+    def _billing_cycle_from_price_id(self, price_id: str | None) -> SubscriptionPlan:
+        settings = getattr(self.stripe_billing_service, 'settings', None)
+        yearly_price_id = getattr(settings, 'stripe_price_id_yearly', None) if settings else None
+        if yearly_price_id and price_id == yearly_price_id:
+            return SubscriptionPlan.ONE_YEAR
+        return SubscriptionPlan.ONE_MONTH
+
+    @staticmethod
+    def _from_unix_timestamp(value: Any) -> datetime | None:
+        if value in (None, ''):
+            return None
+        try:
+            return datetime.fromtimestamp(int(value), tz=UTC)
+        except (TypeError, ValueError, OSError):
+            return None
+
+    @staticmethod
+    def _map_stripe_status(value: str | None) -> SubscriptionStatus:
+        mapping = {
+            'trialing': SubscriptionStatus.TRIAL,
+            'active': SubscriptionStatus.ACTIVE,
+            'past_due': SubscriptionStatus.SUSPENDED,
+            'unpaid': SubscriptionStatus.SUSPENDED,
+            'paused': SubscriptionStatus.SUSPENDED,
+            'canceled': SubscriptionStatus.CANCELED,
+            'incomplete_expired': SubscriptionStatus.EXPIRED,
+            'incomplete': SubscriptionStatus.SUSPENDED,
+        }
+        return mapping.get(str(value), SubscriptionStatus.ACTIVE)
 
     async def update_plan(self, payload: SubscriptionPlanUpdateRequest) -> SubscriptionPlanActionResponse:
         updates = payload.model_dump(exclude_none=True, mode='json')

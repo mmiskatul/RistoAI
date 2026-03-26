@@ -18,6 +18,12 @@ class UserRepository(BaseRepository[dict]):
     async def get_by_email(self, email: str) -> dict | None:
         return await self.get_one({"email": email.lower()})
 
+    async def get_by_stripe_customer_id(self, stripe_customer_id: str) -> dict | None:
+        return await self.get_one({"stripe_customer_id": stripe_customer_id})
+
+    async def get_by_stripe_subscription_id(self, stripe_subscription_id: str) -> dict | None:
+        return await self.get_one({"stripe_subscription_id": stripe_subscription_id})
+
     async def get_role_counts(self) -> dict[str, int]:
         pipeline = [
             {"$group": {"_id": "$role", "count": {"$sum": 1}}},

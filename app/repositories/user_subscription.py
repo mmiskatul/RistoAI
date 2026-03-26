@@ -28,6 +28,12 @@ class UserSubscriptionRepository(BaseRepository[dict]):
             sort=[("created_at", -1)],
         )
 
+    async def get_current_by_stripe_subscription_id(self, stripe_subscription_id: str) -> dict | None:
+        return await self.collection.find_one(
+            {"stripe_subscription_id": stripe_subscription_id, "is_current": True},
+            sort=[("created_at", -1)],
+        )
+
     async def close_current_for_user(
         self,
         user_id: str,

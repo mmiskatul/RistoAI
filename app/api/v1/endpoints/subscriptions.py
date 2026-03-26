@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Request
 
 from app.core.enums import UserRole
 from app.dependencies.auth import require_roles
@@ -16,10 +16,13 @@ from app.schemas.subscription import (
     SubscriptionPlanActionResponse,
     SubscriptionPlanManagementResponse,
     SubscriptionPlanUpdateRequest,
+    StripeWebhookResponse,
     UserCurrentSubscriptionResponse,
     UserSubscriptionDiscountPreviewRequest,
     UserSubscriptionDiscountPreviewResponse,
     UserSubscriptionActionResponse,
+    UserSubscriptionCheckoutSessionResponse,
+    UserSubscriptionPortalResponse,
     UserSubscriptionPlanListResponse,
     UserSubscriptionSelectRequest,
 )
@@ -78,6 +81,33 @@ async def select_user_subscription_plan(
     service: SubscriptionService = Depends(get_subscription_service),
 ) -> UserSubscriptionActionResponse:
     return await service.select_user_plan(current_user, payload)
+
+
+@router.post('/user/checkout-session', response_model=UserSubscriptionCheckoutSessionResponse, tags=['User Subscription'], summary='Create Stripe Checkout Session', description='Creates a Stripe Checkout Session for a restaurant user to start a paid subscription in test or live mode.')
+async def create_user_subscription_checkout_session(
+    payload: UserSubscriptionSelectRequest,
+    current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> UserSubscriptionCheckoutSessionResponse:
+    return await service.create_checkout_session(current_user, payload)
+
+
+@router.post('/user/customer-portal', response_model=UserSubscriptionPortalResponse, tags=['User Subscription'], summary='Create Stripe Customer Portal Session', description='Creates a Stripe billing portal session for the current restaurant user.')
+async def create_user_subscription_customer_portal(
+    current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> UserSubscriptionPortalResponse:
+    return await service.create_customer_portal(current_user)
+
+
+@router.post('/webhook', response_model=StripeWebhookResponse, include_in_schema=False)
+async def stripe_webhook(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias='Stripe-Signature'),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> StripeWebhookResponse:
+    payload = await request.body()
+    return await service.handle_stripe_webhook(payload, stripe_signature)
 
 
 @router.patch('/plans', response_model=SubscriptionPlanActionResponse, tags=['Subscription Management'])
