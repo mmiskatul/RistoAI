@@ -38,6 +38,21 @@ class SupportTicketMessageResponse(BaseSchema):
     created_at: datetime
 
 
+class SupportTicketDetailBadgeResponse(BaseSchema):
+    label: str
+    variant: str
+
+
+class SupportTicketReplyComposerResponse(BaseSchema):
+    title: str = "Send a Reply"
+    placeholder: str = "Type your response..."
+    internal_note_label: str = "Post as internal note (hidden from customer)"
+    resolve_button_label: str = "Mark as Resolved"
+    send_button_label: str = "Send Reply"
+    reply_endpoint: str | None = None
+    resolve_endpoint: str | None = None
+
+
 class SupportManagementFilterChipResponse(BaseSchema):
     key: str
     label: str
@@ -122,6 +137,8 @@ class SupportTicketCustomerResponse(BaseSchema):
     phone: str | None = None
     location: str | None = None
     restaurant_name: str | None = None
+    card_title: str = "Customer Details"
+    subtitle: str | None = None
 
 
 class SupportTicketDetailResponse(BaseSchema):
@@ -132,8 +149,15 @@ class SupportTicketDetailResponse(BaseSchema):
     priority: SupportTicketPriority
     submitted_at: datetime
     resolved_at: datetime | None = None
+    page_title: str = "Support Ticket Detail"
+    breadcrumb_label: str | None = None
+    breadcrumb_current: str | None = None
+    submitted_label: str | None = None
+    submitted_meta: str | None = None
+    badges: list[SupportTicketDetailBadgeResponse] = Field(default_factory=list)
     customer: SupportTicketCustomerResponse
     messages: list[SupportTicketMessageResponse]
+    composer: SupportTicketReplyComposerResponse | None = None
 
 
 class SupportTicketActionResponse(BaseSchema):

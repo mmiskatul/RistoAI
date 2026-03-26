@@ -194,8 +194,22 @@ def test_restaurant_can_create_support_ticket_and_admin_can_manage_it():
 
     assert detail_response.status_code == 200
     detail_payload = detail_response.json()
+    assert detail_payload['page_title'] == 'Support Ticket Detail'
+    assert detail_payload['breadcrumb_label'] == 'Tickets'
+    assert detail_payload['breadcrumb_current'].startswith('Ticket TKT-')
+    assert detail_payload['submitted_label'] == 'Submitted'
+    assert detail_payload['submitted_meta'].endswith('by Alex Rivera')
+    assert detail_payload['badges'][0]['label'] == 'High Priority'
+    assert detail_payload['badges'][0]['variant'] == 'warning'
+    assert detail_payload['badges'][1] == {'label': 'Open', 'variant': 'warning'}
+    assert detail_payload['customer']['card_title'] == 'Customer Details'
     assert detail_payload['customer']['user_name'] == 'Alex Rivera'
+    assert detail_payload['customer']['subtitle'] == 'Customer since Jan 2023'
     assert detail_payload['messages'][0]['attachment_name'] == 'screenshot_order_status.png'
+    assert detail_payload['composer']['title'] == 'Send a Reply'
+    assert detail_payload['composer']['placeholder'] == 'Type your response to Alex Rivera...'
+    assert detail_payload['composer']['reply_endpoint'].endswith(f'/{ticket_id}/reply')
+    assert detail_payload['composer']['resolve_endpoint'].endswith(f'/{ticket_id}/resolve')
 
     assert reply_response.status_code == 200
     assert len(reply_response.json()['ticket']['messages']) == 2

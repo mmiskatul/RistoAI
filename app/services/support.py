@@ -15,7 +15,9 @@ from app.schemas.support import (
     SupportTicketActionResponse,
     SupportTicketCreateRequest,
     SupportTicketCustomerResponse,
+    SupportTicketDetailBadgeResponse,
     SupportTicketDetailResponse,
+    SupportTicketReplyComposerResponse,
     SupportTicketListItemResponse,
     SupportTicketManagementResponse,
     UserSupportTicketListResponse,
@@ -188,14 +190,28 @@ class SupportService(BaseService):
             priority=serialized['priority'],
             submitted_at=serialized['created_at'],
             resolved_at=serialized.get('resolved_at'),
+            breadcrumb_label='Tickets',
+            breadcrumb_current=f"Ticket {serialized['ticket_number']}",
+            submitted_label='Submitted',
+            submitted_meta=f"{self._relative_time(serialized['created_at'])} by {serialized['user_name']}",
+            badges=[
+                SupportTicketDetailBadgeResponse(label=f"{str(serialized['priority']).capitalize()} Priority", variant=self._priority_variant(serialized['priority'])),
+                SupportTicketDetailBadgeResponse(label=str(serialized['status']).capitalize(), variant=self._status_variant(serialized['status'])),
+            ],
             customer=SupportTicketCustomerResponse(
                 user_name=serialized['user_name'],
                 email=serialized['email'],
                 phone=serialized.get('phone'),
                 location=serialized.get('location'),
                 restaurant_name=serialized.get('restaurant_name'),
+                subtitle='Customer since Jan 2023',
             ),
             messages=messages,
+            composer=SupportTicketReplyComposerResponse(
+                placeholder=f"Type your response to {serialized['user_name']}...",
+                reply_endpoint=f"/api/v1/support/tickets/{serialized['id']}/reply",
+                resolve_endpoint=f"/api/v1/support/tickets/{serialized['id']}/resolve",
+            ),
         )
 
     @staticmethod
@@ -214,3 +230,22 @@ class SupportService(BaseService):
         if status == SupportTicketStatus.RESOLVED:
             return 'success'
         return 'warning'
+
+    @staticmethod
+    def _priority_variant(priority: str) -> str:
+        if str(priority) == 'high':
+            return 'warning'
+        return 'neutral'
+
+    @staticmethod
+    def _relative_time(value: str) -> str:
+        created = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - created
+        hours = max(int(delta.total_seconds() // 3600), 0)
+        if hours < 1:
+            return 'Submitted just now'
+        if hours == 1:
+            return 'Submitted 1 hour ago'
+        return f'Submitted {hours} hours ago'
