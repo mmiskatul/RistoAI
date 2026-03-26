@@ -707,18 +707,51 @@ class ChatConversationResponse(BaseSchema):
     messages: list[ChatMessageResponse]
 
 
+class SettingsLanguageOptionResponse(BaseSchema):
+    code: str
+    label: str
+    active: bool = False
+
+
+class SettingsActionItemResponse(BaseSchema):
+    label: str
+    endpoint: str
+
+
 class RestaurantProfileResponse(BaseSchema):
+    page_title: str = "Settings"
+    edit_page_title: str = "Edit User"
     full_name: str
     email: str
     phone: str | None = None
     restaurant_name: str | None = None
+    restaurant_type: str | None = None
     location: str | None = None
+    city_location: str | None = None
+    number_of_seats: int | None = None
     preferred_language: str
+    profile_image_url: str | None = None
+    profile_subtitle: str | None = None
+    edit_profile_button_label: str = "Edit Profile"
+    edit_profile_endpoint: str = "/api/v1/restaurant/settings/profile"
+    change_photo_label: str = "Change Photo"
+    restaurant_details_title: str = "Restaurant Details"
+    cancel_button_label: str = "Cancel"
+    save_button_label: str = "Save Changes"
+    language_options: list[SettingsLanguageOptionResponse] = Field(default_factory=list)
+    account_settings_title: str = "Account Settings"
+    account_settings: list[SettingsActionItemResponse] = Field(default_factory=list)
+    support_legal_title: str = "Support & Legal"
+    support_legal: list[SettingsActionItemResponse] = Field(default_factory=list)
+    logout_button_label: str = "Logout"
 
 
 class RestaurantProfileUpdateRequest(BaseSchema):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     phone: str | None = Field(default=None, max_length=30)
     restaurant_name: str | None = Field(default=None, max_length=120)
+    restaurant_type: str | None = Field(default=None, max_length=80)
     location: str | None = Field(default=None, max_length=120)
+    city_location: str | None = Field(default=None, max_length=120)
+    number_of_seats: int | None = Field(default=None, ge=0)
 

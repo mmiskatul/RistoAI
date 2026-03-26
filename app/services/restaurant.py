@@ -80,6 +80,8 @@ from app.schemas.restaurant import (
     RestaurantHomeResponse,
     RestaurantProfileResponse,
     RestaurantProfileUpdateRequest,
+    SettingsActionItemResponse,
+    SettingsLanguageOptionResponse,
     QuickActionResponse,
     VatOverviewResponse,
 )
@@ -928,17 +930,42 @@ class RestaurantOperationsService(BaseService):
 
     async def get_profile(self, current_user: dict) -> RestaurantProfileResponse:
         serialized = self.serialize(current_user)
+        preferred_language = serialized.get("preferred_language", "en")
+        location = serialized.get("city_location") or serialized.get("location")
+        restaurant_name = serialized.get("restaurant_name")
+        profile_subtitle = f"{restaurant_name} ? {location}" if restaurant_name and location else restaurant_name or location
         return RestaurantProfileResponse(
             full_name=serialized["full_name"],
             email=serialized["email"],
             phone=serialized.get("phone"),
-            restaurant_name=serialized.get("restaurant_name"),
+            restaurant_name=restaurant_name,
+            restaurant_type=serialized.get("restaurant_type"),
             location=serialized.get("location"),
-            preferred_language=serialized.get("preferred_language", "en"),
+            city_location=location,
+            number_of_seats=serialized.get("number_of_seats"),
+            preferred_language=preferred_language,
+            profile_subtitle=profile_subtitle,
+            language_options=[
+                SettingsLanguageOptionResponse(code="en", label="English", active=preferred_language == "en"),
+                SettingsLanguageOptionResponse(code="it", label="Italian", active=preferred_language == "it"),
+            ],
+            account_settings=[
+                SettingsActionItemResponse(label="Manage Subscription", endpoint="/api/v1/subscriptions/user/current"),
+                SettingsActionItemResponse(label="Notification Settings", endpoint="/api/v1/restaurant/settings/profile"),
+                SettingsActionItemResponse(label="Change Password", endpoint="/api/v1/auth/restaurant/forgot-password"),
+                SettingsActionItemResponse(label="Two-Factor Authentication", endpoint="/api/v1/restaurant/settings/profile"),
+            ],
+            support_legal=[
+                SettingsActionItemResponse(label="Terms & Conditions", endpoint="/api/v1/support/tickets"),
+                SettingsActionItemResponse(label="Privacy Policy", endpoint="/api/v1/support/tickets"),
+                SettingsActionItemResponse(label="Help Center", endpoint="/api/v1/support/tickets"),
+            ],
         )
 
     async def update_profile(self, current_user: dict, payload: RestaurantProfileUpdateRequest) -> RestaurantProfileResponse:
         updates = payload.model_dump(exclude_none=True)
+        if "city_location" in updates and "location" not in updates:
+            updates["location"] = updates["city_location"]
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
         return await self.get_profile(user)
 
