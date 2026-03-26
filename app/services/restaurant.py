@@ -825,7 +825,7 @@ class RestaurantOperationsService(BaseService):
                 )
             )
         return AnalyticsOverviewResponse(
-            insight_banner=self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
+            insight_banner=await self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
             estimated_profit=context["profit_total"],
             estimated_profit_formatted=self._format_currency(float(context["profit_total"])),
             peak_hour_label="7:00 PM",
@@ -865,7 +865,7 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
-        return self._build_analytics_insight_banner(
+        return await self._build_analytics_insight_banner(
             serialized_records=self.serialize_list(daily_records),
             serialized_expenses=self.serialize_list(expenses),
         )
@@ -1185,7 +1185,7 @@ class RestaurantOperationsService(BaseService):
             },
         )
 
-    def _build_analytics_insight_banner(
+    async def _build_analytics_insight_banner(
         self,
         *,
         serialized_records: list[dict[str, Any]],
@@ -1249,23 +1249,44 @@ class RestaurantOperationsService(BaseService):
                 "food": "Review purchasing and menu mix for this day.",
                 "operations": "Review overhead allocations and shift planning.",
             }.get(best_group, "Review cost drivers for this day.")
-            return AnalyticsInsightBannerResponse(
-                title=f"Optimization Tip: {group_label} are {percent}% higher on {weekday_names[best_weekday]}s relative to revenue.",
-                subtitle=subtitle,
+            fallback_title = f"Optimization Tip: {group_label} are {percent}% higher on {weekday_names[best_weekday]}s relative to revenue."
+            fallback_subtitle = subtitle
+            generated = await self.openai_service.generate_business_insight(
+                analytics_context={
+                    "insight_type": best_group,
+                    "weekday": weekday_names[best_weekday],
+                    "lift_percent": percent,
+                    "ratio": round(best_ratio * 100, 2),
+                    "revenue_by_weekday": revenue_by_weekday,
+                    "costs_by_group_by_weekday": costs_by_group_by_weekday,
+                },
+                fallback_title=fallback_title,
+                fallback_subtitle=fallback_subtitle,
             )
+            return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
 
         if serialized_expenses:
             top_expense = max(serialized_expenses, key=lambda item: float(item.get("amount", 0)))
             category_name = str(top_expense.get("category", "operating"))
-            return AnalyticsInsightBannerResponse(
-                title=f"Optimization Tip: {category_name} is your largest recent cost driver.",
-                subtitle="Review the largest expense category against revenue trend.",
+            fallback_title = f"Optimization Tip: {category_name} is your largest recent cost driver."
+            fallback_subtitle = "Review the largest expense category against revenue trend."
+            generated = await self.openai_service.generate_business_insight(
+                analytics_context={
+                    "insight_type": "largest_expense",
+                    "category": category_name,
+                    "top_expense_amount": float(top_expense.get("amount", 0)),
+                },
+                fallback_title=fallback_title,
+                fallback_subtitle=fallback_subtitle,
             )
+            return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
 
-        return AnalyticsInsightBannerResponse(
-            title="Optimization Tip: Add more daily data to unlock pattern-based insights.",
-            subtitle="We need a bit more revenue and cost history to generate stronger recommendations.",
+        generated = await self.openai_service.generate_business_insight(
+            analytics_context={"insight_type": "insufficient_data"},
+            fallback_title="Optimization Tip: Add more daily data to unlock pattern-based insights.",
+            fallback_subtitle="We need a bit more revenue and cost history to generate stronger recommendations.",
         )
+        return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
 
     @staticmethod
     def _format_currency(value: float) -> str:
