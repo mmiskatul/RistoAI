@@ -16,15 +16,36 @@ def validate_password_strength(value: str) -> str:
 
 
 class RegisterRequest(BaseSchema):
-    full_name: str = Field(min_length=2, max_length=120)
+    restaurant_name: str | None = Field(default=None, min_length=2, max_length=160)
+    owner_full_name: str | None = Field(default=None, min_length=2, max_length=120)
+    full_name: str | None = Field(default=None, min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(min_length=8, max_length=72)
+    confirm_password: str | None = Field(default=None, min_length=8, max_length=72)
     phone: str | None = Field(default=None, max_length=30)
 
     @field_validator('password')
     @classmethod
     def validate_password(cls, value: str) -> str:
         return validate_password_strength(value)
+
+    @field_validator('confirm_password')
+    @classmethod
+    def validate_confirm_password(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return validate_password_strength(value)
+
+    @model_validator(mode='after')
+    def normalize_registration_fields(self) -> 'RegisterRequest':
+        resolved_name = self.owner_full_name or self.full_name
+        if not resolved_name:
+            raise ValueError('Owner full name is required')
+        if self.confirm_password is not None and self.password != self.confirm_password:
+            raise ValueError('Password and confirm password must match')
+        self.full_name = resolved_name
+        self.owner_full_name = resolved_name
+        return self
 
 
 class LoginRequest(BaseSchema):

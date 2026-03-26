@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from html import escape
 from typing import Any
 
 from app.core.exceptions import ValidationException
@@ -274,6 +275,14 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
         return self._to_document_detail(document)
+
+    async def download_document_file(self, current_user: dict, document_id: str) -> tuple[str, str]:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
+        serialized = self.serialize(document)
+        supplier = str(serialized.get("supplier_name") or "document").strip().lower().replace(" ", "-")
+        safe_supplier = "".join(ch for ch in supplier if ch.isalnum() or ch in {"-", "_"}) or "document"
+        return f"{safe_supplier}-{serialized['id']}.svg", self._build_document_svg(serialized)
 
     async def update_document(self, current_user: dict, document_id: str, payload: DocumentConfirmRequest) -> DocumentDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1333,6 +1342,60 @@ class RestaurantOperationsService(BaseService):
         )
         return generated_alerts
 
+    def _build_document_svg(self, document: dict[str, Any]) -> str:
+        line_items = document.get("line_items", [])
+        width = 900
+        row_height = 44
+        items_top = 310
+        items_height = max(220, len(line_items) * row_height + 60)
+        height = items_top + items_height + 140
+        supplier_name = escape(str(document.get("supplier_name") or "Unknown Supplier"))
+        invoice_number = escape(str(document.get("invoice_number") or "N/A"))
+        invoice_date = escape(str(self._format_human_date(document.get("invoice_date")) or "-"))
+        upload_date = escape(str(self._format_human_date(document.get("upload_date")) or "-"))
+        total_amount = escape(self._format_currency(float(document.get("total_amount", 0))))
+        row_parts: list[str] = []
+        y = items_top + 46
+        for item in line_items:
+            product_name = escape(str(item.get("product_name") or "Item"))
+            quantity = escape(str(item.get("quantity", 0)))
+            unit_price = escape(self._format_currency(float(item.get("unit_price", 0))))
+            total_price = escape(self._format_currency(float(item.get("total_price", 0))))
+            row_parts.append(
+                f'<line x1="70" y1="{y + 18}" x2="830" y2="{y + 18}" stroke="#f1f5f9" stroke-width="1" />'
+                f'<text x="80" y="{y}" font-size="20" fill="#0f172a" font-family="Arial">{product_name}</text>'
+                f'<text x="470" y="{y}" font-size="20" fill="#64748b" font-family="Arial">Qty {quantity}</text>'
+                f'<text x="590" y="{y}" font-size="20" fill="#64748b" font-family="Arial">{unit_price}</text>'
+                f'<text x="730" y="{y}" font-size="20" fill="#111827" font-family="Arial" font-weight="700">{total_price}</text>'
+            )
+            y += row_height
+        rows_svg = ''.join(row_parts)
+        return (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
+            f'<rect width="100%" height="100%" fill="#f8fafc"/>'
+            f'<rect x="36" y="36" width="828" height="{height - 72}" rx="28" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>'
+            f'<text x="70" y="96" font-size="30" font-weight="700" fill="#0f172a" font-family="Arial">INVOICE</text>'
+            f'<text x="70" y="145" font-size="18" fill="#64748b" font-family="Arial">Supplier</text>'
+            f'<text x="70" y="174" font-size="28" font-weight="700" fill="#111827" font-family="Arial">{supplier_name}</text>'
+            f'<text x="540" y="145" font-size="18" fill="#64748b" font-family="Arial">Invoice Number</text>'
+            f'<text x="540" y="174" font-size="24" font-weight="700" fill="#111827" font-family="Arial">{invoice_number}</text>'
+            f'<text x="70" y="220" font-size="18" fill="#64748b" font-family="Arial">Invoice Date</text>'
+            f'<text x="70" y="248" font-size="22" font-weight="700" fill="#111827" font-family="Arial">{invoice_date}</text>'
+            f'<text x="300" y="220" font-size="18" fill="#64748b" font-family="Arial">Upload Date</text>'
+            f'<text x="300" y="248" font-size="22" font-weight="700" fill="#111827" font-family="Arial">{upload_date}</text>'
+            f'<rect x="560" y="204" width="240" height="62" rx="18" fill="#fff7ed"/>'
+            f'<text x="585" y="229" font-size="18" fill="#9a3412" font-family="Arial">Total Amount</text>'
+            f'<text x="585" y="255" font-size="28" font-weight="700" fill="#f97316" font-family="Arial">{total_amount}</text>'
+            f'<rect x="60" y="290" width="780" height="{items_height}" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>'
+            f'<text x="80" y="330" font-size="18" fill="#64748b" font-family="Arial">PRODUCT</text>'
+            f'<text x="470" y="330" font-size="18" fill="#64748b" font-family="Arial">QTY</text>'
+            f'<text x="590" y="330" font-size="18" fill="#64748b" font-family="Arial">PRICE</text>'
+            f'<text x="730" y="330" font-size="18" fill="#64748b" font-family="Arial">TOTAL</text>'
+            f'<line x1="70" y1="346" x2="830" y2="346" stroke="#e2e8f0" stroke-width="2" />'
+            f'{rows_svg}'
+            f'</svg>'
+        )
+
     @staticmethod
     def _format_human_date(value: str | None) -> str | None:
         if not value:
@@ -1622,7 +1685,7 @@ class RestaurantOperationsService(BaseService):
             preview_image_url=None,
             line_items=[DocumentLineItemSchema(**item) for item in serialized.get("line_items", [])],
             edit_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
-            download_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
+            download_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}/download",
             delete_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
