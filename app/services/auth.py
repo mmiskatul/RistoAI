@@ -62,7 +62,7 @@ class AuthService(BaseService):
             user = await self.user_repository.update(
                 user['_id'],
                 {
-                    'full_name': payload.full_name,
+                    'full_name': payload.owner_full_name,
                     'hashed_password': password_manager.hash_password(payload.password),
                     'role': UserRole.RESTAURANT_OWNER,
                     'preferred_language': user.get('preferred_language', AppLanguage.ENGLISH),
@@ -79,7 +79,7 @@ class AuthService(BaseService):
             user = await self.user_repository.create(
                 {
                     'email': payload.email.lower(),
-                    'full_name': payload.full_name,
+                    'full_name': payload.owner_full_name,
                     'hashed_password': password_manager.hash_password(payload.password),
                     'role': UserRole.RESTAURANT_OWNER,
                     'preferred_language': AppLanguage.ENGLISH,

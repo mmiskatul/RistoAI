@@ -20,9 +20,16 @@ class RegisterRequest(BaseSchema):
 
     restaurant_name: str | None = Field(default=None, min_length=2, max_length=160)
     owner_full_name: str | None = Field(default=None, min_length=2, max_length=120)
-    full_name: str | None = Field(default=None, min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(min_length=8, max_length=72)
+
+    @model_validator(mode='before')
+    @classmethod
+    def map_legacy_full_name(cls, value: object) -> object:
+        if isinstance(value, dict) and not value.get('owner_full_name') and value.get('full_name'):
+            value = dict(value)
+            value['owner_full_name'] = value['full_name']
+        return value
 
     @field_validator('password')
     @classmethod
@@ -31,11 +38,8 @@ class RegisterRequest(BaseSchema):
 
     @model_validator(mode='after')
     def normalize_registration_fields(self) -> 'RegisterRequest':
-        resolved_name = self.owner_full_name or self.full_name
-        if not resolved_name:
+        if not self.owner_full_name:
             raise ValueError('Owner full name is required')
-        self.full_name = resolved_name
-        self.owner_full_name = resolved_name
         return self
 
 
