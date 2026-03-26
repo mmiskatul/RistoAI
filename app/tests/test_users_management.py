@@ -135,20 +135,39 @@ def test_get_users_management_page_returns_summary_and_items():
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload['page_title'] == 'Users Management'
+    assert payload['page_subtitle'] == 'Manage restaurant owners and user accounts across the platform.'
+    assert payload['search_placeholder'] == 'Search users, restaurants...'
+    assert payload['filter_button_label'] == 'Filters'
     assert payload['summary'] == {
         'total_users': 4,
         'active_users': 3,
         'suspended_users': 1,
         'trial_users': 1,
     }
+    assert payload['summary_cards'][0]['label'] == 'Total Users'
+    assert payload['summary_cards'][0]['value'] == 4
+    assert payload['summary_cards'][1]['label'] == 'Active Users'
+    assert payload['summary_cards'][2]['label'] == 'Suspended Users'
+    assert payload['table_columns'][0] == {'key': 'user_name', 'label': 'User Name'}
+    assert payload['pagination_label'] == 'Showing 1 to 4 of 4 users'
     assert payload['total'] == 4
     owner_item = next(item for item in payload['items'] if item['id'] == str(owner_id))
     assert owner_item['restaurant_name'] == 'La Trattoria Milano'
+    assert owner_item['restaurant'] == 'La Trattoria Milano'
     assert owner_item['location'] == 'Milan, Italy'
     assert owner_item['subscription_plan_name'] == 'Pro Plan'
     assert owner_item['subscription_plan'] == '1_year'
     assert owner_item['subscription_status'] == 'active'
     assert owner_item['status'] == 'active'
+    assert owner_item['status_label'] == 'ACTIVE'
+    assert owner_item['status_color'] == 'green'
+    assert owner_item['plan_label'] == '1 YEAR'
+    assert owner_item['join_date_formatted'] == 'Feb 01, 2026'
+    assert owner_item['view_endpoint'] == f"/api/v1/users/{owner_item['id']}"
+    assert owner_item['edit_endpoint'] == f"/api/v1/users/{owner_item['id']}"
+    assert owner_item['actions_menu'][0]['label'] == 'Suspend Account'
+    assert owner_item['actions_menu'][1]['label'] == 'Delete User'
 
 
 
@@ -215,6 +234,7 @@ def test_suspend_and_delete_user():
 
     assert suspend_response.status_code == 200
     assert suspend_response.json()['user']['status'] == 'suspended'
+    assert suspend_response.json()['user']['status_label'] == 'SUSPENDED'
     assert suspend_response.json()['user']['subscription_status'] == 'suspended'
     assert delete_response.status_code == 204
     assert all(item['id'] != str(owner_id) for item in list_response.json()['items'])
