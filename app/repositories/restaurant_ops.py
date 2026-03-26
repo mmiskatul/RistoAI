@@ -105,9 +105,9 @@ class RestaurantDailyRecordRepository(ScopedRepository):
         if start_date or end_date:
             date_filters: dict[str, Any] = {}
             if start_date:
-                date_filters["$gte"] = start_date
+                date_filters["$gte"] = start_date.isoformat()
             if end_date:
-                date_filters["$lte"] = end_date
+                date_filters["$lte"] = end_date.isoformat()
             filters["business_date"] = date_filters
         return await self.get_multi(
             filters=filters,
@@ -117,7 +117,7 @@ class RestaurantDailyRecordRepository(ScopedRepository):
         )
 
     async def find_by_business_date(self, *, scope_id: str, business_date: date) -> dict[str, Any] | None:
-        return await self.get_one(self.scope_filters(scope_id, {"business_date": business_date}))
+        return await self.get_one(self.scope_filters(scope_id, {"business_date": business_date.isoformat()}))
 
 
 class RestaurantRecordRepository(ScopedRepository):

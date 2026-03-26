@@ -316,17 +316,48 @@ class DailyDataManualEntryResponse(BaseSchema):
     methods: list[DailyDataManualMethodResponse] = Field(default_factory=list)
 
 
+class DailyDataRevenueBreakdownItemResponse(BaseSchema):
+    label: str
+    amount: float
+    amount_formatted: str
+
+
+class DailyDataCoversSummaryResponse(BaseSchema):
+    lunch: int = 0
+    dinner: int = 0
+    total: int = 0
+
+
+class DailyDataRegisterSummaryResponse(BaseSchema):
+    opening_cash: float = 0.0
+    opening_cash_formatted: str = "$0.00"
+    closing_cash: float = 0.0
+    closing_cash_formatted: str = "$0.00"
+
+
 class DailyDataResponse(BaseSchema):
     id: str
+    page_title: str = "Daily Record Details"
+    report_for_label: str = "Reports For"
     business_date: str
     method: str
+    status_label: str = "CLOSED"
     total_revenue: float
     total_expenses: float
     profit: float
+    net_profit_formatted: str = "$0.00"
+    total_revenue_formatted: str = "$0.00"
+    total_expenses_formatted: str = "$0.00"
     lunch_covers: int
     dinner_covers: int
     total_covers: int
     avg_revenue_per_cover: float
+    revenue_breakdown: list[DailyDataRevenueBreakdownItemResponse] = Field(default_factory=list)
+    covers_summary: DailyDataCoversSummaryResponse = Field(default_factory=DailyDataCoversSummaryResponse)
+    register_summary: DailyDataRegisterSummaryResponse = Field(default_factory=DailyDataRegisterSummaryResponse)
+    edit_endpoint: str | None = None
+    export_endpoint: str | None = None
+    export_label: str = "Export"
     created_at: str
 
 
@@ -441,6 +472,17 @@ class InventoryCreateRequest(BaseSchema):
     purchase_date: date | None = None
 
 
+class InventoryUpdateRequest(BaseSchema):
+    product_name: str | None = Field(default=None, min_length=2, max_length=120)
+    category: str | None = Field(default=None, min_length=2, max_length=80)
+    stock_quantity: float | None = Field(default=None, ge=0)
+    unit_type: str | None = Field(default=None, min_length=1, max_length=30)
+    supplier_name: str | None = Field(default=None, max_length=120)
+    unit_price: float | None = Field(default=None, ge=0)
+    alert_threshold: float | None = Field(default=None, ge=0)
+    purchase_date: date | None = None
+
+
 class InventoryStockUpdateRequest(BaseSchema):
     add_stock: float = Field(default=0, ge=0)
     remove_stock: float = Field(default=0, ge=0)
@@ -452,27 +494,60 @@ class InventoryHistoryItemResponse(BaseSchema):
     occurred_at: str
 
 
+class InventoryListItemActionResponse(BaseSchema):
+    view_endpoint: str | None = None
+    stock_update_endpoint: str | None = None
+
+
+class InventorySupplierCardResponse(BaseSchema):
+    supplier_name: str | None = None
+    supplier_role: str = "Primary Distributor"
+    last_purchase: str | None = None
+    price_per_unit: str | None = None
+
+
 class InventoryItemResponse(BaseSchema):
     id: str
     product_name: str
     category: str
     stock_quantity: float
+    stock_quantity_label: str | None = None
     unit_type: str
     supplier_name: str | None = None
+    supplier_subtitle: str | None = None
     unit_price: float
     alert_threshold: float
     stock_status: str
+    stock_status_label: str | None = None
     purchase_date: str | None = None
+    last_purchase_label: str | None = None
+    actions: InventoryListItemActionResponse | None = None
     created_at: str
     updated_at: str
 
 
 class InventoryDetailResponse(InventoryItemResponse):
+    page_title: str = "View Inventory Product"
+    current_stock_label: str = "Current Stock"
+    current_stock_value: float = 0.0
+    current_stock_display: str = "0"
+    stock_update_endpoint: str | None = None
+    stock_update_button_label: str = "Update Stock Level"
+    supplier_card: InventorySupplierCardResponse = Field(default_factory=InventorySupplierCardResponse)
+    edit_endpoint: str | None = None
+    delete_endpoint: str | None = None
+    delete_label: str = "Delete"
     history: list[InventoryHistoryItemResponse]
 
 
 class InventoryListResponse(BaseSchema):
+    page_title: str = "Inventory"
+    subtitle: str = "Track and manage your restaurant ingredients and stock."
+    search_placeholder: str = "Search products"
+    add_button_endpoint: str = "/api/v1/restaurant/inventory"
     total_inventory_value: float
+    total_inventory_value_formatted: str = "$0.00"
+    inventory_growth_percent: float = 0.0
     total: int
     page: int
     page_size: int
@@ -480,14 +555,59 @@ class InventoryListResponse(BaseSchema):
     items: list[InventoryItemResponse]
 
 
+class AnalyticsInsightBannerResponse(BaseSchema):
+    label: str = "AI Business Insight"
+    title: str
+    subtitle: str
+
+
+class AnalyticsMetricTileResponse(BaseSchema):
+    label: str
+    value: float | str
+    value_formatted: str
+    change_percent: float | None = None
+    subtitle: str | None = None
+
+
+class AnalyticsSummaryStatResponse(BaseSchema):
+    label: str
+    value: float | int
+    value_formatted: str
+
+
+class AnalyticsComparisonRowResponse(BaseSchema):
+    label: str
+    value: float
+    value_formatted: str
+
+
+class AnalyticsSupplierAlertResponse(BaseSchema):
+    title: str
+    subtitle: str
+
+
 class AnalyticsOverviewResponse(BaseSchema):
+    page_title: str = "Analytics"
+    export_label: str = "Export Data"
+    active_filter: str = "Weekly"
+    insight_banner: AnalyticsInsightBannerResponse
     estimated_profit: float
+    estimated_profit_formatted: str
     peak_hour_label: str
+    peak_hour_subtitle: str
     revenue_total: float
+    revenue_total_formatted: str
     revenue_change_percent: float
-    covers_total: int
-    avg_revenue_per_cover: float
     weekly_revenue: list[ChartPointResponse]
+    metric_tiles: list[AnalyticsMetricTileResponse] = Field(default_factory=list)
+    summary_stats: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
+    revenue_comparison: list[AnalyticsComparisonRowResponse] = Field(default_factory=list)
+    covers_total: int
+    covers_activity: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
+    avg_revenue_per_cover: float
+    avg_revenue_per_cover_formatted: str
+    cost_breakdown: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
+    supplier_price_alerts: list[AnalyticsSupplierAlertResponse] = Field(default_factory=list)
 
 
 class ChatMessageCreateRequest(BaseSchema):

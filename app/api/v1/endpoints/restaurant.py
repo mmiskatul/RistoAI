@@ -34,6 +34,7 @@ from app.schemas.restaurant import (
     InventoryItemResponse,
     InventoryListResponse,
     InventoryStockUpdateRequest,
+    InventoryUpdateRequest,
     RestaurantHomeResponse,
     RestaurantProfileResponse,
     RestaurantProfileUpdateRequest,
@@ -151,6 +152,11 @@ async def create_daily_data(payload: DailyDataCreateRequest, current_user: dict 
     return await service.create_daily_data(current_user, payload)
 
 
+@router.patch('/manual-entry/{record_id}', response_model=DailyDataResponse, tags=['Restaurant Data Management'])
+async def update_daily_data(record_id: str, payload: DailyDataCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DailyDataResponse:
+    return await service.update_daily_data(current_user, record_id, payload)
+
+
 @router.get('/daily-data', response_model=DailyDataListResponse, tags=['Restaurant Data Management'])
 async def list_daily_data(
     page: int = Query(default=1, ge=1),
@@ -249,6 +255,17 @@ async def list_inventory(
 @router.get('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'])
 async def get_inventory_item(item_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryDetailResponse:
     return await service.get_inventory_item(current_user, item_id)
+
+
+@router.patch('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'])
+async def update_inventory_item(item_id: str, payload: InventoryUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryDetailResponse:
+    return await service.update_inventory_item(current_user, item_id, payload)
+
+
+@router.delete('/inventory/{item_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Inventory'])
+async def delete_inventory_item(item_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
+    await service.delete_inventory_item(current_user, item_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post('/inventory/{item_id}/stock-update', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'])

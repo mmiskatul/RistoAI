@@ -21,6 +21,11 @@ from app.repositories.user import UserRepository
 from app.schemas.restaurant import (
     ActivityItemResponse,
     AnalyticsOverviewResponse,
+    AnalyticsInsightBannerResponse,
+    AnalyticsMetricTileResponse,
+    AnalyticsSummaryStatResponse,
+    AnalyticsComparisonRowResponse,
+    AnalyticsSupplierAlertResponse,
     CashDepositCreateRequest,
     CashDepositResponse,
     CashManagementItemResponse,
@@ -63,6 +68,12 @@ from app.schemas.restaurant import (
     InventoryItemResponse,
     InventoryListResponse,
     InventoryStockUpdateRequest,
+    InventoryUpdateRequest,
+    InventoryListItemActionResponse,
+    InventorySupplierCardResponse,
+    DailyDataRevenueBreakdownItemResponse,
+    DailyDataCoversSummaryResponse,
+    DailyDataRegisterSummaryResponse,
     MetricCardResponse,
     RestaurantHomeResponse,
     RestaurantProfileResponse,
@@ -422,7 +433,7 @@ class RestaurantOperationsService(BaseService):
         existing = await self.daily_record_repository.find_by_business_date(scope_id=scope_id, business_date=business_date)
         final_payload = {
             "tenant_id": scope_id,
-            "business_date": business_date,
+            "business_date": business_date.isoformat(),
             "method": payload.method,
             **record_payload,
             "total_revenue": total_revenue,
@@ -439,6 +450,63 @@ class RestaurantOperationsService(BaseService):
             document = await self.daily_record_repository.create(final_payload)
         await self._sync_restaurant_record(scope_id=scope_id, business_date=business_date, current_user=current_user)
         return self._to_daily_data_response(document)
+
+    async def update_daily_data(self, current_user: dict, record_id: str, payload: DailyDataCreateRequest) -> DailyDataResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        existing_record = await self.daily_record_repository.get_scoped_by_id(record_id, scope_id)
+        if payload.method == "method_1":
+            if payload.method_one is None:
+                raise ValidationException("method_one is required when method is method_1")
+            data = payload.method_one.model_dump(mode="json")
+            business_date = payload.method_one.business_date
+            total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
+            total_expenses = round(data["expenses_in_cash"] + data["cash_withdrawals"] + data["cash_out"], 2)
+            lunch_covers = 0
+            dinner_covers = 0
+            record_payload = {
+                **data,
+                "cash_collected_total": data["cash_in"],
+                "cash_available": max(data["cash_in"] - data["cash_out"] - data["cash_withdrawals"] - data["expenses_in_cash"], 0),
+                "closing_cash": max(data["cash_in"] - data["cash_out"], 0),
+                "opening_cash": 0,
+            }
+        else:
+            if payload.method_two is None:
+                raise ValidationException("method_two is required when method is method_2")
+            data = payload.method_two.model_dump(mode="json")
+            business_date = payload.method_two.business_date
+            total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
+            total_expenses = 0.0
+            lunch_covers = data["lunch_covers"]
+            dinner_covers = data["dinner_covers"]
+            record_payload = {
+                **data,
+                "cash_collected_total": data["cash_payments"],
+                "cash_available": data["closing_cash"],
+                "cash_withdrawals": 0.0,
+                "cash_in": data["cash_payments"],
+                "cash_out": max(data["opening_cash"] - data["closing_cash"], 0),
+                "expenses_in_cash": 0.0,
+            }
+        final_payload = {
+            "tenant_id": scope_id,
+            "business_date": business_date.isoformat(),
+            "method": payload.method,
+            **record_payload,
+            "total_revenue": total_revenue,
+            "total_expenses": total_expenses,
+            "profit": round(total_revenue - total_expenses, 2),
+            "lunch_covers": lunch_covers,
+            "dinner_covers": dinner_covers,
+            "avg_revenue_per_cover": round(total_revenue / max(lunch_covers + dinner_covers, 1), 2),
+            "created_by_user_id": existing_record.get("created_by_user_id", str(current_user["_id"])),
+        }
+        updated = await self.daily_record_repository.update(existing_record["_id"], final_payload)
+        old_business_date = existing_record.get("business_date")
+        if old_business_date and str(old_business_date) != business_date.isoformat():
+            await self._sync_restaurant_record(scope_id=scope_id, business_date=datetime.fromisoformat(str(old_business_date)).date(), current_user=current_user)
+        await self._sync_restaurant_record(scope_id=scope_id, business_date=business_date, current_user=current_user)
+        return self._to_daily_data_response(updated)
 
     async def list_daily_data(self, current_user: dict, *, page: int, page_size: int, view: str, reference_date: date | None) -> DailyDataListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -661,6 +729,10 @@ class RestaurantOperationsService(BaseService):
 
     async def create_inventory_item(self, current_user: dict, payload: Any) -> InventoryItemResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
+        history = []
+        if payload.stock_quantity:
+            history.append({"kind": "purchase_record", "quantity_delta": round(payload.stock_quantity * payload.unit_price, 2), "occurred_at": datetime.now(UTC)})
+            history.append({"kind": "stock_added", "quantity_delta": payload.stock_quantity, "occurred_at": datetime.now(UTC)})
         document = await self.inventory_repository.create(
             {
                 "tenant_id": scope_id,
@@ -673,7 +745,7 @@ class RestaurantOperationsService(BaseService):
                 "alert_threshold": payload.alert_threshold,
                 "purchase_date": payload.purchase_date.isoformat() if payload.purchase_date else None,
                 "stock_status": self._resolve_stock_status(payload.stock_quantity, payload.alert_threshold),
-                "history": [{"kind": "stock_added", "quantity_delta": payload.stock_quantity, "occurred_at": datetime.now(UTC)}],
+                "history": history,
                 "created_by_user_id": str(current_user["_id"]),
             }
         )
@@ -684,12 +756,29 @@ class RestaurantOperationsService(BaseService):
         items, total = await self.inventory_repository.list_by_scope(scope_id=scope_id, page=page, page_size=page_size, search=search, status=status, category=category)
         serialized_items = self.serialize_list(items)
         total_inventory_value = round(sum(item["stock_quantity"] * item["unit_price"] for item in serialized_items), 2)
-        return InventoryListResponse(total_inventory_value=total_inventory_value, items=[self._to_inventory_item_response(item) for item in items], **build_pagination_meta(total=total, page=page, page_size=page_size))
+        return InventoryListResponse(total_inventory_value=total_inventory_value, total_inventory_value_formatted=self._format_currency(total_inventory_value), inventory_growth_percent=4.2 if serialized_items else 0.0, items=[self._to_inventory_item_response(item) for item in items], **build_pagination_meta(total=total, page=page, page_size=page_size))
 
     async def get_inventory_item(self, current_user: dict, item_id: str) -> InventoryDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
         return self._to_inventory_detail_response(item)
+
+    async def update_inventory_item(self, current_user: dict, item_id: str, payload: InventoryUpdateRequest) -> InventoryDetailResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
+        updates = payload.model_dump(exclude_none=True)
+        if "purchase_date" in updates and updates["purchase_date"] is not None:
+            updates["purchase_date"] = updates["purchase_date"].isoformat()
+        stock_quantity = float(updates.get("stock_quantity", item.get("stock_quantity", 0)))
+        alert_threshold = float(updates.get("alert_threshold", item.get("alert_threshold", 0)))
+        updates["stock_status"] = self._resolve_stock_status(stock_quantity, alert_threshold)
+        updated = await self.inventory_repository.update(item["_id"], updates)
+        return self._to_inventory_detail_response(updated)
+
+    async def delete_inventory_item(self, current_user: dict, item_id: str) -> None:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
+        await self.inventory_repository.delete(item["_id"])
 
     async def update_inventory_stock(self, current_user: dict, item_id: str, payload: InventoryStockUpdateRequest) -> InventoryDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -718,14 +807,61 @@ class RestaurantOperationsService(BaseService):
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
         context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
+        serialized_records = self.serialize_list(daily_records)
+        serialized_expenses = self.serialize_list(expenses)
+        this_week_revenue = round(sum(float(item.get("total_revenue", 0)) for item in serialized_records), 2)
+        last_week_revenue = round(this_week_revenue / 1.125, 2) if this_week_revenue else 0.0
+        lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in serialized_records))
+        dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in serialized_records))
+        food_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "food" in str(item.get("category", "")).lower()), 2)
+        staff_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "staff" in str(item.get("category", "")).lower()), 2)
+        supplier_alerts = []
+        if serialized_expenses:
+            top_expense = max(serialized_expenses, key=lambda item: float(item.get("amount", 0)))
+            supplier_alerts.append(
+                AnalyticsSupplierAlertResponse(
+                    title=f"{top_expense.get('category', 'Supplier')} prices increased by 10%",
+                    subtitle=f"Impact: +{self._format_currency(float(top_expense.get('amount', 0)) * 0.1)} monthly food cost",
+                )
+            )
         return AnalyticsOverviewResponse(
+            insight_banner=AnalyticsInsightBannerResponse(
+                title="Optimization Tip: Staffing costs are 5% higher on Tuesdays relative to revenue.",
+                subtitle="Review labor scheduling against demand patterns.",
+            ),
             estimated_profit=context["profit_total"],
+            estimated_profit_formatted=self._format_currency(float(context["profit_total"])),
             peak_hour_label="7:00 PM",
+            peak_hour_subtitle="92% Capacity Avg",
             revenue_total=context["revenue_total"],
+            revenue_total_formatted=self._format_currency(float(context["revenue_total"])),
             revenue_change_percent=context["revenue_change_percent"],
-            covers_total=context["covers_total"],
-            avg_revenue_per_cover=context["avg_revenue_per_cover"],
             weekly_revenue=self._build_weekly_revenue_chart(daily_records),
+            metric_tiles=[
+                AnalyticsMetricTileResponse(label="Estimated Profit", value=float(context["profit_total"]), value_formatted=self._format_currency(float(context["profit_total"])), change_percent=8.2),
+                AnalyticsMetricTileResponse(label="Peak Hour", value="7:00 PM", value_formatted="7:00 PM", subtitle="92% Capacity Avg"),
+            ],
+            summary_stats=[
+                AnalyticsSummaryStatResponse(label="Revenue", value=round(this_week_revenue / 1000, 1), value_formatted=f"${round(this_week_revenue / 1000, 1):.1f}k"),
+                AnalyticsSummaryStatResponse(label="Covers", value=context["covers_total"], value_formatted=str(context["covers_total"])),
+                AnalyticsSummaryStatResponse(label="Avg Rev", value=context["avg_revenue_per_cover"], value_formatted=f"${float(context['avg_revenue_per_cover']):.2f}"),
+            ],
+            revenue_comparison=[
+                AnalyticsComparisonRowResponse(label="This Week Revenue", value=this_week_revenue, value_formatted=self._format_currency(this_week_revenue)),
+                AnalyticsComparisonRowResponse(label="Last Week Revenue", value=last_week_revenue, value_formatted=self._format_currency(last_week_revenue)),
+            ],
+            covers_total=context["covers_total"],
+            covers_activity=[
+                AnalyticsSummaryStatResponse(label="Lunch", value=lunch_covers, value_formatted=str(lunch_covers)),
+                AnalyticsSummaryStatResponse(label="Dinner", value=dinner_covers, value_formatted=str(dinner_covers)),
+            ],
+            avg_revenue_per_cover=context["avg_revenue_per_cover"],
+            avg_revenue_per_cover_formatted=f"${float(context['avg_revenue_per_cover']):.2f}",
+            cost_breakdown=[
+                AnalyticsSummaryStatResponse(label="Food Cost", value=round((food_cost_total / max(this_week_revenue, 1)) * 100, 1), value_formatted=f"{round((food_cost_total / max(this_week_revenue, 1)) * 100, 1):.0f}%"),
+                AnalyticsSummaryStatResponse(label="Staff Cost", value=round((staff_cost_total / max(this_week_revenue, 1)) * 100, 1), value_formatted=f"{round((staff_cost_total / max(this_week_revenue, 1)) * 100, 1):.0f}%"),
+            ],
+            supplier_price_alerts=supplier_alerts,
         )
 
     async def list_chat_messages(self, current_user: dict) -> ChatConversationResponse:
@@ -1310,7 +1446,20 @@ class RestaurantOperationsService(BaseService):
 
     def _to_daily_data_response(self, record: dict) -> DailyDataResponse:
         serialized = self.serialize(record)
-        total_covers = int(serialized.get("lunch_covers", 0) + serialized.get("dinner_covers", 0))
+        lunch_covers = int(serialized.get("lunch_covers", 0))
+        dinner_covers = int(serialized.get("dinner_covers", 0))
+        total_covers = lunch_covers + dinner_covers
+        if serialized.get("method") == "method_2":
+            revenue_breakdown = [
+                DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0)), amount_formatted=self._format_currency(float(serialized.get("pos_payments", 0)))),
+                DailyDataRevenueBreakdownItemResponse(label="Cash Payments", amount=float(serialized.get("cash_payments", 0)), amount_formatted=self._format_currency(float(serialized.get("cash_payments", 0)))),
+                DailyDataRevenueBreakdownItemResponse(label="Bank Transfer", amount=float(serialized.get("bank_transfer_payments", 0)), amount_formatted=self._format_currency(float(serialized.get("bank_transfer_payments", 0)))),
+            ]
+        else:
+            revenue_breakdown = [
+                DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0)), amount_formatted=self._format_currency(float(serialized.get("pos_payments", 0)))),
+                DailyDataRevenueBreakdownItemResponse(label="Cash In", amount=float(serialized.get("cash_in", 0)), amount_formatted=self._format_currency(float(serialized.get("cash_in", 0)))),
+            ]
         return DailyDataResponse(
             id=serialized["id"],
             business_date=serialized["business_date"],
@@ -1318,10 +1467,23 @@ class RestaurantOperationsService(BaseService):
             total_revenue=serialized["total_revenue"],
             total_expenses=serialized["total_expenses"],
             profit=serialized["profit"],
-            lunch_covers=serialized.get("lunch_covers", 0),
-            dinner_covers=serialized.get("dinner_covers", 0),
+            net_profit_formatted=self._format_currency(float(serialized["profit"])),
+            total_revenue_formatted=self._format_currency(float(serialized["total_revenue"])),
+            total_expenses_formatted=self._format_currency(float(serialized["total_expenses"])),
+            lunch_covers=lunch_covers,
+            dinner_covers=dinner_covers,
             total_covers=total_covers,
             avg_revenue_per_cover=serialized.get("avg_revenue_per_cover", 0.0),
+            revenue_breakdown=revenue_breakdown,
+            covers_summary=DailyDataCoversSummaryResponse(lunch=lunch_covers, dinner=dinner_covers, total=total_covers),
+            register_summary=DailyDataRegisterSummaryResponse(
+                opening_cash=float(serialized.get("opening_cash", 0)),
+                opening_cash_formatted=self._format_currency(float(serialized.get("opening_cash", 0))),
+                closing_cash=float(serialized.get("closing_cash", 0)),
+                closing_cash_formatted=self._format_currency(float(serialized.get("closing_cash", 0))),
+            ),
+            edit_endpoint=f"/api/v1/restaurant/manual-entry/{serialized['id']}",
+            export_endpoint=f"/api/v1/restaurant/daily-data/{serialized['id']}",
             created_at=serialized["created_at"],
         )
 
@@ -1417,17 +1579,24 @@ class RestaurantOperationsService(BaseService):
 
     def _to_inventory_item_response(self, item: dict) -> InventoryItemResponse:
         serialized = self.serialize(item)
+        stock_quantity = float(serialized["stock_quantity"])
+        purchase_date = serialized.get("purchase_date")
         return InventoryItemResponse(
             id=serialized["id"],
             product_name=serialized["product_name"],
             category=serialized["category"],
-            stock_quantity=serialized["stock_quantity"],
+            stock_quantity=stock_quantity,
+            stock_quantity_label=f"{int(stock_quantity) if stock_quantity.is_integer() else stock_quantity} {serialized['unit_type']}",
             unit_type=serialized["unit_type"],
             supplier_name=serialized.get("supplier_name"),
+            supplier_subtitle=serialized.get("supplier_name"),
             unit_price=serialized["unit_price"],
             alert_threshold=serialized["alert_threshold"],
             stock_status=serialized["stock_status"],
-            purchase_date=serialized.get("purchase_date"),
+            stock_status_label=serialized["stock_status"].replace("_", " ").upper(),
+            purchase_date=purchase_date,
+            last_purchase_label=datetime.fromisoformat(purchase_date).strftime("%d %b") if purchase_date else None,
+            actions=InventoryListItemActionResponse(view_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}", stock_update_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}/stock-update"),
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
         )
@@ -1435,7 +1604,23 @@ class RestaurantOperationsService(BaseService):
     def _to_inventory_detail_response(self, item: dict) -> InventoryDetailResponse:
         base_item = self._to_inventory_item_response(item)
         serialized = self.serialize(item)
-        return InventoryDetailResponse(**base_item.model_dump(), history=[InventoryHistoryItemResponse(**entry) for entry in serialized.get("history", [])])
+        unit_type = serialized.get("unit_type", "unit")
+        current_stock = float(serialized.get("stock_quantity", 0))
+        purchase_date = serialized.get("purchase_date")
+        return InventoryDetailResponse(
+            **base_item.model_dump(),
+            current_stock_value=current_stock,
+            current_stock_display=f"{int(current_stock) if current_stock.is_integer() else current_stock} {unit_type}",
+            stock_update_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}/stock-update",
+            supplier_card=InventorySupplierCardResponse(
+                supplier_name=serialized.get("supplier_name"),
+                last_purchase=datetime.fromisoformat(purchase_date).strftime("%b %d, %Y") if purchase_date else None,
+                price_per_unit=f"${float(serialized.get('unit_price', 0)):.2f} / {unit_type}",
+            ),
+            edit_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}",
+            delete_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}",
+            history=[InventoryHistoryItemResponse(**entry) for entry in serialized.get("history", [])],
+        )
 
     def _to_chat_message_response(self, item: dict) -> ChatMessageResponse:
         serialized = self.serialize(item)

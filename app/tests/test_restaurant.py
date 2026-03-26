@@ -232,6 +232,41 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     inventory_detail_user_two = client.get(f"/api/v1/restaurant/inventory/{inventory_id}", headers=headers_user_two)
     assert inventory_detail_user_two.status_code == 404
 
+    inventory_detail_user_one = client.get(f"/api/v1/restaurant/inventory/{inventory_id}", headers=headers_user_one)
+    assert inventory_detail_user_one.status_code == 200
+    inventory_detail_payload = inventory_detail_user_one.json()
+    assert inventory_detail_payload["page_title"] == "View Inventory Product"
+    assert inventory_detail_payload["current_stock_label"] == "Current Stock"
+    assert inventory_detail_payload["supplier_card"]["supplier_name"] == "Global Foods Inc."
+    assert inventory_detail_payload["stock_update_endpoint"].endswith(f"/inventory/{inventory_id}/stock-update")
+
+    inventory_list_user_one = client.get("/api/v1/restaurant/inventory", headers=headers_user_one)
+    assert inventory_list_user_one.status_code == 200
+    inventory_list_payload = inventory_list_user_one.json()
+    assert inventory_list_payload["page_title"] == "Inventory"
+    assert inventory_list_payload["search_placeholder"] == "Search products"
+    assert inventory_list_payload["total_inventory_value_formatted"] == "$54.00"
+    assert inventory_list_payload["items"][0]["actions"]["view_endpoint"].endswith(inventory_id)
+
+    inventory_update_response = client.patch(
+        f"/api/v1/restaurant/inventory/{inventory_id}",
+        headers=headers_user_one,
+        json={"supplier_name": "Updated Supplier", "alert_threshold": 3},
+    )
+    assert inventory_update_response.status_code == 200
+    assert inventory_update_response.json()["supplier_card"]["supplier_name"] == "Updated Supplier"
+
+    inventory_stock_response = client.post(
+        f"/api/v1/restaurant/inventory/{inventory_id}/stock-update",
+        headers=headers_user_one,
+        json={"add_stock": 5, "remove_stock": 2},
+    )
+    assert inventory_stock_response.status_code == 200
+    assert inventory_stock_response.json()["current_stock_value"] == 15
+
+    inventory_delete_response = client.delete(f"/api/v1/restaurant/inventory/{inventory_id}", headers=headers_user_one)
+    assert inventory_delete_response.status_code == 204
+
 
 def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     seed_subscription_plan(app)
@@ -341,7 +376,15 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     detail_id = daily_list_payload["items"][0]["id"]
     detail_response = client.get(f"/api/v1/restaurant/daily-data/{detail_id}", headers=headers)
     assert detail_response.status_code == 200
-    assert detail_response.json()["business_date"] == "2026-03-25"
+    detail_payload = detail_response.json()
+    assert detail_payload["business_date"] == "2026-03-25"
+    assert detail_payload["page_title"] == "Daily Record Details"
+    assert detail_payload["report_for_label"] == "Reports For"
+    assert detail_payload["status_label"] == "CLOSED"
+    assert detail_payload["revenue_breakdown"][0]["label"] == "POS Payments"
+    assert detail_payload["covers_summary"]["total"] == 38
+    assert detail_payload["register_summary"]["closing_cash"] == 220
+    assert detail_payload["edit_endpoint"].endswith(detail_id)
 
     date_detail_response = client.get("/api/v1/restaurant/daily-data/by-date?business_date=2026-03-25", headers=headers)
     assert date_detail_response.status_code == 200
@@ -404,7 +447,18 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
 
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200
-    assert analytics_response.json()["revenue_total"] == 1300
+    analytics_payload = analytics_response.json()
+    assert analytics_payload["page_title"] == "Analytics"
+    assert analytics_payload["export_label"] == "Export Data"
+    assert analytics_payload["active_filter"] == "Weekly"
+    assert analytics_payload["revenue_total"] == 1300
+    assert analytics_payload["insight_banner"]["label"] == "AI Business Insight"
+    assert analytics_payload["metric_tiles"][0]["label"] == "Estimated Profit"
+    assert analytics_payload["metric_tiles"][1]["label"] == "Peak Hour"
+    assert analytics_payload["summary_stats"][0]["label"] == "Revenue"
+    assert analytics_payload["revenue_comparison"][0]["label"] == "This Week Revenue"
+    assert analytics_payload["covers_activity"][0]["label"] == "Lunch"
+    assert analytics_payload["cost_breakdown"][0]["label"] == "Food Cost"
 
     chat_response = client.post("/api/v1/restaurant/chat/messages", headers=headers, json={"message": "How can I improve profit?"})
     assert chat_response.status_code == 201
