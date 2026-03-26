@@ -825,10 +825,7 @@ class RestaurantOperationsService(BaseService):
                 )
             )
         return AnalyticsOverviewResponse(
-            insight_banner=AnalyticsInsightBannerResponse(
-                title="Optimization Tip: Staffing costs are 5% higher on Tuesdays relative to revenue.",
-                subtitle="Review labor scheduling against demand patterns.",
-            ),
+            insight_banner=self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
             estimated_profit=context["profit_total"],
             estimated_profit_formatted=self._format_currency(float(context["profit_total"])),
             peak_hour_label="7:00 PM",
@@ -862,6 +859,15 @@ class RestaurantOperationsService(BaseService):
                 AnalyticsSummaryStatResponse(label="Staff Cost", value=round((staff_cost_total / max(this_week_revenue, 1)) * 100, 1), value_formatted=f"{round((staff_cost_total / max(this_week_revenue, 1)) * 100, 1):.0f}%"),
             ],
             supplier_price_alerts=supplier_alerts,
+        )
+
+    async def get_analytics_business_insight(self, current_user: dict) -> AnalyticsInsightBannerResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
+        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
+        return self._build_analytics_insight_banner(
+            serialized_records=self.serialize_list(daily_records),
+            serialized_expenses=self.serialize_list(expenses),
         )
 
     async def list_chat_messages(self, current_user: dict) -> ChatConversationResponse:
@@ -1177,6 +1183,88 @@ class RestaurantOperationsService(BaseService):
                 "last_synced_by_user_id": str(current_user["_id"]),
                 "last_synced_at": datetime.now(UTC),
             },
+        )
+
+    def _build_analytics_insight_banner(
+        self,
+        *,
+        serialized_records: list[dict[str, Any]],
+        serialized_expenses: list[dict[str, Any]],
+    ) -> AnalyticsInsightBannerResponse:
+        weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        revenue_by_weekday: dict[int, float] = {}
+        for item in serialized_records:
+            try:
+                weekday = datetime.fromisoformat(str(item.get("business_date"))).date().weekday()
+            except ValueError:
+                continue
+            revenue_by_weekday[weekday] = revenue_by_weekday.get(weekday, 0.0) + float(item.get("total_revenue", 0))
+
+        category_groups = {
+            "staff": ("staff", "labor", "payroll", "salary"),
+            "food": ("food", "inventory", "supplier", "grocery"),
+            "operations": ("operations", "utility", "cleaning", "rent", "maintenance"),
+        }
+        costs_by_group_by_weekday: dict[str, dict[int, float]] = {key: {} for key in category_groups}
+        for item in serialized_expenses:
+            category = str(item.get("category", "")).lower()
+            try:
+                weekday = datetime.fromisoformat(item["expense_date"].replace("Z", "+00:00")).date().weekday()
+            except (KeyError, ValueError):
+                continue
+            amount = float(item.get("amount", 0))
+            for group_name, keywords in category_groups.items():
+                if any(keyword in category for keyword in keywords):
+                    costs_by_group_by_weekday[group_name][weekday] = costs_by_group_by_weekday[group_name].get(weekday, 0.0) + amount
+                    break
+
+        best_group = None
+        best_weekday = None
+        best_lift = None
+        best_ratio = 0.0
+        for group_name, weekday_costs in costs_by_group_by_weekday.items():
+            weekday_ratios: list[tuple[int, float]] = []
+            for weekday, cost in weekday_costs.items():
+                revenue = revenue_by_weekday.get(weekday, 0.0)
+                if revenue <= 0:
+                    continue
+                weekday_ratios.append((weekday, cost / revenue))
+            if len(weekday_ratios) < 1:
+                continue
+            ratios_only = [ratio for _, ratio in weekday_ratios]
+            baseline = sum(ratios_only) / len(ratios_only) if ratios_only else 0.0
+            for weekday, ratio in weekday_ratios:
+                lift = ((ratio - baseline) / baseline * 100) if baseline > 0 else ratio * 100
+                if best_lift is None or lift > best_lift:
+                    best_group = group_name
+                    best_weekday = weekday
+                    best_lift = lift
+                    best_ratio = ratio
+
+        if best_group is not None and best_weekday is not None and best_lift is not None and best_lift > 0:
+            percent = max(1, round(best_lift))
+            group_label = {"staff": "Staffing costs", "food": "Food costs", "operations": "Operating costs"}.get(best_group, "Costs")
+            subtitle = {
+                "staff": "Review labor scheduling against demand patterns.",
+                "food": "Review purchasing and menu mix for this day.",
+                "operations": "Review overhead allocations and shift planning.",
+            }.get(best_group, "Review cost drivers for this day.")
+            return AnalyticsInsightBannerResponse(
+                title=f"Optimization Tip: {group_label} are {percent}% higher on {weekday_names[best_weekday]}s relative to revenue.",
+                subtitle=subtitle,
+            )
+
+        if serialized_expenses:
+            top_expense = max(serialized_expenses, key=lambda item: float(item.get("amount", 0)))
+            category_name = str(top_expense.get("category", "operating"))
+            return AnalyticsInsightBannerResponse(
+                title=f"Optimization Tip: {category_name} is your largest recent cost driver.",
+                subtitle="Review the largest expense category against revenue trend.",
+            )
+
+        return AnalyticsInsightBannerResponse(
+            title="Optimization Tip: Add more daily data to unlock pattern-based insights.",
+            subtitle="We need a bit more revenue and cost history to generate stronger recommendations.",
         )
 
     @staticmethod

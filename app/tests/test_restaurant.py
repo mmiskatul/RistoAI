@@ -445,6 +445,12 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert after_delete_response.status_code == 200
     assert after_delete_response.json()["total"] == 1
 
+    business_insight_response = client.get("/api/v1/restaurant/analytics/business-insight", headers=headers)
+    assert business_insight_response.status_code == 200
+    business_insight_payload = business_insight_response.json()
+    assert business_insight_payload["label"] == "AI Business Insight"
+    assert "Optimization Tip:" in business_insight_payload["title"]
+
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200
     analytics_payload = analytics_response.json()
@@ -453,6 +459,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert analytics_payload["active_filter"] == "Weekly"
     assert analytics_payload["revenue_total"] == 1300
     assert analytics_payload["insight_banner"]["label"] == "AI Business Insight"
+    assert analytics_payload["insight_banner"]["title"] == business_insight_payload["title"]
     assert analytics_payload["metric_tiles"][0]["label"] == "Estimated Profit"
     assert analytics_payload["metric_tiles"][1]["label"] == "Peak Hour"
     assert analytics_payload["summary_stats"][0]["label"] == "Revenue"

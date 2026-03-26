@@ -8,6 +8,7 @@ from app.core.exceptions import ValidationException
 from app.dependencies.auth import get_current_user
 from app.dependencies.services import get_restaurant_operations_service
 from app.schemas.restaurant import (
+    AnalyticsInsightBannerResponse,
     AnalyticsOverviewResponse,
     CashDepositCreateRequest,
     CashDepositResponse,
@@ -276,6 +277,11 @@ async def update_inventory_stock(item_id: str, payload: InventoryStockUpdateRequ
 @router.get('/analytics/overview', response_model=AnalyticsOverviewResponse, tags=['Restaurant Analytics'])
 async def get_analytics(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> AnalyticsOverviewResponse:
     return await service.get_analytics(current_user)
+
+
+@router.get('/analytics/business-insight', response_model=AnalyticsInsightBannerResponse, tags=['Restaurant Analytics'])
+async def get_analytics_business_insight(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> AnalyticsInsightBannerResponse:
+    return await service.get_analytics_business_insight(current_user)
 
 
 @router.get('/chat/messages', response_model=ChatConversationResponse, tags=['Restaurant Chat'])
