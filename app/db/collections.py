@@ -9,6 +9,7 @@ class CoreCollections:
     USER_SUBSCRIPTIONS = "user_subscriptions"
     SUPPORT_TICKETS = "support_tickets"
     COUPONS = "coupons"
+    ADMIN_SETTINGS = "admin_settings"
 
 
 class RestaurantCollections:
@@ -32,6 +33,7 @@ ALL_COLLECTIONS = {
     CoreCollections.USER_SUBSCRIPTIONS,
     CoreCollections.SUPPORT_TICKETS,
     CoreCollections.COUPONS,
+    CoreCollections.ADMIN_SETTINGS,
     RestaurantCollections.INVOICES,
     RestaurantCollections.MANUAL_ENTRIES,
     RestaurantCollections.DAILY_RECORDS,

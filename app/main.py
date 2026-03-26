@@ -51,6 +51,7 @@ OPENAPI_TAGS = [
     {'name': 'Users', 'description': 'Admin user management and filtering.'},
     {'name': 'Subscription Management', 'description': 'Admin subscription plan, coupon, and revenue management.'},
     {'name': 'Support Management', 'description': 'Admin support ticket list, replies, and resolution.'},
+    {'name': 'Settings', 'description': 'Admin platform settings and legal content editor endpoints.'},
     {'name': 'Health', 'description': 'Service health check.'},
 ]
 
