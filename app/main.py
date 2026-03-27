@@ -39,7 +39,6 @@ OPENAPI_TAGS = [
     {'name': 'Restaurant Cash Management', 'description': 'Cash overview and bank deposit records.'},
     {'name': 'Restaurant Invoice Manual Entry', 'description': 'Manual invoice-style daily business entry create and update endpoints for method 1 and method 2 flows.'},
     {'name': 'Restaurant Data Management', 'description': 'Grouped date, week, and month records, drilldowns, and daily record detail views.'},
-    {'name': 'Restaurant Inventory', 'description': 'Inventory create, list, detail, edit, delete, and stock update flows.'},
     {'name': 'Restaurant Analytics', 'description': 'Analytics overview, AI business insight banner, trend cards, comparison rows, and alerts.'},
     {'name': 'Restaurant Chat', 'description': 'Restaurant AI chat conversation read and send endpoints.'},
     {'name': 'Restaurant Settings', 'description': 'Restaurant profile and settings detail/update endpoints.'},

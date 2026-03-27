@@ -63,19 +63,22 @@ class InsightSummaryResponse(BaseSchema):
     metric_caption: str
 
 
+class RestaurantHomePeriodResponse(BaseSchema):
+    metrics: list[MetricCardResponse]
+    cash_management: list[CashManagementItemResponse]
+    vat_balance: float
+    revenue: list[ChartPointResponse]
+    featured_insight: InsightSummaryResponse | None = None
+
+
 class RestaurantHomeResponse(BaseSchema):
     greeting_name: str
     restaurant_name: str | None = None
     preferred_language: str
-    period: Literal["weekly", "monthly"] = "weekly"
     available_periods: list[str] = Field(default_factory=lambda: ["weekly", "monthly"])
-    export_endpoint: str = "/api/v1/restaurant/home/export"
-    metrics: list[MetricCardResponse]
-    cash_management: list[CashManagementItemResponse]
+    weekly: RestaurantHomePeriodResponse
+    monthly: RestaurantHomePeriodResponse
     quick_actions: list[QuickActionResponse]
-    vat_balance: float
-    weekly_revenue: list[ChartPointResponse]
-    featured_insight: InsightSummaryResponse | None = None
     recent_activity: list[ActivityItemResponse]
 
 
@@ -139,6 +142,24 @@ class DocumentExtractionResponse(BaseSchema):
     ai_summary: str
 
 
+class DocumentConfirmSaveResponse(BaseSchema):
+    id: str
+    supplier_name: str
+    invoice_number: str | None = None
+    invoice_date: str | None = None
+    total_amount: float
+    line_items: list[DocumentLineItemSchema]
+    source_file_name: str
+    ai_provider: str
+    ai_summary: str
+    upload_date: str
+    status: str
+    created_by_user_id: str | None = None
+    last_edited_by_user_id: str | None = None
+    confirmed_by_user_id: str | None = None
+    confirmed_at: str | None = None
+
+
 class DocumentConfirmRequest(BaseSchema):
     supplier_name: str | None = Field(default=None, min_length=2, max_length=120)
     invoice_number: str | None = Field(default=None, min_length=2, max_length=80)
@@ -172,22 +193,12 @@ class DocumentListItemResponse(BaseSchema):
     id: str
     supplier_name: str
     invoice_number: str | None = None
-    invoice_number_display: str | None = None
     invoice_date: str | None = None
     invoice_date_formatted: str | None = None
     upload_date: str
     total_amount: float
-    total_amount_formatted: str | None = None
     status: str
-    status_label: str | None = None
-    status_note: str | None = None
     line_item_count: int
-    line_item_count_label: str | None = None
-    source_file_name: str
-    primary_action_label: str | None = None
-    secondary_action_label: str | None = None
-    primary_action_endpoint: str | None = None
-    secondary_action_endpoint: str | None = None
     created_by_user_id: str | None = None
     last_edited_by_user_id: str | None = None
     confirmed_at: str | None = None
@@ -236,14 +247,8 @@ class DocumentDetailResponse(BaseSchema):
 
 
 class DocumentListResponse(BaseSchema):
-    page_title: str = "Documents"
-    search_placeholder: str = "Search invoices, suppliers..."
-    filter_labels: list[str] = Field(default_factory=lambda: ["Date", "Supplier", "Status"])
-    upload_button_label: str = "Upload Invoice"
-    upload_endpoint: str = "/api/v1/restaurant/documents/upload-extract"
     ai_banner_title: str = "AI Data Extraction Active"
     ai_banner_subtitle: str = "Risto AI automatically extracts supplier, date, line items, quantities, and unit prices from your uploads."
-    recent_documents_title: str = "Recent Documents"
     total: int
     page: int
     page_size: int
@@ -674,7 +679,9 @@ class AnalyticsSupplierAlertResponse(BaseSchema):
 class AnalyticsOverviewResponse(BaseSchema):
     page_title: str = "Analytics"
     export_label: str = "Export Data"
+    export_endpoint: str = "/api/v1/restaurant/analytics/export"
     active_filter: str = "Weekly"
+    available_filters: list[str] = Field(default_factory=lambda: ["Weekly", "Monthly"])
     insight_banner: AnalyticsInsightBannerResponse
     estimated_profit: float
     estimated_profit_formatted: str

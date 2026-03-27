@@ -186,7 +186,7 @@ def test_restaurant_can_create_support_ticket_and_admin_can_manage_it():
     assert management_payload['items'][0]['status_label'] == 'Open'
     assert management_payload['items'][0]['status_variant'] == 'warning'
     assert management_payload['items'][0]['priority_label'] == 'High'
-    assert management_payload['items'][0]['date_formatted'] == 'Mar 26, 2026'
+    assert management_payload['items'][0]['date_formatted'] == datetime.now(UTC).strftime('%b %d, %Y')
     assert management_payload['items'][0]['view_endpoint'].endswith(ticket_id)
     assert management_payload['items'][0]['action_button_label'] == 'View Ticket'
     assert management_payload['items'][0]['actions_menu'][0]['label'] == 'View Ticket'

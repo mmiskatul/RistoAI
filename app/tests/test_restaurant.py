@@ -67,14 +67,10 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert confirm_response.json()["confirmed_by_user_id"]
     assert confirm_response.json()["confirmed_at"]
     assert confirm_response.json()["invoice_date"] == datetime.now(UTC).date().isoformat()
+    assert "page_title" not in confirm_response.json()
+    assert confirm_response.json()["status"] == "processed"
+    assert confirm_response.json()["line_items"][0]["product_name"] == "Sourdough Loaf"
 
-    assert confirm_response.json()["page_title"] == "Document Details"
-    assert confirm_response.json()["preview_title"] == "Document Preview"
-    assert confirm_response.json()["status_label"] == "Processed"
-    assert confirm_response.json()["edit_button_label"] == "Edit Data"
-    assert confirm_response.json()["download_button_label"] == "Download"
-    assert confirm_response.json()["delete_button_label"] == "Delete Document"
-    assert confirm_response.json()["total_amount_formatted"] == "$425.00"
     assert confirm_response.json()["created_by_user_id"]
     assert confirm_response.json()["last_edited_by_user_id"]
     assert confirm_response.json()["confirmed_by_user_id"]
@@ -82,17 +78,10 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     documents_response = client.get("/api/v1/restaurant/documents", headers=headers)
     assert documents_response.status_code == 200
     documents_payload = documents_response.json()
-    assert documents_payload["page_title"] == "Documents"
-    assert documents_payload["search_placeholder"] == "Search invoices, suppliers..."
-    assert documents_payload["upload_button_label"] == "Upload Invoice"
     assert documents_payload["ai_banner_title"] == "AI Data Extraction Active"
-    assert documents_payload["recent_documents_title"] == "Recent Documents"
     assert documents_payload["items"][0]["supplier_name"] == "Bakery Goods Co"
-    assert documents_payload["items"][0]["status_label"] == "Processed"
-    assert documents_payload["items"][0]["primary_action_label"] == "View"
-    assert documents_payload["items"][0]["secondary_action_label"] == "Edit"
-    assert documents_payload["items"][0]["line_item_count_label"] == "3 Items"
-    assert documents_payload["items"][0]["total_amount_formatted"] == "$425.00"
+    assert documents_payload["items"][0]["status"] == "processed"
+    assert documents_payload["items"][0]["line_item_count"] == 3
 
     document_detail_response = client.get(f"/api/v1/restaurant/documents/{confirm_response.json()['id']}", headers=headers)
     assert document_detail_response.status_code == 200
@@ -224,7 +213,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert month_data_response.json()["summary_cards"][1]["label"] == "This Month Expenses"
     assert month_data_response.json()["summary_cards"][1]["value"] == 425.0
 
-    analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
+    analytics_response = client.get("/api/v1/restaurant/analytics/overview?period=weekly", headers=headers)
     assert analytics_response.status_code == 200
     analytics_payload = analytics_response.json()
     assert len(analytics_payload["supplier_price_alerts"]) >= 1
@@ -381,13 +370,15 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
     home_payload = home_response.json()
-    assert home_payload["period"] == "weekly"
-    assert home_payload["export_endpoint"] == "/api/v1/restaurant/home/export"
-    assert home_payload["metrics"][0]["label"] == "Revenue"
+    assert home_payload["available_periods"] == ["weekly", "monthly"]
+    assert home_payload["weekly"]["metrics"][0]["label"] == "Revenue"
+    assert home_payload["monthly"]["metrics"][0]["label"] == "Revenue"
+    assert home_payload["weekly"]["revenue"][0]["label"] in ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+    assert home_payload["monthly"]["revenue"][0]["label"].startswith("Week ")
 
     home_monthly_response = client.get("/api/v1/restaurant/home?period=monthly", headers=headers)
     assert home_monthly_response.status_code == 200
-    assert home_monthly_response.json()["period"] == "monthly"
+    assert "monthly" in home_monthly_response.json()
 
     home_export_pdf_response = client.get("/api/v1/restaurant/home/export?period=weekly&format=pdf", headers=headers)
     assert home_export_pdf_response.status_code == 200
@@ -399,7 +390,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
 
     home_custom_range_response = client.get("/api/v1/restaurant/home?period=weekly&from_date=2026-03-24&to_date=2026-03-25", headers=headers)
     assert home_custom_range_response.status_code == 200
-    assert home_custom_range_response.json()["period"] == "weekly"
+    assert "weekly" in home_custom_range_response.json()
 
     home_export_custom_range_response = client.get("/api/v1/restaurant/home/export?period=weekly&format=excel&from_date=2026-03-24&to_date=2026-03-25", headers=headers)
     assert home_export_custom_range_response.status_code == 200
@@ -577,6 +568,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     analytics_payload = analytics_response.json()
     assert analytics_payload["page_title"] == "Analytics"
     assert analytics_payload["export_label"] == "Export Data"
+    assert analytics_payload["export_endpoint"] == "/api/v1/restaurant/analytics/export"
+    assert analytics_payload["available_filters"] == ["Weekly", "Monthly"]
     assert analytics_payload["active_filter"] == "Weekly"
     assert analytics_payload["revenue_total"] == 1300
     assert analytics_payload["insight_banner"]["label"] == "AI Business Insight"
@@ -590,6 +583,21 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert len(analytics_payload["supplier_price_alerts"]) >= 1
     assert analytics_payload["supplier_price_alerts"][0]["title"]
     assert analytics_payload["supplier_price_alerts"][0]["subtitle"]
+
+
+    analytics_monthly_response = client.get("/api/v1/restaurant/analytics/overview?period=monthly", headers=headers)
+    assert analytics_monthly_response.status_code == 200
+    analytics_monthly_payload = analytics_monthly_response.json()
+    assert analytics_monthly_payload["active_filter"] == "Monthly"
+    assert analytics_monthly_payload["revenue_comparison"][0]["label"] == "This Month Revenue"
+
+    analytics_export_pdf_response = client.get("/api/v1/restaurant/analytics/export?period=weekly&format=pdf", headers=headers)
+    assert analytics_export_pdf_response.status_code == 200
+    assert analytics_export_pdf_response.headers["content-type"].startswith("application/pdf")
+
+    analytics_export_excel_response = client.get("/api/v1/restaurant/analytics/export?period=monthly&format=excel&from_date=2026-03-24&to_date=2026-03-26", headers=headers)
+    assert analytics_export_excel_response.status_code == 200
+    assert "text/csv" in analytics_export_excel_response.headers["content-type"]
 
     chat_list_response = client.get("/api/v1/restaurant/chat/messages", headers=headers)
     assert chat_list_response.status_code == 200

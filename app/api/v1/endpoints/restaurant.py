@@ -21,6 +21,7 @@ from app.schemas.restaurant import (
     DailyDataListResponse,
     DailyDataResponse,
     DocumentConfirmRequest,
+    DocumentConfirmSaveResponse,
     DocumentDetailResponse,
     DocumentExtractionResponse,
     DocumentListResponse,
@@ -123,8 +124,8 @@ async def upload_and_extract_document(
     )
 
 
-@router.post('/documents/confirm-save', response_model=DocumentDetailResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Invoice AI'], summary='Confirm And Save Invoice', description='Stores the edited invoice preview as a restaurant invoice record.')
-async def confirm_and_save_document(payload: DocumentSaveRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DocumentDetailResponse:
+@router.post('/documents/confirm-save', response_model=DocumentConfirmSaveResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Invoice AI'], summary='Confirm And Save Invoice', description='Stores the edited invoice preview as a restaurant invoice record.')
+async def confirm_and_save_document(payload: DocumentSaveRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DocumentConfirmSaveResponse:
     return await service.create_document_from_confirmation(current_user, payload)
 
 
@@ -269,12 +270,12 @@ async def delete_daily_data(record_id: str, current_user: dict = Depends(get_cur
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post('/inventory', response_model=InventoryItemResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Inventory'], summary='Create Inventory Item', description='Creates a new inventory item for the add inventory screen.')
+@router.post('/inventory', response_model=InventoryItemResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Inventory'], summary='Create Inventory Item', description='Creates a new inventory item for the add inventory screen.', include_in_schema=False)
 async def create_inventory_item(payload: InventoryCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryItemResponse:
     return await service.create_inventory_item(current_user, payload)
 
 
-@router.get('/inventory', response_model=InventoryListResponse, tags=['Restaurant Inventory'], summary='Inventory List', description='Lists inventory items and summary card data for the inventory screen.')
+@router.get('/inventory', response_model=InventoryListResponse, tags=['Restaurant Inventory'], summary='Inventory List', description='Lists inventory items and summary card data for the inventory screen.', include_in_schema=False)
 async def list_inventory(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -287,30 +288,55 @@ async def list_inventory(
     return await service.list_inventory(current_user, page=page, page_size=page_size, search=search, status=status_filter, category=category)
 
 
-@router.get('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Inventory Detail', description='Returns the inventory detail screen payload for one product.')
+@router.get('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Inventory Detail', description='Returns the inventory detail screen payload for one product.', include_in_schema=False)
 async def get_inventory_item(item_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryDetailResponse:
     return await service.get_inventory_item(current_user, item_id)
 
 
-@router.patch('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Update Inventory Item', description='Updates inventory item fields such as supplier, threshold, or stock metadata.')
+@router.patch('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Update Inventory Item', description='Updates inventory item fields such as supplier, threshold, or stock metadata.', include_in_schema=False)
 async def update_inventory_item(item_id: str, payload: InventoryUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryDetailResponse:
     return await service.update_inventory_item(current_user, item_id, payload)
 
 
-@router.delete('/inventory/{item_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Inventory'], summary='Delete Inventory Item', description='Deletes one inventory item.')
+@router.delete('/inventory/{item_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Inventory'], summary='Delete Inventory Item', description='Deletes one inventory item.', include_in_schema=False)
 async def delete_inventory_item(item_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
     await service.delete_inventory_item(current_user, item_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post('/inventory/{item_id}/stock-update', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Update Inventory Stock', description='Adds or removes stock and appends inventory history entries.')
+@router.post('/inventory/{item_id}/stock-update', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Update Inventory Stock', description='Adds or removes stock and appends inventory history entries.', include_in_schema=False)
 async def update_inventory_stock(item_id: str, payload: InventoryStockUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryDetailResponse:
     return await service.update_inventory_stock(current_user, item_id, payload)
 
 
 @router.get('/analytics/overview', response_model=AnalyticsOverviewResponse, tags=['Restaurant Analytics'], summary='Analytics Overview', description='Returns the analytics screen payload including cards, trend, comparisons, and alerts.')
-async def get_analytics(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> AnalyticsOverviewResponse:
-    return await service.get_analytics(current_user)
+async def get_analytics(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsOverviewResponse:
+    return await service.get_analytics(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/analytics/export', tags=['Restaurant Analytics'], summary='Export Analytics Report', description='Exports analytics data in PDF or Excel format for weekly or monthly period.')
+async def export_analytics_report(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    format: str = Query(default='pdf', pattern='^(pdf|excel)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> Response:
+    file_name, media_type, content = await service.export_analytics_report(
+        current_user,
+        period=period,
+        export_format=format,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return Response(content=content, media_type=media_type, headers={'Content-Disposition': f'attachment; filename="{file_name}"'})
 
 
 @router.get('/analytics/business-insight', response_model=AnalyticsInsightBannerResponse, tags=['Restaurant Analytics'], summary='Analytics Business Insight', description='Returns the top analytics insight banner generated from restaurant data.')

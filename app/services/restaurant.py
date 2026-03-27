@@ -53,6 +53,7 @@ from app.schemas.restaurant import (
     DailyDataResponse,
     DailyDataSummaryCardResponse,
     DocumentConfirmRequest,
+    DocumentConfirmSaveResponse,
     DocumentDetailResponse,
     DocumentExtractionResponse,
     DocumentLineItemSchema,
@@ -80,6 +81,7 @@ from app.schemas.restaurant import (
     DailyDataCoversSummaryResponse,
     DailyDataRegisterSummaryResponse,
     MetricCardResponse,
+    RestaurantHomePeriodResponse,
     RestaurantHomeResponse,
     RestaurantProfileResponse,
     RestaurantProfileUpdateRequest,
@@ -125,47 +127,49 @@ class RestaurantOperationsService(BaseService):
         self.openai_service = openai_service
 
     async def get_home(self, current_user: dict, *, period: str = "weekly", from_date: date | None = None, to_date: date | None = None) -> RestaurantHomeResponse:
+        del period
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
         cash_deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=120)
 
-        filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
-        filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
-        filtered_cash_deposits = self._filter_home_cash_deposits(cash_deposits, period=period, from_date=from_date, to_date=to_date)
-
-        insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=filtered_daily_records, expenses=filtered_expenses)
-        metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
-        recent_activity = self._build_recent_activity(
-            daily_records=filtered_daily_records,
-            expenses=filtered_expenses,
-            cash_deposits=filtered_cash_deposits,
+        weekly_snapshot = await self._build_home_period_snapshot(
+            scope_id=scope_id,
+            daily_records=daily_records,
+            expenses=expenses,
+            cash_deposits=cash_deposits,
+            period='weekly',
+            from_date=from_date,
+            to_date=to_date,
         )
+        monthly_snapshot = await self._build_home_period_snapshot(
+            scope_id=scope_id,
+            daily_records=daily_records,
+            expenses=expenses,
+            cash_deposits=cash_deposits,
+            period='monthly',
+            from_date=from_date,
+            to_date=to_date,
+        )
+
+        recent_activity = self._build_recent_activity(
+            daily_records=self.serialize_list(daily_records),
+            expenses=self.serialize_list(expenses),
+            cash_deposits=self.serialize_list(cash_deposits),
+        )
+
         return RestaurantHomeResponse(
             greeting_name=current_user["full_name"].split()[0],
             restaurant_name=current_user.get("restaurant_name"),
             preferred_language=str(current_user.get("preferred_language", "en")),
-            period=period,
-            metrics=[
-                MetricCardResponse(label="Revenue", value=metrics_context["revenue_total"], change_percent=metrics_context["revenue_change_percent"]),
-                MetricCardResponse(label="Expenses", value=metrics_context["expenses_total"], change_percent=metrics_context["expense_change_percent"]),
-                MetricCardResponse(label="Food Cost", value=metrics_context["food_cost_total"], change_percent=metrics_context["food_cost_change_percent"]),
-                MetricCardResponse(label="Profit", value=metrics_context["profit_total"], change_percent=metrics_context["profit_change_percent"]),
-            ],
-            cash_management=[
-                CashManagementItemResponse(label="Total Cash Collected", amount=metrics_context["cash_collected_total"], subtitle="From recorded daily entries"),
-                CashManagementItemResponse(label="Cash Available", amount=metrics_context["cash_available"], subtitle="Estimated from register movements"),
-                CashManagementItemResponse(label="Cash Deposited", amount=sum(float(item.get("amount", 0)) for item in filtered_cash_deposits), subtitle="Bank deposits logged"),
-            ],
+            weekly=weekly_snapshot,
+            monthly=monthly_snapshot,
             quick_actions=[
                 QuickActionResponse(key="upload_invoice", label="Upload Invoice"),
                 QuickActionResponse(key="daily_data", label="Add Daily Data"),
                 QuickActionResponse(key="expenses", label="Expenses"),
                 QuickActionResponse(key="cash", label="Cash"),
             ],
-            vat_balance=self._calculate_vat_balance(metrics_context["revenue_total"], metrics_context["expenses_total"]),
-            weekly_revenue=self._build_home_revenue_chart(filtered_daily_records, period=period),
-            featured_insight=insights[0] if insights else None,
             recent_activity=recent_activity,
         )
 
@@ -179,16 +183,17 @@ class RestaurantOperationsService(BaseService):
         to_date: date | None = None,
     ) -> tuple[str, str, bytes]:
         home = await self.get_home(current_user, period=period, from_date=from_date, to_date=to_date)
+        section = home.monthly if period == 'monthly' else home.weekly
         period_label = period.capitalize()
         if export_format == 'excel':
             lines = [
                 'Section,Label,Value,ChangePercent,Currency',
             ]
-            for metric in home.metrics:
+            for metric in section.metrics:
                 lines.append(f'Metric,{metric.label},{metric.value},{metric.change_percent},{metric.currency}')
-            for item in home.cash_management:
+            for item in section.cash_management:
                 lines.append(f'CashManagement,{item.label},{item.amount},,EUR')
-            for point in home.weekly_revenue:
+            for point in section.revenue:
                 lines.append(f'Trend,{point.label},{point.value},,EUR')
             content = ('\n'.join(lines) + '\n').encode('utf-8')
             return (f'home_{period}_report.csv', 'text/csv; charset=utf-8', content)
@@ -197,20 +202,59 @@ class RestaurantOperationsService(BaseService):
             f'Risto AI - Home Report ({period_label})',
             f'Greeting: {home.greeting_name}',
             f'Restaurant: {home.restaurant_name or "-"}',
-            f'VAT Balance: {home.vat_balance:.2f}',
+            f'VAT Balance: {section.vat_balance:.2f}',
             'Metrics:',
         ]
-        for metric in home.metrics:
+        for metric in section.metrics:
             pdf_text.append(f'- {metric.label}: {metric.value:.2f} ({metric.change_percent:+.1f}%)')
         pdf_text.append('Cash Management:')
-        for item in home.cash_management:
+        for item in section.cash_management:
             pdf_text.append(f'- {item.label}: {item.amount:.2f}')
         pdf_text.append('Trend:')
-        for point in home.weekly_revenue:
+        for point in section.revenue:
             pdf_text.append(f'- {point.label}: {point.value:.2f}')
 
         content = self._build_simple_pdf('\n'.join(pdf_text))
         return (f'home_{period}_report.pdf', 'application/pdf', content)
+
+    async def _build_home_period_snapshot(
+        self,
+        *,
+        scope_id: str,
+        daily_records: list[dict],
+        expenses: list[dict],
+        cash_deposits: list[dict],
+        period: str,
+        from_date: date | None,
+        to_date: date | None,
+    ) -> RestaurantHomePeriodResponse:
+        filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
+        filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
+        filtered_cash_deposits = self._filter_home_cash_deposits(cash_deposits, period=period, from_date=from_date, to_date=to_date)
+
+        insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=filtered_daily_records, expenses=filtered_expenses)
+        metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
+
+        revenue_points = self._build_home_revenue_chart(filtered_daily_records, period=period)
+        if period == 'monthly':
+            revenue_points = [ChartPointResponse(label=point.label.replace('W', 'Week '), value=point.value) for point in revenue_points]
+
+        return RestaurantHomePeriodResponse(
+            metrics=[
+                MetricCardResponse(label="Revenue", value=metrics_context["revenue_total"], change_percent=metrics_context["revenue_change_percent"]),
+                MetricCardResponse(label="Expenses", value=metrics_context["expenses_total"], change_percent=metrics_context["expense_change_percent"]),
+                MetricCardResponse(label="Food Cost", value=metrics_context["food_cost_total"], change_percent=metrics_context["food_cost_change_percent"]),
+                MetricCardResponse(label="Profit", value=metrics_context["profit_total"], change_percent=metrics_context["profit_change_percent"]),
+            ],
+            cash_management=[
+                CashManagementItemResponse(label="Total Cash Collected", amount=metrics_context["cash_collected_total"], subtitle="From recorded daily entries"),
+                CashManagementItemResponse(label="Cash Available", amount=metrics_context["cash_available"], subtitle="Estimated from register movements"),
+                CashManagementItemResponse(label="Cash Deposited", amount=sum(float(item.get("amount", 0)) for item in filtered_cash_deposits), subtitle="Bank deposits logged"),
+            ],
+            vat_balance=self._calculate_vat_balance(metrics_context["revenue_total"], metrics_context["expenses_total"]),
+            revenue=revenue_points,
+            featured_insight=insights[0] if insights else None,
+        )
 
     async def get_vat_overview(self, current_user: dict) -> VatOverviewResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -281,7 +325,7 @@ class RestaurantOperationsService(BaseService):
             line_items=[DocumentLineItemSchema(**item) for item in line_items],
         )
 
-    async def create_document_from_confirmation(self, current_user: dict, payload: DocumentSaveRequest) -> DocumentDetailResponse:
+    async def create_document_from_confirmation(self, current_user: dict, payload: DocumentSaveRequest) -> DocumentConfirmSaveResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         now = datetime.now(UTC)
         resolved_invoice_date = payload.invoice_date or now.date()
@@ -307,7 +351,7 @@ class RestaurantOperationsService(BaseService):
             }
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=resolved_invoice_date, current_user=current_user)
-        return self._to_document_detail(document)
+        return self._to_document_confirm_save(document)
 
     async def confirm_document(self, current_user: dict, document_id: str, payload: DocumentConfirmRequest) -> DocumentDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -902,15 +946,29 @@ class RestaurantOperationsService(BaseService):
         )
         return self._to_inventory_detail_response(updated)
 
-    async def get_analytics(self, current_user: dict) -> AnalyticsOverviewResponse:
+    async def get_analytics(self, current_user: dict, *, period: str = "weekly", from_date: date | None = None, to_date: date | None = None) -> AnalyticsOverviewResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
-        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
-        documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
-        context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
-        serialized_records = self.serialize_list(daily_records)
-        serialized_expenses = self.serialize_list(expenses)
+        daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
+        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
+        documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
+
+        filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
+        filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
+
         serialized_documents = [item for item in self.serialize_list(documents) if item.get("status") == "processed"]
+        filtered_documents = []
+        start_date, end_date = self._resolve_home_date_range(period, from_date=from_date, to_date=to_date)
+        for item in serialized_documents:
+            invoice_date = self._safe_parse_date(item.get('invoice_date'))
+            if start_date is not None and invoice_date < start_date:
+                continue
+            if end_date is not None and invoice_date > end_date:
+                continue
+            filtered_documents.append(item)
+
+        context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
+        serialized_records = filtered_daily_records
+        serialized_expenses = filtered_expenses
         this_week_revenue = round(sum(float(item.get("total_revenue", 0)) for item in serialized_records), 2)
         last_week_revenue = round(this_week_revenue / 1.125, 2) if this_week_revenue else 0.0
         lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in serialized_records))
@@ -919,9 +977,10 @@ class RestaurantOperationsService(BaseService):
         staff_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "staff" in str(item.get("category", "")).lower()), 2)
         supplier_alerts = [
             AnalyticsSupplierAlertResponse(**item)
-            for item in await self._build_supplier_alerts(serialized_expenses=serialized_expenses, serialized_documents=serialized_documents)
+            for item in await self._build_supplier_alerts(serialized_expenses=serialized_expenses, serialized_documents=filtered_documents)
         ]
         return AnalyticsOverviewResponse(
+            active_filter=self._analytics_filter_label(period),
             insight_banner=await self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
             estimated_profit=context["profit_total"],
             estimated_profit_formatted=self._format_currency(float(context["profit_total"])),
@@ -930,7 +989,7 @@ class RestaurantOperationsService(BaseService):
             revenue_total=context["revenue_total"],
             revenue_total_formatted=self._format_currency(float(context["revenue_total"])),
             revenue_change_percent=context["revenue_change_percent"],
-            weekly_revenue=self._build_weekly_revenue_chart(daily_records),
+            weekly_revenue=self._build_home_revenue_chart(filtered_daily_records, period=period),
             metric_tiles=[
                 AnalyticsMetricTileResponse(label="Estimated Profit", value=float(context["profit_total"]), value_formatted=self._format_currency(float(context["profit_total"])), change_percent=8.2),
                 AnalyticsMetricTileResponse(label="Peak Hour", value="7:00 PM", value_formatted="7:00 PM", subtitle="92% Capacity Avg"),
@@ -941,8 +1000,8 @@ class RestaurantOperationsService(BaseService):
                 AnalyticsSummaryStatResponse(label="Avg Rev", value=context["avg_revenue_per_cover"], value_formatted=f"${float(context['avg_revenue_per_cover']):.2f}"),
             ],
             revenue_comparison=[
-                AnalyticsComparisonRowResponse(label="This Week Revenue", value=this_week_revenue, value_formatted=self._format_currency(this_week_revenue)),
-                AnalyticsComparisonRowResponse(label="Last Week Revenue", value=last_week_revenue, value_formatted=self._format_currency(last_week_revenue)),
+                AnalyticsComparisonRowResponse(label=self._analytics_current_revenue_label(period), value=this_week_revenue, value_formatted=self._format_currency(this_week_revenue)),
+                AnalyticsComparisonRowResponse(label=self._analytics_previous_revenue_label(period), value=last_week_revenue, value_formatted=self._format_currency(last_week_revenue)),
             ],
             covers_total=context["covers_total"],
             covers_activity=[
@@ -957,6 +1016,53 @@ class RestaurantOperationsService(BaseService):
             ],
             supplier_price_alerts=supplier_alerts,
         )
+
+    async def export_analytics_report(
+        self,
+        current_user: dict,
+        *,
+        period: str = "weekly",
+        export_format: str = "pdf",
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> tuple[str, str, bytes]:
+        analytics = await self.get_analytics(current_user, period=period, from_date=from_date, to_date=to_date)
+        period_label = self._analytics_filter_label(period)
+
+        if export_format == 'excel':
+            lines = [
+                'Section,Label,Value',
+                f'Header,Period,{period_label}',
+                f'Metric,Estimated Profit,{analytics.estimated_profit}',
+                f'Metric,Revenue Total,{analytics.revenue_total}',
+                f'Metric,Avg Rev Per Cover,{analytics.avg_revenue_per_cover}',
+            ]
+            for item in analytics.weekly_revenue:
+                lines.append(f'Revenue Trend,{item.label},{item.value}')
+            for item in analytics.revenue_comparison:
+                lines.append(f'Revenue Comparison,{item.label},{item.value}')
+            for item in analytics.supplier_price_alerts:
+                lines.append(f'Supplier Alert,{item.title},{item.subtitle}')
+            content = ('\n'.join(lines) + '\n').encode('utf-8')
+            return (f'analytics_{period}_report.csv', 'text/csv; charset=utf-8', content)
+
+        pdf_text = [
+            f'Risto AI - Analytics Report ({period_label})',
+            f'Estimated Profit: {analytics.estimated_profit_formatted}',
+            f'Revenue Total: {analytics.revenue_total_formatted}',
+            f'Peak Hour: {analytics.peak_hour_label}',
+            'Revenue Trend:',
+        ]
+        for item in analytics.weekly_revenue:
+            pdf_text.append(f'- {item.label}: {item.value:.2f}')
+        pdf_text.append('Revenue Comparison:')
+        for item in analytics.revenue_comparison:
+            pdf_text.append(f'- {item.label}: {item.value_formatted}')
+        pdf_text.append('Supplier Alerts:')
+        for item in analytics.supplier_price_alerts:
+            pdf_text.append(f'- {item.title}: {item.subtitle}')
+        content = self._build_simple_pdf('\n'.join(pdf_text))
+        return (f'analytics_{period}_report.pdf', 'application/pdf', content)
 
     async def get_analytics_business_insight(self, current_user: dict) -> AnalyticsInsightBannerResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1705,6 +1811,18 @@ class RestaurantOperationsService(BaseService):
             return datetime.now(UTC).date()
 
     @staticmethod
+    def _analytics_filter_label(period: str) -> str:
+        return 'Monthly' if period == 'monthly' else 'Weekly'
+
+    @staticmethod
+    def _analytics_current_revenue_label(period: str) -> str:
+        return 'This Month Revenue' if period == 'monthly' else 'This Week Revenue'
+
+    @staticmethod
+    def _analytics_previous_revenue_label(period: str) -> str:
+        return 'Last Month Revenue' if period == 'monthly' else 'Last Week Revenue'
+
+    @staticmethod
     def _build_simple_pdf(content: str) -> bytes:
         safe_content = content.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
         lines = safe_content.split('\n')
@@ -1979,32 +2097,38 @@ class RestaurantOperationsService(BaseService):
         serialized = self.serialize(document)
         invoice_date = serialized.get("invoice_date")
         status = str(serialized.get("status", "pending_review"))
-        status_label = status.replace("_", " ").title()
-        status_note = "VERIFIED" if status == "processed" else "FLAGGED PRICE CHANGE"
-        primary_action_label = "View" if status == "processed" else "Review"
-        secondary_action_label = "Edit"
         return DocumentListItemResponse(
             id=serialized["id"],
             supplier_name=serialized["supplier_name"],
             invoice_number=serialized.get("invoice_number"),
-            invoice_number_display=f"Inv #{serialized.get('invoice_number')}" if serialized.get("invoice_number") else None,
             invoice_date=invoice_date,
             invoice_date_formatted=self._format_human_date(invoice_date),
             upload_date=serialized["upload_date"],
-            total_amount=serialized["total_amount"],
-            total_amount_formatted=self._format_currency(float(serialized["total_amount"])),
+            total_amount=float(serialized.get("total_amount", 0.0)),
             status=status,
-            status_label=status_label,
-            status_note=status_note,
             line_item_count=len(serialized.get("line_items", [])),
-            line_item_count_label=f"{len(serialized.get('line_items', []))} Items",
-            source_file_name=serialized["source_file_name"],
-            primary_action_label=primary_action_label,
-            secondary_action_label=secondary_action_label,
-            primary_action_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
-            secondary_action_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}",
             created_by_user_id=serialized.get("created_by_user_id"),
             last_edited_by_user_id=serialized.get("last_edited_by_user_id"),
+            confirmed_at=serialized.get("confirmed_at"),
+        )
+
+    def _to_document_confirm_save(self, document: dict) -> DocumentConfirmSaveResponse:
+        serialized = self.serialize(document)
+        return DocumentConfirmSaveResponse(
+            id=serialized["id"],
+            supplier_name=serialized["supplier_name"],
+            invoice_number=serialized.get("invoice_number"),
+            invoice_date=serialized.get("invoice_date"),
+            total_amount=float(serialized.get("total_amount", 0.0)),
+            line_items=[DocumentLineItemSchema(**item) for item in serialized.get("line_items", [])],
+            source_file_name=serialized["source_file_name"],
+            ai_provider=serialized["ai_provider"],
+            ai_summary=serialized.get("ai_summary", ""),
+            upload_date=serialized["upload_date"],
+            status=str(serialized.get("status", "pending_review")),
+            created_by_user_id=serialized.get("created_by_user_id"),
+            last_edited_by_user_id=serialized.get("last_edited_by_user_id"),
+            confirmed_by_user_id=serialized.get("confirmed_by_user_id"),
             confirmed_at=serialized.get("confirmed_at"),
         )
 
