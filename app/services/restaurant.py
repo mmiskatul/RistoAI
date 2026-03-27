@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from html import escape
 from typing import Any
 
@@ -124,18 +124,28 @@ class RestaurantOperationsService(BaseService):
         self.insight_repository = insight_repository
         self.openai_service = openai_service
 
-    async def get_home(self, current_user: dict) -> RestaurantHomeResponse:
+    async def get_home(self, current_user: dict, *, period: str = "weekly", from_date: date | None = None, to_date: date | None = None) -> RestaurantHomeResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
-        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
-        cash_deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=20)
-        insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=daily_records, expenses=expenses)
-        metrics_context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
-        recent_activity = self._build_recent_activity(daily_records=daily_records, expenses=expenses, cash_deposits=cash_deposits)
+        daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
+        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
+        cash_deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=120)
+
+        filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
+        filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
+        filtered_cash_deposits = self._filter_home_cash_deposits(cash_deposits, period=period, from_date=from_date, to_date=to_date)
+
+        insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=filtered_daily_records, expenses=filtered_expenses)
+        metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
+        recent_activity = self._build_recent_activity(
+            daily_records=filtered_daily_records,
+            expenses=filtered_expenses,
+            cash_deposits=filtered_cash_deposits,
+        )
         return RestaurantHomeResponse(
             greeting_name=current_user["full_name"].split()[0],
             restaurant_name=current_user.get("restaurant_name"),
             preferred_language=str(current_user.get("preferred_language", "en")),
+            period=period,
             metrics=[
                 MetricCardResponse(label="Revenue", value=metrics_context["revenue_total"], change_percent=metrics_context["revenue_change_percent"]),
                 MetricCardResponse(label="Expenses", value=metrics_context["expenses_total"], change_percent=metrics_context["expense_change_percent"]),
@@ -145,7 +155,7 @@ class RestaurantOperationsService(BaseService):
             cash_management=[
                 CashManagementItemResponse(label="Total Cash Collected", amount=metrics_context["cash_collected_total"], subtitle="From recorded daily entries"),
                 CashManagementItemResponse(label="Cash Available", amount=metrics_context["cash_available"], subtitle="Estimated from register movements"),
-                CashManagementItemResponse(label="Cash Deposited", amount=sum(float(item.get("amount", 0)) for item in cash_deposits), subtitle="Bank deposits logged"),
+                CashManagementItemResponse(label="Cash Deposited", amount=sum(float(item.get("amount", 0)) for item in filtered_cash_deposits), subtitle="Bank deposits logged"),
             ],
             quick_actions=[
                 QuickActionResponse(key="upload_invoice", label="Upload Invoice"),
@@ -154,10 +164,53 @@ class RestaurantOperationsService(BaseService):
                 QuickActionResponse(key="cash", label="Cash"),
             ],
             vat_balance=self._calculate_vat_balance(metrics_context["revenue_total"], metrics_context["expenses_total"]),
-            weekly_revenue=self._build_weekly_revenue_chart(daily_records),
+            weekly_revenue=self._build_home_revenue_chart(filtered_daily_records, period=period),
             featured_insight=insights[0] if insights else None,
             recent_activity=recent_activity,
         )
+
+    async def export_home_report(
+        self,
+        current_user: dict,
+        *,
+        period: str = "weekly",
+        export_format: str = "pdf",
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> tuple[str, str, bytes]:
+        home = await self.get_home(current_user, period=period, from_date=from_date, to_date=to_date)
+        period_label = period.capitalize()
+        if export_format == 'excel':
+            lines = [
+                'Section,Label,Value,ChangePercent,Currency',
+            ]
+            for metric in home.metrics:
+                lines.append(f'Metric,{metric.label},{metric.value},{metric.change_percent},{metric.currency}')
+            for item in home.cash_management:
+                lines.append(f'CashManagement,{item.label},{item.amount},,EUR')
+            for point in home.weekly_revenue:
+                lines.append(f'Trend,{point.label},{point.value},,EUR')
+            content = ('\n'.join(lines) + '\n').encode('utf-8')
+            return (f'home_{period}_report.csv', 'text/csv; charset=utf-8', content)
+
+        pdf_text = [
+            f'Risto AI - Home Report ({period_label})',
+            f'Greeting: {home.greeting_name}',
+            f'Restaurant: {home.restaurant_name or "-"}',
+            f'VAT Balance: {home.vat_balance:.2f}',
+            'Metrics:',
+        ]
+        for metric in home.metrics:
+            pdf_text.append(f'- {metric.label}: {metric.value:.2f} ({metric.change_percent:+.1f}%)')
+        pdf_text.append('Cash Management:')
+        for item in home.cash_management:
+            pdf_text.append(f'- {item.label}: {item.amount:.2f}')
+        pdf_text.append('Trend:')
+        for point in home.weekly_revenue:
+            pdf_text.append(f'- {point.label}: {point.value:.2f}')
+
+        content = self._build_simple_pdf('\n'.join(pdf_text))
+        return (f'home_{period}_report.pdf', 'application/pdf', content)
 
     async def get_vat_overview(self, current_user: dict) -> VatOverviewResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1557,6 +1610,139 @@ class RestaurantOperationsService(BaseService):
             f'{rows_svg}'
             f'</svg>'
         )
+
+    def _build_home_revenue_chart(self, daily_records: list[dict], *, period: str) -> list[ChartPointResponse]:
+        if period == 'monthly':
+            return self._build_monthly_revenue_chart(daily_records)
+        return self._build_weekly_revenue_chart(daily_records)
+
+    def _build_monthly_revenue_chart(self, daily_records: list[dict]) -> list[ChartPointResponse]:
+        today = datetime.now(UTC).date()
+        start_date = today - timedelta(days=29)
+        by_day: dict[str, float] = {}
+        for item in self.serialize_list(daily_records):
+            key = item['business_date']
+            by_day[key] = by_day.get(key, 0.0) + float(item['total_revenue'])
+
+        points: list[ChartPointResponse] = []
+        for index in range(4):
+            segment_start = start_date + timedelta(days=index * 7)
+            segment_end = segment_start + timedelta(days=6)
+            total = 0.0
+            current = segment_start
+            while current <= segment_end and current <= today:
+                total += by_day.get(current.isoformat(), 0.0)
+                current += timedelta(days=1)
+            points.append(ChartPointResponse(label=f'W{index + 1}', value=round(total, 2)))
+        return points
+
+    def _filter_home_daily_records(self, daily_records: list[dict], *, period: str, from_date: date | None = None, to_date: date | None = None) -> list[dict]:
+        start_date, end_date = self._resolve_home_date_range(period, from_date=from_date, to_date=to_date)
+        records = self.serialize_list(daily_records)
+        if start_date is None and end_date is None:
+            return records
+        return [
+            item for item in records
+            if (start_date is None or self._safe_parse_date(item.get('business_date')) >= start_date)
+            and (end_date is None or self._safe_parse_date(item.get('business_date')) <= end_date)
+        ]
+
+    def _filter_home_expenses(self, expenses: list[dict], *, period: str, from_date: date | None = None, to_date: date | None = None) -> list[dict]:
+        start_date, end_date = self._resolve_home_date_range(period, from_date=from_date, to_date=to_date)
+        records = self.serialize_list(expenses)
+        if start_date is None and end_date is None:
+            return records
+        filtered: list[dict] = []
+        for item in records:
+            expense_date = self._safe_parse_date(item.get('expense_date'))
+            if start_date is not None and expense_date < start_date:
+                continue
+            if end_date is not None and expense_date > end_date:
+                continue
+            filtered.append(item)
+        return filtered
+
+    def _filter_home_cash_deposits(self, deposits: list[dict], *, period: str, from_date: date | None = None, to_date: date | None = None) -> list[dict]:
+        start_date, end_date = self._resolve_home_date_range(period, from_date=from_date, to_date=to_date)
+        records = self.serialize_list(deposits)
+        if start_date is None and end_date is None:
+            return records
+        filtered: list[dict] = []
+        for item in records:
+            deposit_date = self._safe_parse_date(item.get('deposit_date'))
+            if start_date is not None and deposit_date < start_date:
+                continue
+            if end_date is not None and deposit_date > end_date:
+                continue
+            filtered.append(item)
+        return filtered
+
+    @staticmethod
+    def _resolve_home_date_range(period: str, *, from_date: date | None = None, to_date: date | None = None) -> tuple[date | None, date | None]:
+        if from_date is not None or to_date is not None:
+            return from_date, to_date
+        today = datetime.now(UTC).date()
+        if period == 'weekly':
+            return today - timedelta(days=6), today
+        if period == 'monthly':
+            return today - timedelta(days=29), today
+        return None, None
+
+    @staticmethod
+    def _safe_parse_date(value: Any) -> date:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if value is None:
+            return datetime.now(UTC).date()
+        candidate = str(value).replace('Z', '+00:00')
+        try:
+            if 'T' in candidate:
+                return datetime.fromisoformat(candidate).date()
+            return date.fromisoformat(candidate)
+        except ValueError:
+            return datetime.now(UTC).date()
+
+    @staticmethod
+    def _build_simple_pdf(content: str) -> bytes:
+        safe_content = content.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+        lines = safe_content.split('\n')
+        y_position = 780
+        content_lines = ['BT', '/F1 12 Tf', '50 800 Td']
+        first = True
+        for line in lines:
+            if not first:
+                y_position -= 16
+                content_lines.append(f'50 {y_position} Td')
+            content_lines.append(f'({line}) Tj')
+            first = False
+        content_lines.append('ET')
+        stream = '\n'.join(content_lines).encode('utf-8')
+
+        objects: list[bytes] = [
+            b'1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
+            b'2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
+            b'3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>endobj\n',
+            b'4 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
+            b'5 0 obj<< /Length ' + str(len(stream)).encode('utf-8') + b' >>stream\n' + stream + b'\nendstream endobj\n',
+        ]
+
+        output = bytearray(b'%PDF-1.4\n')
+        offsets = [0]
+        for obj in objects:
+            offsets.append(len(output))
+            output.extend(obj)
+
+        xref_start = len(output)
+        output.extend(f'xref\n0 {len(offsets)}\n'.encode('utf-8'))
+        output.extend(b'0000000000 65535 f \n')
+        for offset in offsets[1:]:
+            output.extend(f'{offset:010d} 00000 n \n'.encode('utf-8'))
+        output.extend(
+            f'trailer<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF'.encode('utf-8')
+        )
+        return bytes(output)
 
     @staticmethod
     def _format_human_date(value: str | None) -> str | None:

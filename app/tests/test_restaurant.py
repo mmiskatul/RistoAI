@@ -378,9 +378,32 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
         json={"category": "Food Supplies", "amount": 250.0, "expense_date": "2026-03-24"},
     )
 
-    home_response = client.get("/api/v1/restaurant/home", headers=headers)
+    home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
-    assert home_response.json()["metrics"][0]["label"] == "Revenue"
+    home_payload = home_response.json()
+    assert home_payload["period"] == "weekly"
+    assert home_payload["export_endpoint"] == "/api/v1/restaurant/home/export"
+    assert home_payload["metrics"][0]["label"] == "Revenue"
+
+    home_monthly_response = client.get("/api/v1/restaurant/home?period=monthly", headers=headers)
+    assert home_monthly_response.status_code == 200
+    assert home_monthly_response.json()["period"] == "monthly"
+
+    home_export_pdf_response = client.get("/api/v1/restaurant/home/export?period=weekly&format=pdf", headers=headers)
+    assert home_export_pdf_response.status_code == 200
+    assert home_export_pdf_response.headers["content-type"].startswith("application/pdf")
+
+    home_export_excel_response = client.get("/api/v1/restaurant/home/export?period=monthly&format=excel", headers=headers)
+    assert home_export_excel_response.status_code == 200
+    assert "text/csv" in home_export_excel_response.headers["content-type"]
+
+    home_custom_range_response = client.get("/api/v1/restaurant/home?period=weekly&from_date=2026-03-24&to_date=2026-03-25", headers=headers)
+    assert home_custom_range_response.status_code == 200
+    assert home_custom_range_response.json()["period"] == "weekly"
+
+    home_export_custom_range_response = client.get("/api/v1/restaurant/home/export?period=weekly&format=excel&from_date=2026-03-24&to_date=2026-03-25", headers=headers)
+    assert home_export_custom_range_response.status_code == 200
+    assert "text/csv" in home_export_custom_range_response.headers["content-type"]
 
     cash_deposit_response = client.post(
         "/api/v1/restaurant/cash/deposits",

@@ -47,8 +47,33 @@ router = APIRouter()
 
 
 @router.get('/home', response_model=RestaurantHomeResponse, tags=['Restaurant Home'], summary='Home Overview', description='Restaurant dashboard home data for the mobile app home screen.')
-async def get_home(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RestaurantHomeResponse:
-    return await service.get_home(current_user)
+async def get_home(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantHomeResponse:
+    return await service.get_home(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/home/export', tags=['Restaurant Home'], summary='Export Home Report', description='Exports home dashboard data in PDF or Excel format for weekly or monthly period.')
+async def export_home_report(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    format: str = Query(default='pdf', pattern='^(pdf|excel)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> Response:
+    file_name, media_type, content = await service.export_home_report(
+        current_user,
+        period=period,
+        export_format=format,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return Response(content=content, media_type=media_type, headers={'Content-Disposition': f'attachment; filename="{file_name}"'})
 
 
 @router.get('/vat/overview', response_model=VatOverviewResponse, tags=['Restaurant VAT'], summary='VAT Overview', description='VAT balance, payable, receivable, and filing summary for the VAT screen.')

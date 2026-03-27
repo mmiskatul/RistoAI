@@ -67,6 +67,9 @@ class RestaurantHomeResponse(BaseSchema):
     greeting_name: str
     restaurant_name: str | None = None
     preferred_language: str
+    period: Literal["weekly", "monthly"] = "weekly"
+    available_periods: list[str] = Field(default_factory=lambda: ["weekly", "monthly"])
+    export_endpoint: str = "/api/v1/restaurant/home/export"
     metrics: list[MetricCardResponse]
     cash_management: list[CashManagementItemResponse]
     quick_actions: list[QuickActionResponse]
