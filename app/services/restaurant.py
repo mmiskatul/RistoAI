@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import UTC, date, datetime, timedelta
 from html import escape
 from typing import Any
@@ -392,20 +393,47 @@ class RestaurantOperationsService(BaseService):
         supplier = str(serialized.get("supplier_name") or "document").strip().lower().replace(" ", "-")
         safe_supplier = "".join(ch for ch in supplier if ch.isalnum() or ch in {"-", "_"}) or "document"
 
-        svg_text = self._build_document_svg(serialized)
-        if image_format == 'svg':
-            return f"{safe_supplier}-{serialized['id']}.svg", 'image/svg+xml', svg_text.encode('utf-8')
+        pdf_bytes = self._build_invoice_pdf(serialized)
+        try:
+            import fitz
 
-        if image_format == 'png':
             try:
-                import cairosvg
-            except ImportError as exc:
-                raise ValidationException('PNG export requires cairosvg to be installed on the server') from exc
-            try:
-                png_bytes = cairosvg.svg2png(bytestring=svg_text.encode('utf-8'))
+                pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+                page = pdf_document.load_page(0)
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                png_bytes = pixmap.tobytes("png")
+                png_width = pixmap.width
+                png_height = pixmap.height
+                pdf_document.close()
             except Exception as exc:
-                raise ValidationException('Unable to generate PNG export for this invoice') from exc
-            return f"{safe_supplier}-{serialized['id']}.png", 'image/png', png_bytes
+                raise ValidationException('Unable to render invoice image from generated PDF') from exc
+
+            if image_format == 'png':
+                return f"{safe_supplier}-{serialized['id']}.png", 'image/png', png_bytes
+
+            if image_format == 'svg':
+                encoded_png = base64.b64encode(png_bytes).decode("ascii")
+                svg_text = (
+                    f'<svg xmlns="http://www.w3.org/2000/svg" width="{png_width}" height="{png_height}" viewBox="0 0 {png_width} {png_height}">'
+                    f'<image href="data:image/png;base64,{encoded_png}" x="0" y="0" width="{png_width}" height="{png_height}" />'
+                    f'</svg>'
+                )
+                return f"{safe_supplier}-{serialized['id']}.svg", 'image/svg+xml', svg_text.encode('utf-8')
+        except ImportError:
+            # fallback if PyMuPDF is not installed yet in the runtime
+            svg_text = self._build_document_svg(serialized)
+            if image_format == 'svg':
+                return f"{safe_supplier}-{serialized['id']}.svg", 'image/svg+xml', svg_text.encode('utf-8')
+            if image_format == 'png':
+                try:
+                    import cairosvg
+                except ImportError as exc:
+                    raise ValidationException('Image export requires PyMuPDF or CairoSVG to be installed on the server') from exc
+                try:
+                    png_bytes = cairosvg.svg2png(bytestring=svg_text.encode('utf-8'))
+                except Exception as exc:
+                    raise ValidationException('Unable to generate PNG export for this invoice') from exc
+                return f"{safe_supplier}-{serialized['id']}.png", 'image/png', png_bytes
 
         raise ValidationException('Unsupported image format')
 
@@ -1780,20 +1808,23 @@ class RestaurantOperationsService(BaseService):
 
     def _build_document_svg(self, document: dict[str, Any]) -> str:
         line_items = document.get("line_items", [])
-        width = 794   # A4 portrait at 96 DPI
-        height = 1123
-        outer_margin = 24
-        card_x = outer_margin
-        card_y = outer_margin
-        card_w = width - (outer_margin * 2)
-        card_h = height - (outer_margin * 2)
-        table_x = card_x + 20
-        table_y = 260
-        table_w = card_w - 40
-        table_header_h = 42
-        row_h = 34
-        table_bottom_reserved = 95
-        table_h = max(240, card_h - table_y - table_bottom_reserved)
+
+        # A4 landscape (96 DPI)
+        width = 1123
+        height = 794
+        page_margin = 18
+        frame_x = page_margin
+        frame_y = page_margin
+        frame_w = width - (page_margin * 2)
+        frame_h = height - (page_margin * 2)
+
+        header_left_x = frame_x + 34
+        header_right_x = frame_x + 700
+        table_x = frame_x + 34
+        table_y = frame_y + 350
+        table_w = frame_w - 68
+        table_h = 290
+        header_line_y = table_y + 52
 
         def truncate_text(value: Any, limit: int) -> str:
             raw = str(value or "").strip()
@@ -1801,63 +1832,63 @@ class RestaurantOperationsService(BaseService):
                 return raw
             return f"{raw[:max(limit - 3, 0)]}..."
 
-        supplier_name = escape(truncate_text(document.get("supplier_name") or "Unknown Supplier", 36))
-        invoice_number = escape(truncate_text(document.get("invoice_number") or "N/A", 20))
+        supplier_name = escape(truncate_text(document.get("supplier_name") or "Unknown Supplier", 30))
+        invoice_number = escape(truncate_text(document.get("invoice_number") or "N/A", 16))
         invoice_date = escape(str(self._format_human_date(document.get("invoice_date")) or "-"))
         upload_date = escape(str(self._format_human_date(document.get("upload_date")) or "-"))
         total_amount = escape(self._format_currency(float(document.get("total_amount", 0))))
 
-        max_rows = max(1, int((table_h - table_header_h - 18) // row_h))
+        max_rows = max(1, int((table_h - 78) // 56))
         visible_rows = line_items[:max_rows]
         hidden_count = max(0, len(line_items) - len(visible_rows))
 
         row_parts: list[str] = []
-        y = table_y + table_header_h + 24
+        y = table_y + 92
         for item in visible_rows:
-            product_name = escape(truncate_text(item.get("product_name") or "Item", 34))
-            quantity = escape(truncate_text(item.get("quantity", 0), 8))
+            product_name = escape(truncate_text(item.get("product_name") or "Item", 35))
+            quantity = escape(truncate_text(item.get("quantity", 0), 10))
             unit_price = escape(self._format_currency(float(item.get("unit_price", 0))))
             total_price = escape(self._format_currency(float(item.get("total_price", 0))))
             row_parts.append(
-                f'<text x="{table_x + 14}" y="{y}" font-size="16" fill="#0f172a" font-family="Arial">{product_name}</text>'
-                f'<text x="{table_x + 390}" y="{y}" font-size="16" fill="#64748b" font-family="Arial">Qty {quantity}</text>'
-                f'<text x="{table_x + 500}" y="{y}" font-size="16" fill="#64748b" font-family="Arial">{unit_price}</text>'
-                f'<text x="{table_x + table_w - 115}" y="{y}" font-size="16" fill="#111827" font-family="Arial" font-weight="700">{total_price}</text>'
-                f'<line x1="{table_x + 12}" y1="{y + 12}" x2="{table_x + table_w - 12}" y2="{y + 12}" stroke="#eef2f7" stroke-width="1" />'
+                f'<text x="{table_x + 28}" y="{y}" font-size="40" fill="#0f274b" font-family="Arial">{product_name}</text>'
+                f'<text x="{table_x + 640}" y="{y}" font-size="40" fill="#6b87a6" font-family="Arial">Qty {quantity}</text>'
+                f'<text x="{table_x + 830}" y="{y}" font-size="40" fill="#6b87a6" font-family="Arial">{unit_price}</text>'
+                f'<text x="{table_x + table_w - 165}" y="{y}" font-size="40" fill="#0f274b" font-family="Arial" font-weight="700">{total_price}</text>'
+                f'<line x1="{table_x + 16}" y1="{y + 22}" x2="{table_x + table_w - 16}" y2="{y + 22}" stroke="#e3ebf4" stroke-width="2" />'
             )
-            y += row_h
+            y += 56
 
         hidden_svg = ""
         if hidden_count > 0:
             hidden_svg = (
-                f'<text x="{table_x + 14}" y="{table_y + table_h - 14}" font-size="12" fill="#9a3412" font-family="Arial">'
-                f'... {hidden_count} more item(s) not shown in A4 preview'
+                f'<text x="{table_x + 24}" y="{table_y + table_h - 18}" font-size="28" fill="#9a3412" font-family="Arial">'
+                f'... {hidden_count} more item(s) not shown'
                 f'</text>'
             )
 
         rows_svg = "".join(row_parts)
         return (
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
-            f'<rect width="100%" height="100%" fill="#f8fafc"/>'
-            f'<rect x="{card_x}" y="{card_y}" width="{card_w}" height="{card_h}" rx="20" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>'
-            f'<text x="{card_x + 20}" y="{card_y + 44}" font-size="44" font-weight="700" fill="#0f172a" font-family="Arial">INVOICE</text>'
-            f'<text x="{card_x + 20}" y="{card_y + 90}" font-size="22" fill="#64748b" font-family="Arial">Supplier</text>'
-            f'<text x="{card_x + 20}" y="{card_y + 124}" font-size="48" font-weight="700" fill="#111827" font-family="Arial">{supplier_name}</text>'
-            f'<text x="{card_x + 470}" y="{card_y + 90}" font-size="22" fill="#64748b" font-family="Arial">Invoice Number</text>'
-            f'<text x="{card_x + 470}" y="{card_y + 124}" font-size="42" font-weight="700" fill="#111827" font-family="Arial">{invoice_number}</text>'
-            f'<text x="{card_x + 20}" y="{card_y + 170}" font-size="22" fill="#64748b" font-family="Arial">Invoice Date</text>'
-            f'<text x="{card_x + 20}" y="{card_y + 204}" font-size="38" font-weight="700" fill="#111827" font-family="Arial">{invoice_date}</text>'
-            f'<text x="{card_x + 240}" y="{card_y + 170}" font-size="22" fill="#64748b" font-family="Arial">Upload Date</text>'
-            f'<text x="{card_x + 240}" y="{card_y + 204}" font-size="38" font-weight="700" fill="#111827" font-family="Arial">{upload_date}</text>'
-            f'<rect x="{card_x + 470}" y="{card_y + 150}" width="250" height="74" rx="15" fill="#fff7ed"/>'
-            f'<text x="{card_x + 490}" y="{card_y + 178}" font-size="24" fill="#9a3412" font-family="Arial">Total Amount</text>'
-            f'<text x="{card_x + 490}" y="{card_y + 210}" font-size="48" font-weight="700" fill="#f97316" font-family="Arial">{total_amount}</text>'
-            f'<rect x="{table_x}" y="{table_y}" width="{table_w}" height="{table_h}" rx="18" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>'
-            f'<text x="{table_x + 14}" y="{table_y + 28}" font-size="14" fill="#64748b" font-family="Arial">PRODUCT</text>'
-            f'<text x="{table_x + 390}" y="{table_y + 28}" font-size="14" fill="#64748b" font-family="Arial">QTY</text>'
-            f'<text x="{table_x + 500}" y="{table_y + 28}" font-size="14" fill="#64748b" font-family="Arial">PRICE</text>'
-            f'<text x="{table_x + table_w - 115}" y="{table_y + 28}" font-size="14" fill="#64748b" font-family="Arial">TOTAL</text>'
-            f'<line x1="{table_x + 12}" y1="{table_y + table_header_h}" x2="{table_x + table_w - 12}" y2="{table_y + table_header_h}" stroke="#e2e8f0" stroke-width="2" />'
+            f'<rect width="100%" height="100%" fill="#f7fafc"/>'
+            f'<rect x="{frame_x}" y="{frame_y}" width="{frame_w}" height="{frame_h}" fill="none" stroke="#d6e1ee" stroke-width="3"/>'
+            f'<text x="{header_left_x}" y="{frame_y + 70}" font-size="62" font-weight="700" fill="#0f274b" font-family="Arial">INVOICE</text>'
+            f'<text x="{header_left_x}" y="{frame_y + 130}" font-size="32" fill="#6b87a6" font-family="Arial">Supplier</text>'
+            f'<text x="{header_left_x}" y="{frame_y + 178}" font-size="52" font-weight="700" fill="#0f274b" font-family="Arial">{supplier_name}</text>'
+            f'<text x="{header_right_x}" y="{frame_y + 130}" font-size="32" fill="#6b87a6" font-family="Arial">Invoice Number</text>'
+            f'<text x="{header_right_x}" y="{frame_y + 178}" font-size="52" font-weight="700" fill="#0f274b" font-family="Arial">{invoice_number}</text>'
+            f'<text x="{header_left_x}" y="{frame_y + 250}" font-size="32" fill="#6b87a6" font-family="Arial">Invoice Date</text>'
+            f'<text x="{header_left_x}" y="{frame_y + 298}" font-size="48" font-weight="700" fill="#0f274b" font-family="Arial">{invoice_date}</text>'
+            f'<text x="{header_left_x + 300}" y="{frame_y + 250}" font-size="32" fill="#6b87a6" font-family="Arial">Upload Date</text>'
+            f'<text x="{header_left_x + 300}" y="{frame_y + 298}" font-size="48" font-weight="700" fill="#0f274b" font-family="Arial">{upload_date}</text>'
+            f'<rect x="{header_right_x + 96}" y="{frame_y + 220}" width="265" height="96" fill="#f7efe4"/>'
+            f'<text x="{header_right_x + 114}" y="{frame_y + 262}" font-size="38" fill="#b65a1e" font-family="Arial">Total Amount</text>'
+            f'<text x="{header_right_x + 114}" y="{frame_y + 304}" font-size="58" font-weight="700" fill="#f97316" font-family="Arial">{total_amount}</text>'
+            f'<rect x="{table_x}" y="{table_y}" width="{table_w}" height="{table_h}" fill="none" stroke="#d6e1ee" stroke-width="3"/>'
+            f'<text x="{table_x + 28}" y="{table_y + 40}" font-size="34" fill="#6b87a6" font-family="Arial">PRODUCT</text>'
+            f'<text x="{table_x + 640}" y="{table_y + 40}" font-size="34" fill="#6b87a6" font-family="Arial">QTY</text>'
+            f'<text x="{table_x + 830}" y="{table_y + 40}" font-size="34" fill="#6b87a6" font-family="Arial">PRICE</text>'
+            f'<text x="{table_x + table_w - 165}" y="{table_y + 40}" font-size="34" fill="#6b87a6" font-family="Arial">TOTAL</text>'
+            f'<line x1="{table_x + 16}" y1="{header_line_y}" x2="{table_x + table_w - 16}" y2="{header_line_y}" stroke="#d6e1ee" stroke-width="2" />'
             f'{rows_svg}'
             f'{hidden_svg}'
             f'</svg>'
