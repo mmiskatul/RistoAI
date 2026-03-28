@@ -205,18 +205,6 @@ class DocumentListItemResponse(BaseSchema):
 
 
 class DocumentDetailResponse(BaseSchema):
-    page_title: str = "Document Details"
-    preview_title: str = "Document Preview"
-    preview_image_url: str | None = None
-    document_information_title: str = "Document Information"
-    extracted_data_title: str = "Extracted Data"
-    supplier_name_label: str = "Supplier Name"
-    total_amount_label: str = "Total Amount"
-    invoice_date_label: str = "Invoice Date"
-    upload_date_label: str = "Upload Date"
-    edit_button_label: str = "Edit Data"
-    download_button_label: str = "Download"
-    delete_button_label: str = "Delete Document"
     id: str
     supplier_name: str
     invoice_number: str | None = None
@@ -226,24 +214,13 @@ class DocumentDetailResponse(BaseSchema):
     upload_date: str
     upload_date_formatted: str | None = None
     total_amount: float
-    total_amount_formatted: str | None = None
     status: str
-    status_label: str | None = None
     ai_provider: str
     ai_summary: str
-    source_file_name: str
-    source_label: str | None = None
     line_items: list[DocumentLineItemSchema]
-    edit_endpoint: str | None = None
     download_endpoint: str | None = None
-    delete_endpoint: str | None = None
     created_at: str
     updated_at: str
-    created_by_user_id: str | None = None
-    last_edited_by_user_id: str | None = None
-    last_edited_at: str | None = None
-    confirmed_by_user_id: str | None = None
-    confirmed_at: str | None = None
 
 
 class DocumentListResponse(BaseSchema):

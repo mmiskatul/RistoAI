@@ -86,15 +86,12 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     document_detail_response = client.get(f"/api/v1/restaurant/documents/{confirm_response.json()['id']}", headers=headers)
     assert document_detail_response.status_code == 200
     document_detail_payload = document_detail_response.json()
-    assert document_detail_payload["page_title"] == "Document Details"
-    assert document_detail_payload["document_information_title"] == "Document Information"
-    assert document_detail_payload["extracted_data_title"] == "Extracted Data"
     assert document_detail_payload["supplier_name"] == "Bakery Goods Co"
     assert document_detail_payload["invoice_date_formatted"]
     assert document_detail_payload["upload_date_formatted"]
-    assert document_detail_payload["edit_endpoint"].endswith(confirm_response.json()["id"])
-    assert document_detail_payload["delete_endpoint"].endswith(confirm_response.json()["id"])
     assert document_detail_payload["download_endpoint"].endswith(f"{confirm_response.json()['id']}/download")
+    assert "page_title" not in document_detail_payload
+    assert "source_file_name" not in document_detail_payload
 
     download_response = client.get(f"/api/v1/restaurant/documents/{confirm_response.json()['id']}/download", headers=headers)
     assert download_response.status_code == 200
