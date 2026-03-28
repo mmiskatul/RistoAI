@@ -377,13 +377,37 @@ class RestaurantOperationsService(BaseService):
         document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
         return self._to_document_detail(document)
 
-    async def download_document_file(self, current_user: dict, document_id: str) -> tuple[str, str]:
+    async def download_document_file(self, current_user: dict, document_id: str) -> tuple[str, bytes]:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
         serialized = self.serialize(document)
         supplier = str(serialized.get("supplier_name") or "document").strip().lower().replace(" ", "-")
         safe_supplier = "".join(ch for ch in supplier if ch.isalnum() or ch in {"-", "_"}) or "document"
-        return f"{safe_supplier}-{serialized['id']}.svg", self._build_document_svg(serialized)
+        return f"{safe_supplier}-{serialized['id']}.pdf", self._build_invoice_pdf(serialized)
+
+    async def download_document_image(self, current_user: dict, document_id: str, *, image_format: str = 'svg') -> tuple[str, str, bytes]:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
+        serialized = self.serialize(document)
+        supplier = str(serialized.get("supplier_name") or "document").strip().lower().replace(" ", "-")
+        safe_supplier = "".join(ch for ch in supplier if ch.isalnum() or ch in {"-", "_"}) or "document"
+
+        svg_text = self._build_document_svg(serialized)
+        if image_format == 'svg':
+            return f"{safe_supplier}-{serialized['id']}.svg", 'image/svg+xml', svg_text.encode('utf-8')
+
+        if image_format == 'png':
+            try:
+                import cairosvg
+            except ImportError as exc:
+                raise ValidationException('PNG export requires cairosvg to be installed on the server') from exc
+            try:
+                png_bytes = cairosvg.svg2png(bytestring=svg_text.encode('utf-8'))
+            except Exception as exc:
+                raise ValidationException('Unable to generate PNG export for this invoice') from exc
+            return f"{safe_supplier}-{serialized['id']}.png", 'image/png', png_bytes
+
+        raise ValidationException('Unsupported image format')
 
     async def update_document(self, current_user: dict, document_id: str, payload: DocumentConfirmRequest) -> DocumentDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1663,6 +1687,100 @@ class RestaurantOperationsService(BaseService):
         )
         return generated_alerts
 
+    @staticmethod
+    def _pdf_escape(value: str) -> str:
+        return value.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+    def _build_invoice_pdf(self, document: dict[str, Any]) -> bytes:
+        line_items = document.get('line_items', [])
+        supplier_name = str(document.get('supplier_name') or 'Unknown Supplier')
+        invoice_number = str(document.get('invoice_number') or 'N/A')
+        invoice_date = str(self._format_human_date(document.get('invoice_date')) or '-')
+        upload_date = str(self._format_human_date(document.get('upload_date')) or '-')
+        total_amount = self._format_currency(float(document.get('total_amount', 0)))
+
+        width = 595
+        height = 842
+        margin = 32
+
+        row_height = 26
+        max_rows = 15
+        visible_items = line_items[:max_rows]
+        table_top = 562
+        table_height = max(160, 54 + len(visible_items) * row_height + 24)
+        table_bottom = table_top - table_height
+
+        cmds: list[str] = []
+        cmds.append('0.985 0.99 1 rg')
+        cmds.append(f'0 0 {width} {height} re f')
+
+        cmds.append('1 1 1 rg')
+        cmds.append('0.85 0.89 0.93 RG')
+        cmds.append('1 w')
+        cmds.append(f'12 12 {width - 24} {height - 24} re B')
+
+        cmds.append('0.94 0.9 0.85 rg')
+        cmds.append('430 640 140 52 re f')
+
+        cmds.append('0.85 0.89 0.93 RG')
+        cmds.append('1 w')
+        cmds.append(f'{margin} {table_bottom} {width - margin * 2} {table_height} re S')
+
+        y_div = table_top - 34
+        cmds.append('0.85 0.89 0.93 RG')
+        cmds.append('1 w')
+        cmds.append(f'{margin + 10} {y_div} {width - margin * 2 - 20} {y_div} l S')
+
+        def add_text(x: float, y: float, size: int, value: str, *, bold: bool = False, color: str = '0.06 0.14 0.27') -> None:
+            font = 'F2' if bold else 'F1'
+            safe = self._pdf_escape(value)
+            cmds.append(f'BT {color} rg /{font} {size} Tf 1 0 0 1 {x} {y} Tm ({safe}) Tj ET')
+
+        add_text(margin, 776, 20, 'INVOICE', bold=True)
+        add_text(margin, 742, 10, 'Supplier', color='0.35 0.45 0.57')
+        add_text(margin, 720, 16, supplier_name, bold=True)
+
+        add_text(355, 742, 10, 'Invoice Number', color='0.35 0.45 0.57')
+        add_text(355, 720, 15, invoice_number, bold=True)
+
+        add_text(margin, 674, 10, 'Invoice Date', color='0.35 0.45 0.57')
+        add_text(margin, 652, 14, invoice_date, bold=True)
+
+        add_text(190, 674, 10, 'Upload Date', color='0.35 0.45 0.57')
+        add_text(190, 652, 14, upload_date, bold=True)
+
+        add_text(442, 666, 10, 'Total Amount', color='0.55 0.24 0.08')
+        add_text(442, 644, 20, total_amount, bold=True, color='0.95 0.45 0.1')
+
+        add_text(margin + 14, table_top - 22, 10, 'PRODUCT', color='0.35 0.45 0.57')
+        add_text(304, table_top - 22, 10, 'QTY', color='0.35 0.45 0.57')
+        add_text(388, table_top - 22, 10, 'PRICE', color='0.35 0.45 0.57')
+        add_text(490, table_top - 22, 10, 'TOTAL', color='0.35 0.45 0.57')
+
+        y = table_top - 44
+        for item in visible_items:
+            product_name = str(item.get('product_name') or 'Item')
+            quantity = float(item.get('quantity', 0))
+            unit_price = self._format_currency(float(item.get('unit_price', 0)))
+            row_total = self._format_currency(float(item.get('total_price', 0)))
+
+            add_text(margin + 14, y, 10, product_name)
+            add_text(304, y, 10, f'Qty {quantity:.1f}', color='0.35 0.45 0.57')
+            add_text(388, y, 10, unit_price, color='0.35 0.45 0.57')
+            add_text(490, y, 10, row_total, bold=True)
+
+            y_line = y - 10
+            cmds.append('0.92 0.94 0.97 RG')
+            cmds.append('0.8 w')
+            cmds.append(f'{margin + 10} {y_line} {width - margin - 10} {y_line} l S')
+            y -= row_height
+
+        if len(line_items) > max_rows:
+            add_text(margin + 14, table_bottom + 12, 9, f'... {len(line_items) - max_rows} more items omitted in preview export', color='0.55 0.45 0.35')
+
+        stream = '\n'.join(cmds).encode('utf-8')
+        return self._build_pdf_document(stream)
+
     def _build_document_svg(self, document: dict[str, Any]) -> str:
         line_items = document.get("line_items", [])
         width = 900
@@ -1837,13 +1955,17 @@ class RestaurantOperationsService(BaseService):
             first = False
         content_lines.append('ET')
         stream = '\n'.join(content_lines).encode('utf-8')
+        return RestaurantOperationsService._build_pdf_document(stream)
 
+    @staticmethod
+    def _build_pdf_document(stream: bytes) -> bytes:
         objects: list[bytes] = [
             b'1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n',
             b'2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n',
-            b'3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>endobj\n',
+            b'3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>endobj\n',
             b'4 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n',
-            b'5 0 obj<< /Length ' + str(len(stream)).encode('utf-8') + b' >>stream\n' + stream + b'\nendstream endobj\n',
+            b'5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>endobj\n',
+            b'6 0 obj<< /Length ' + str(len(stream)).encode('utf-8') + b' >>stream\n' + stream + b'\nendstream endobj\n',
         ]
 
         output = bytearray(b'%PDF-1.4\n')
@@ -1857,9 +1979,7 @@ class RestaurantOperationsService(BaseService):
         output.extend(b'0000000000 65535 f \n')
         for offset in offsets[1:]:
             output.extend(f'{offset:010d} 00000 n \n'.encode('utf-8'))
-        output.extend(
-            f'trailer<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF'.encode('utf-8')
-        )
+        output.extend(f'trailer<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF'.encode('utf-8'))
         return bytes(output)
 
     @staticmethod

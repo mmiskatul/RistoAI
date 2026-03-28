@@ -95,9 +95,15 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
 
     download_response = client.get(f"/api/v1/restaurant/documents/{confirm_response.json()['id']}/download", headers=headers)
     assert download_response.status_code == 200
-    assert download_response.headers["content-type"].startswith("image/svg+xml")
+    assert download_response.headers["content-type"].startswith("application/pdf")
     assert "attachment; filename=" in download_response.headers["content-disposition"]
-    assert "<svg" in download_response.text
+    assert download_response.content.startswith(b"%PDF")
+
+    download_svg_response = client.get(f"/api/v1/restaurant/documents/{confirm_response.json()['id']}/download-image?format=svg", headers=headers)
+    assert download_svg_response.status_code == 200
+    assert download_svg_response.headers["content-type"].startswith("image/svg+xml")
+    assert "attachment; filename=" in download_svg_response.headers["content-disposition"]
+    assert b"<svg" in download_svg_response.content
 
     today_iso = datetime.now(UTC).date().isoformat()
     date_data_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={today_iso}", headers=headers)

@@ -146,10 +146,21 @@ async def get_document_detail(document_id: str, current_user: dict = Depends(get
     return await service.get_document_detail(current_user, document_id)
 
 
-@router.get('/documents/{document_id}/download', tags=['Restaurant Invoice AI'], summary='Download Invoice Image', description='Generates a downloadable invoice image from the saved document data.')
+@router.get('/documents/{document_id}/download', tags=['Restaurant Invoice AI'], summary='Download Invoice PDF', description='Generates a downloadable A4 invoice PDF from the saved document data.')
 async def download_document(document_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
     filename, content = await service.download_document_file(current_user, document_id)
-    return Response(content=content, media_type='image/svg+xml', headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+    return Response(content=content, media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+
+
+@router.get('/documents/{document_id}/download-image', tags=['Restaurant Invoice AI'], summary='Download Invoice Image', description='Generates a downloadable invoice image in SVG or PNG format.')
+async def download_document_image(
+    document_id: str,
+    format: str = Query(default='svg', pattern='^(svg|png)$'),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> Response:
+    filename, media_type, content = await service.download_document_image(current_user, document_id, image_format=format)
+    return Response(content=content, media_type=media_type, headers={'Content-Disposition': f'attachment; filename="{filename}"'})
 
 
 @router.patch('/documents/{document_id}', response_model=DocumentDetailResponse, tags=['Restaurant Invoice AI'], summary='Update Invoice', description='Updates an existing saved invoice record.')
