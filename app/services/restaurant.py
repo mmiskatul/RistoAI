@@ -32,6 +32,10 @@ from app.schemas.restaurant import (
     CashDepositResponse,
     CashManagementItemResponse,
     CashManagementSummaryResponse,
+    CashOverviewPeriodsResponse,
+    CashPeriodOverviewResponse,
+    CashPeriodStatusResponse,
+    CashPeriodSummaryResponse,
     ChartPointResponse,
     ChatAttachmentOptionResponse,
     ChatConversationResponse,
@@ -534,22 +538,67 @@ class RestaurantOperationsService(BaseService):
 
     async def get_cash_management(self, current_user: dict) -> CashManagementSummaryResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
-        daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
-        total_collected = round(sum(float(item.get("cash_collected_total", item.get("cash_payments", 0) + item.get("cash_in", 0))) for item in daily_records), 2)
-        cash_available = round(sum(float(item.get("cash_available", item.get("closing_cash", 0) + item.get("cash_in", 0) - item.get("cash_out", 0))) for item in daily_records), 2)
-        withdrawals_total = round(sum(float(item.get("cash_withdrawals", 0) + item.get("cash_out", 0)) for item in daily_records), 2)
-        bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposits), 2)
+        deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200)
+        daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200)
+
+        serialized_deposits = self.serialize_list(deposits)
+        serialized_daily = self.serialize_list(daily_records)
+        today = datetime.now(UTC).date()
+        week_start = today - timedelta(days=today.weekday())
+        month_start = today.replace(day=1)
+
+        def parse_iso_date(value: Any) -> date:
+            parsed = self._safe_parse_date(value)
+            if parsed is not None:
+                return parsed
+            return today
+
+        def in_range(value: date, start: date, end: date) -> bool:
+            return start <= value <= end
+
+        def build_period(start: date, end: date, label: str) -> CashPeriodOverviewResponse:
+            daily_in_period = [item for item in serialized_daily if in_range(parse_iso_date(item.get("business_date")), start, end)]
+            deposits_in_period = [item for item in serialized_deposits if in_range(parse_iso_date(item.get("deposit_date")), start, end)]
+
+            total_collected = round(
+                sum(float(item.get("cash_collected_total", item.get("cash_payments", 0) + item.get("cash_in", 0))) for item in daily_in_period),
+                2,
+            )
+            cash_available = round(
+                sum(float(item.get("cash_available", item.get("closing_cash", 0) + item.get("cash_in", 0) - item.get("cash_out", 0))) for item in daily_in_period),
+                2,
+            )
+            withdrawals_total = round(
+                sum(float(item.get("cash_withdrawals", 0) + item.get("cash_out", 0)) for item in daily_in_period),
+                2,
+            )
+            bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposits_in_period), 2)
+
+            period_status = CashPeriodStatusResponse(
+                total_collected=label,
+                cash_available="IN_SAFE",
+                withdrawals=label,
+                bank_deposits=label,
+            )
+            period_summary = CashPeriodSummaryResponse(
+                total_collected=total_collected,
+                cash_available=cash_available,
+                withdrawals_total=withdrawals_total,
+                bank_deposits_total=bank_deposits_total,
+            )
+            return CashPeriodOverviewResponse(
+                summary=period_summary,
+                status=period_status,
+                recent_deposits=[self._to_cash_deposit_response(item) for item in deposits_in_period[:10]],
+            )
+
         return CashManagementSummaryResponse(
-            total_collected=total_collected,
-            total_collected_formatted=self._format_currency(total_collected),
-            cash_available=cash_available,
-            cash_available_formatted=self._format_currency(cash_available),
-            withdrawals_total=withdrawals_total,
-            withdrawals_total_formatted=self._format_currency(withdrawals_total),
-            bank_deposits_total=bank_deposits_total,
-            bank_deposits_total_formatted=self._format_currency(bank_deposits_total),
-            recent_deposits=[self._to_cash_deposit_response(item) for item in deposits[:10]],
+            active_period="today",
+            periods=CashOverviewPeriodsResponse(
+                today=build_period(today, today, "TODAY"),
+                this_week=build_period(week_start, today, "THIS_WEEK"),
+                this_month=build_period(month_start, today, "THIS_MONTH"),
+            ),
         )
 
     async def get_daily_data_manual_entry(self, current_user: dict) -> DailyDataManualEntryResponse:

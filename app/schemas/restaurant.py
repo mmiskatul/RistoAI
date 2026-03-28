@@ -295,28 +295,35 @@ class CashDepositResponse(BaseSchema):
     created_at: str
 
 
-class CashManagementSummaryResponse(BaseSchema):
-    page_title: str = "Cash Management"
-    subtitle: str = "Track and manage your restaurant's physical cash flow and bank deposits."
-    add_button_label: str = "Add Bank Deposit"
-    add_button_endpoint: str = "/api/v1/restaurant/cash/deposits"
-    period_filters: list[str] = Field(default_factory=lambda: ["Today", "This Week", "This Month", "This Year"])
-    active_period: str = "Today"
+class CashPeriodSummaryResponse(BaseSchema):
     total_collected: float
-    total_collected_formatted: str | None = None
-    total_collected_status: str = "TODAY"
     cash_available: float
-    cash_available_formatted: str | None = None
-    cash_available_status: str = "IN SAFE"
     withdrawals_total: float
-    withdrawals_total_formatted: str | None = None
-    withdrawals_status: str = "TODAY"
     bank_deposits_total: float
-    bank_deposits_total_formatted: str | None = None
-    bank_deposits_status: str = "TODAY"
-    recent_deposits_title: str = "Recent Deposits"
-    recent_deposits_view_all_label: str = "View All"
-    recent_deposits: list[CashDepositResponse]
+
+
+class CashPeriodStatusResponse(BaseSchema):
+    total_collected: str
+    cash_available: str
+    withdrawals: str
+    bank_deposits: str
+
+
+class CashPeriodOverviewResponse(BaseSchema):
+    summary: CashPeriodSummaryResponse
+    status: CashPeriodStatusResponse
+    recent_deposits: list[CashDepositResponse] = Field(default_factory=list)
+
+
+class CashOverviewPeriodsResponse(BaseSchema):
+    today: CashPeriodOverviewResponse
+    this_week: CashPeriodOverviewResponse
+    this_month: CashPeriodOverviewResponse
+
+
+class CashManagementSummaryResponse(BaseSchema):
+    active_period: str = "today"
+    periods: CashOverviewPeriodsResponse
 
 
 class DailyDataMethodOneRequest(BaseSchema):

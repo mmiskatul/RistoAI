@@ -413,14 +413,11 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
     assert cash_overview_response.status_code == 200
     cash_overview_payload = cash_overview_response.json()
-    assert cash_overview_payload["page_title"] == "Cash Management"
-    assert cash_overview_payload["add_button_label"] == "Add Bank Deposit"
-    assert cash_overview_payload["period_filters"] == ["Today", "This Week", "This Month", "This Year"]
-    assert cash_overview_payload["recent_deposits_title"] == "Recent Deposits"
-    assert cash_overview_payload["recent_deposits_view_all_label"] == "View All"
-    assert cash_overview_payload["bank_deposits_total"] == 450.0
-    assert cash_overview_payload["bank_deposits_total_formatted"] == "$450.00"
-    assert cash_overview_payload["recent_deposits"][0]["display_title"] == "Chase Bank - Main"
+    assert cash_overview_payload["active_period"] == "today"
+    assert set(cash_overview_payload["periods"].keys()) == {"today", "this_week", "this_month"}
+    assert cash_overview_payload["periods"]["this_month"]["summary"]["bank_deposits_total"] == 450.0
+    assert cash_overview_payload["periods"]["today"]["status"]["cash_available"] == "IN_SAFE"
+    assert cash_overview_payload["periods"]["this_month"]["recent_deposits"][0]["display_title"] == "Chase Bank - Main"
 
     insights_response = client.get("/api/v1/restaurant/insights", headers=headers)
     assert insights_response.status_code == 200
