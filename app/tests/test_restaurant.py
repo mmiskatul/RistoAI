@@ -275,14 +275,14 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
 
     expenses_user_two = client.get("/api/v1/restaurant/expenses", headers=headers_user_two)
     assert expenses_user_two.status_code == 200
-    assert "page_title" not in expenses_user_two.json()
-    assert expenses_user_two.json()["period_filters"] == ["Today", "This Week", "This Month", "This Year"]
-    assert expenses_user_two.json()["total"] == 0
+    assert set(expenses_user_two.json().keys()) == {"today", "this_week", "this_month"}
+    assert expenses_user_two.json()["today"]["total"] == 0
+    assert expenses_user_two.json()["this_week"]["items"] == []
 
     expenses_user_one = client.get("/api/v1/restaurant/expenses", headers=headers_user_one)
     assert expenses_user_one.status_code == 200
-    assert expenses_user_one.json()["summary"]["top_category"] == "Staff Costs"
-    assert expenses_user_one.json()["expense_distribution"][0]["label"] == "Staff Costs"
+    assert expenses_user_one.json()["this_month"]["top_category"] == "Staff Costs"
+    assert expenses_user_one.json()["this_month"]["distribution"][0]["label"] == "Staff Costs"
 
     inventory_user_two = client.get("/api/v1/restaurant/inventory", headers=headers_user_two)
     assert inventory_user_two.status_code == 200

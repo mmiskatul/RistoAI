@@ -262,17 +262,17 @@ class ExpenseDistributionItemResponse(BaseSchema):
     percentage: float
 
 
-class ExpenseListResponse(BaseSchema):
-    period_filters: list[str] = Field(default_factory=lambda: ["Today", "This Week", "This Month", "This Year"])
-    active_period: str = "Today"
-    summary: ExpenseSummaryResponse
-    distribution_total_label: str | None = None
-    expense_distribution: list[ExpenseDistributionItemResponse] = Field(default_factory=list)
-    total: int
-    page: int
-    page_size: int
-    pages: int
+class ExpensePeriodResponse(BaseSchema):
+    total: float
+    top_category: str | None = None
+    distribution: list[ExpenseDistributionItemResponse] = Field(default_factory=list)
     items: list[ExpenseResponse]
+
+
+class ExpenseListResponse(BaseSchema):
+    today: ExpensePeriodResponse
+    this_week: ExpensePeriodResponse
+    this_month: ExpensePeriodResponse
 
 
 class CashDepositCreateRequest(BaseSchema):

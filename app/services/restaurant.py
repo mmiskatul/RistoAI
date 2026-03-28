@@ -64,8 +64,8 @@ from app.schemas.restaurant import (
     ExpenseCreateRequest,
     ExpenseDistributionItemResponse,
     ExpenseListResponse,
+    ExpensePeriodResponse,
     ExpenseResponse,
-    ExpenseSummaryResponse,
     InsightActionResponse,
     InsightDetailResponse,
     InsightSummaryResponse,
@@ -452,41 +452,42 @@ class RestaurantOperationsService(BaseService):
 
     async def list_expenses(self, current_user: dict, *, page: int, page_size: int) -> ExpenseListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        items, total = await self.expense_repository.list_by_scope(scope_id=scope_id, page=page, page_size=page_size)
+        items, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=page, page_size=page_size)
+        serialized_items = self.serialize_list(items)
         today = datetime.now(UTC).date()
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
-        year_start = today.replace(month=1, day=1)
-        serialized_items = self.serialize_list(items)
-        today_total = round(sum(item["amount"] for item in serialized_items if item["expense_date"][:10] == today.isoformat()), 2)
-        week_total = round(sum(item["amount"] for item in serialized_items if week_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()), 2)
-        month_total = round(sum(item["amount"] for item in serialized_items if month_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()), 2)
-        year_total = round(sum(item["amount"] for item in serialized_items if year_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()), 2)
-        category_totals: dict[str, float] = {}
-        for item in serialized_items:
-            category = str(item.get("category") or "Other")
-            category_totals[category] = round(category_totals.get(category, 0.0) + float(item.get("amount", 0)), 2)
-        total_spend = round(sum(category_totals.values()), 2)
-        distribution = [
-            ExpenseDistributionItemResponse(
-                label=category,
-                percentage=round((amount / max(total_spend, 1)) * 100, 1),
+
+        def build_period(expenses: list[dict]) -> ExpensePeriodResponse:
+            total = round(sum(float(item.get("amount", 0)) for item in expenses), 2)
+            category_totals: dict[str, float] = {}
+            for item in expenses:
+                category = str(item.get("category") or "Other")
+                category_totals[category] = round(category_totals.get(category, 0.0) + float(item.get("amount", 0)), 2)
+            total_spend = round(sum(category_totals.values()), 2)
+            distribution = [
+                ExpenseDistributionItemResponse(
+                    label=category,
+                    percentage=round((amount / max(total_spend, 1)) * 100, 1),
+                )
+                for category, amount in sorted(category_totals.items(), key=lambda value: value[1], reverse=True)
+            ]
+            top_category = max(category_totals.items(), key=lambda value: value[1])[0] if category_totals else None
+            return ExpensePeriodResponse(
+                total=total,
+                top_category=top_category,
+                distribution=distribution,
+                items=[self._to_expense_response(item) for item in expenses],
             )
-            for category, amount in sorted(category_totals.items(), key=lambda item: item[1], reverse=True)[:3]
-        ]
-        summary = ExpenseSummaryResponse(
-            today_total=today_total,
-            week_total=week_total,
-            month_total=month_total,
-            top_category=self._top_category(serialized_items),
-        )
+
+        today_items = [item for item in serialized_items if item["expense_date"][:10] == today.isoformat()]
+        week_items = [item for item in serialized_items if week_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
+        month_items = [item for item in serialized_items if month_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
+
         return ExpenseListResponse(
-            active_period="Today",
-            summary=summary,
-            distribution_total_label=f"{round(distribution[0].percentage):.0f}%" if distribution else None,
-            expense_distribution=distribution,
-            items=[self._to_expense_response(item) for item in items],
-            **build_pagination_meta(total=total, page=page, page_size=page_size),
+            today=build_period(today_items),
+            this_week=build_period(week_items),
+            this_month=build_period(month_items),
         )
 
     async def create_cash_deposit(self, current_user: dict, payload: CashDepositCreateRequest) -> CashDepositResponse:
