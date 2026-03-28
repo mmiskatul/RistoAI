@@ -244,9 +244,7 @@ class ExpenseResponse(BaseSchema):
     id: str
     category: str
     amount: float
-    amount_formatted: str | None = None
     expense_date: str
-    expense_date_formatted: str | None = None
     notes: str | None = None
     subtitle: str | None = None
     created_at: str
@@ -254,30 +252,19 @@ class ExpenseResponse(BaseSchema):
 
 class ExpenseSummaryResponse(BaseSchema):
     today_total: float
-    today_total_formatted: str | None = None
     week_total: float
-    week_total_formatted: str | None = None
     month_total: float
-    month_total_formatted: str | None = None
     top_category: str | None = None
 
 
 class ExpenseDistributionItemResponse(BaseSchema):
     label: str
     percentage: float
-    percentage_label: str
 
 
 class ExpenseListResponse(BaseSchema):
-    page_title: str = "Expenses"
-    subtitle: str = "Track and manage all restaurant operational costs"
-    add_button_label: str = "Add Expense"
-    add_button_endpoint: str = "/api/v1/restaurant/expenses"
     period_filters: list[str] = Field(default_factory=lambda: ["Today", "This Week", "This Month", "This Year"])
     active_period: str = "Today"
-    quick_summary_title: str = "Quick Summary"
-    expense_distribution_title: str = "Expense Distribution"
-    recent_transactions_title: str = "Recent Transactions"
     summary: ExpenseSummaryResponse
     distribution_total_label: str | None = None
     expense_distribution: list[ExpenseDistributionItemResponse] = Field(default_factory=list)

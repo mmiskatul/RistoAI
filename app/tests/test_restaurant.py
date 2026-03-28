@@ -253,8 +253,7 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
         json={"category": "Staff Costs", "amount": 420.0, "expense_date": "2026-03-20", "notes": "Payroll"},
     )
     assert expense_response.status_code == 201
-    assert expense_response.json()["amount_formatted"] == "$420.00"
-    assert expense_response.json()["expense_date_formatted"] == "Mar 20, 2026"
+    assert set(expense_response.json().keys()) == {"id", "category", "amount", "expense_date", "notes", "subtitle", "created_at"}
     assert expense_response.json()["subtitle"] == "Payroll"
 
     inventory_response = client.post(
@@ -276,16 +275,13 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
 
     expenses_user_two = client.get("/api/v1/restaurant/expenses", headers=headers_user_two)
     assert expenses_user_two.status_code == 200
-    assert expenses_user_two.json()["page_title"] == "Expenses"
-    assert expenses_user_two.json()["add_button_label"] == "Add Expense"
+    assert "page_title" not in expenses_user_two.json()
     assert expenses_user_two.json()["period_filters"] == ["Today", "This Week", "This Month", "This Year"]
     assert expenses_user_two.json()["total"] == 0
 
     expenses_user_one = client.get("/api/v1/restaurant/expenses", headers=headers_user_one)
     assert expenses_user_one.status_code == 200
     assert expenses_user_one.json()["summary"]["top_category"] == "Staff Costs"
-    assert expenses_user_one.json()["items"][0]["amount_formatted"] == "$420.00"
-    assert expenses_user_one.json()["items"][0]["expense_date_formatted"] == "Mar 20, 2026"
     assert expenses_user_one.json()["expense_distribution"][0]["label"] == "Staff Costs"
 
     inventory_user_two = client.get("/api/v1/restaurant/inventory", headers=headers_user_two)

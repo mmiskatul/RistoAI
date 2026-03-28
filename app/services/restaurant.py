@@ -471,23 +471,19 @@ class RestaurantOperationsService(BaseService):
             ExpenseDistributionItemResponse(
                 label=category,
                 percentage=round((amount / max(total_spend, 1)) * 100, 1),
-                percentage_label=f"{round((amount / max(total_spend, 1)) * 100):.0f}%",
             )
             for category, amount in sorted(category_totals.items(), key=lambda item: item[1], reverse=True)[:3]
         ]
         summary = ExpenseSummaryResponse(
             today_total=today_total,
-            today_total_formatted=self._format_currency(today_total),
             week_total=week_total,
-            week_total_formatted=self._format_currency(week_total),
             month_total=month_total,
-            month_total_formatted=self._format_currency(month_total),
             top_category=self._top_category(serialized_items),
         )
         return ExpenseListResponse(
             active_period="Today",
             summary=summary,
-            distribution_total_label=distribution[0].percentage_label if distribution else None,
+            distribution_total_label=f"{round(distribution[0].percentage):.0f}%" if distribution else None,
             expense_distribution=distribution,
             items=[self._to_expense_response(item) for item in items],
             **build_pagination_meta(total=total, page=page, page_size=page_size),
@@ -1783,55 +1779,86 @@ class RestaurantOperationsService(BaseService):
 
     def _build_document_svg(self, document: dict[str, Any]) -> str:
         line_items = document.get("line_items", [])
-        width = 900
-        row_height = 44
-        items_top = 310
-        items_height = max(220, len(line_items) * row_height + 60)
-        height = items_top + items_height + 140
-        supplier_name = escape(str(document.get("supplier_name") or "Unknown Supplier"))
-        invoice_number = escape(str(document.get("invoice_number") or "N/A"))
+        width = 794   # A4 portrait at 96 DPI
+        height = 1123
+        outer_margin = 24
+        card_x = outer_margin
+        card_y = outer_margin
+        card_w = width - (outer_margin * 2)
+        card_h = height - (outer_margin * 2)
+        table_x = card_x + 20
+        table_y = 260
+        table_w = card_w - 40
+        table_header_h = 42
+        row_h = 34
+        table_bottom_reserved = 95
+        table_h = max(240, card_h - table_y - table_bottom_reserved)
+
+        def truncate_text(value: Any, limit: int) -> str:
+            raw = str(value or "").strip()
+            if len(raw) <= limit:
+                return raw
+            return f"{raw[:max(limit - 3, 0)]}..."
+
+        supplier_name = escape(truncate_text(document.get("supplier_name") or "Unknown Supplier", 36))
+        invoice_number = escape(truncate_text(document.get("invoice_number") or "N/A", 20))
         invoice_date = escape(str(self._format_human_date(document.get("invoice_date")) or "-"))
         upload_date = escape(str(self._format_human_date(document.get("upload_date")) or "-"))
         total_amount = escape(self._format_currency(float(document.get("total_amount", 0))))
+
+        max_rows = max(1, int((table_h - table_header_h - 18) // row_h))
+        visible_rows = line_items[:max_rows]
+        hidden_count = max(0, len(line_items) - len(visible_rows))
+
         row_parts: list[str] = []
-        y = items_top + 46
-        for item in line_items:
-            product_name = escape(str(item.get("product_name") or "Item"))
-            quantity = escape(str(item.get("quantity", 0)))
+        y = table_y + table_header_h + 24
+        for item in visible_rows:
+            product_name = escape(truncate_text(item.get("product_name") or "Item", 34))
+            quantity = escape(truncate_text(item.get("quantity", 0), 8))
             unit_price = escape(self._format_currency(float(item.get("unit_price", 0))))
             total_price = escape(self._format_currency(float(item.get("total_price", 0))))
             row_parts.append(
-                f'<line x1="70" y1="{y + 18}" x2="830" y2="{y + 18}" stroke="#f1f5f9" stroke-width="1" />'
-                f'<text x="80" y="{y}" font-size="20" fill="#0f172a" font-family="Arial">{product_name}</text>'
-                f'<text x="470" y="{y}" font-size="20" fill="#64748b" font-family="Arial">Qty {quantity}</text>'
-                f'<text x="590" y="{y}" font-size="20" fill="#64748b" font-family="Arial">{unit_price}</text>'
-                f'<text x="730" y="{y}" font-size="20" fill="#111827" font-family="Arial" font-weight="700">{total_price}</text>'
+                f'<text x="{table_x + 14}" y="{y}" font-size="16" fill="#0f172a" font-family="Arial">{product_name}</text>'
+                f'<text x="{table_x + 390}" y="{y}" font-size="16" fill="#64748b" font-family="Arial">Qty {quantity}</text>'
+                f'<text x="{table_x + 500}" y="{y}" font-size="16" fill="#64748b" font-family="Arial">{unit_price}</text>'
+                f'<text x="{table_x + table_w - 115}" y="{y}" font-size="16" fill="#111827" font-family="Arial" font-weight="700">{total_price}</text>'
+                f'<line x1="{table_x + 12}" y1="{y + 12}" x2="{table_x + table_w - 12}" y2="{y + 12}" stroke="#eef2f7" stroke-width="1" />'
             )
-            y += row_height
-        rows_svg = ''.join(row_parts)
+            y += row_h
+
+        hidden_svg = ""
+        if hidden_count > 0:
+            hidden_svg = (
+                f'<text x="{table_x + 14}" y="{table_y + table_h - 14}" font-size="12" fill="#9a3412" font-family="Arial">'
+                f'... {hidden_count} more item(s) not shown in A4 preview'
+                f'</text>'
+            )
+
+        rows_svg = "".join(row_parts)
         return (
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
             f'<rect width="100%" height="100%" fill="#f8fafc"/>'
-            f'<rect x="36" y="36" width="828" height="{height - 72}" rx="28" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>'
-            f'<text x="70" y="96" font-size="30" font-weight="700" fill="#0f172a" font-family="Arial">INVOICE</text>'
-            f'<text x="70" y="145" font-size="18" fill="#64748b" font-family="Arial">Supplier</text>'
-            f'<text x="70" y="174" font-size="28" font-weight="700" fill="#111827" font-family="Arial">{supplier_name}</text>'
-            f'<text x="540" y="145" font-size="18" fill="#64748b" font-family="Arial">Invoice Number</text>'
-            f'<text x="540" y="174" font-size="24" font-weight="700" fill="#111827" font-family="Arial">{invoice_number}</text>'
-            f'<text x="70" y="220" font-size="18" fill="#64748b" font-family="Arial">Invoice Date</text>'
-            f'<text x="70" y="248" font-size="22" font-weight="700" fill="#111827" font-family="Arial">{invoice_date}</text>'
-            f'<text x="300" y="220" font-size="18" fill="#64748b" font-family="Arial">Upload Date</text>'
-            f'<text x="300" y="248" font-size="22" font-weight="700" fill="#111827" font-family="Arial">{upload_date}</text>'
-            f'<rect x="560" y="204" width="240" height="62" rx="18" fill="#fff7ed"/>'
-            f'<text x="585" y="229" font-size="18" fill="#9a3412" font-family="Arial">Total Amount</text>'
-            f'<text x="585" y="255" font-size="28" font-weight="700" fill="#f97316" font-family="Arial">{total_amount}</text>'
-            f'<rect x="60" y="290" width="780" height="{items_height}" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>'
-            f'<text x="80" y="330" font-size="18" fill="#64748b" font-family="Arial">PRODUCT</text>'
-            f'<text x="470" y="330" font-size="18" fill="#64748b" font-family="Arial">QTY</text>'
-            f'<text x="590" y="330" font-size="18" fill="#64748b" font-family="Arial">PRICE</text>'
-            f'<text x="730" y="330" font-size="18" fill="#64748b" font-family="Arial">TOTAL</text>'
-            f'<line x1="70" y1="346" x2="830" y2="346" stroke="#e2e8f0" stroke-width="2" />'
+            f'<rect x="{card_x}" y="{card_y}" width="{card_w}" height="{card_h}" rx="20" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>'
+            f'<text x="{card_x + 20}" y="{card_y + 44}" font-size="44" font-weight="700" fill="#0f172a" font-family="Arial">INVOICE</text>'
+            f'<text x="{card_x + 20}" y="{card_y + 90}" font-size="22" fill="#64748b" font-family="Arial">Supplier</text>'
+            f'<text x="{card_x + 20}" y="{card_y + 124}" font-size="48" font-weight="700" fill="#111827" font-family="Arial">{supplier_name}</text>'
+            f'<text x="{card_x + 470}" y="{card_y + 90}" font-size="22" fill="#64748b" font-family="Arial">Invoice Number</text>'
+            f'<text x="{card_x + 470}" y="{card_y + 124}" font-size="42" font-weight="700" fill="#111827" font-family="Arial">{invoice_number}</text>'
+            f'<text x="{card_x + 20}" y="{card_y + 170}" font-size="22" fill="#64748b" font-family="Arial">Invoice Date</text>'
+            f'<text x="{card_x + 20}" y="{card_y + 204}" font-size="38" font-weight="700" fill="#111827" font-family="Arial">{invoice_date}</text>'
+            f'<text x="{card_x + 240}" y="{card_y + 170}" font-size="22" fill="#64748b" font-family="Arial">Upload Date</text>'
+            f'<text x="{card_x + 240}" y="{card_y + 204}" font-size="38" font-weight="700" fill="#111827" font-family="Arial">{upload_date}</text>'
+            f'<rect x="{card_x + 470}" y="{card_y + 150}" width="250" height="74" rx="15" fill="#fff7ed"/>'
+            f'<text x="{card_x + 490}" y="{card_y + 178}" font-size="24" fill="#9a3412" font-family="Arial">Total Amount</text>'
+            f'<text x="{card_x + 490}" y="{card_y + 210}" font-size="48" font-weight="700" fill="#f97316" font-family="Arial">{total_amount}</text>'
+            f'<rect x="{table_x}" y="{table_y}" width="{table_w}" height="{table_h}" rx="18" fill="#ffffff" stroke="#dbe4ef" stroke-width="2"/>'
+            f'<text x="{table_x + 14}" y="{table_y + 28}" font-size="14" fill="#64748b" font-family="Arial">PRODUCT</text>'
+            f'<text x="{table_x + 390}" y="{table_y + 28}" font-size="14" fill="#64748b" font-family="Arial">QTY</text>'
+            f'<text x="{table_x + 500}" y="{table_y + 28}" font-size="14" fill="#64748b" font-family="Arial">PRICE</text>'
+            f'<text x="{table_x + table_w - 115}" y="{table_y + 28}" font-size="14" fill="#64748b" font-family="Arial">TOTAL</text>'
+            f'<line x1="{table_x + 12}" y1="{table_y + table_header_h}" x2="{table_x + table_w - 12}" y2="{table_y + table_header_h}" stroke="#e2e8f0" stroke-width="2" />'
             f'{rows_svg}'
+            f'{hidden_svg}'
             f'</svg>'
         )
 
@@ -2285,9 +2312,7 @@ class RestaurantOperationsService(BaseService):
             id=serialized["id"],
             category=category,
             amount=amount,
-            amount_formatted=self._format_currency(amount),
             expense_date=serialized["expense_date"],
-            expense_date_formatted=self._format_human_date(serialized.get("expense_date")),
             notes=serialized.get("notes"),
             subtitle=subtitle,
             created_at=serialized["created_at"],
