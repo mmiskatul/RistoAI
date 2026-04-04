@@ -109,16 +109,6 @@ class DashboardUserGrowthResponse(BaseSchema):
 
 
 class DashboardOverviewResponse(BaseSchema):
-    page_title: str = "Admin Dashboard"
-    page_subtitle: str = "Platform Overview"
-    brand_name: str = "Risto AI"
-    header: DashboardHeaderResponse
-    sidebar_items: list[DashboardSidebarItemResponse] = Field(default_factory=list)
-    sidebar_footer_action: DashboardSidebarFooterActionResponse
-    header_actions: list[DashboardHeaderActionResponse] = Field(default_factory=list)
-    top_cards: list[DashboardTopCardResponse] = Field(default_factory=list)
-    revenue_growth: DashboardRevenueGrowthResponse
-    user_growth: DashboardUserGrowthResponse
     summary: DashboardKpiResponse
     charts: DashboardChartsResponse
     meta: DashboardMetaResponse

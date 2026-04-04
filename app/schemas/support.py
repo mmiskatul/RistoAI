@@ -64,7 +64,6 @@ class SupportManagementSummaryCardResponse(BaseSchema):
     label: str
     value: int
     value_formatted: str
-    subtitle: str | None = None
     icon_key: str | None = None
 
 
@@ -90,15 +89,6 @@ class SupportTicketListItemResponse(BaseSchema):
     status: SupportTicketStatus
     priority: SupportTicketPriority
     date: datetime
-    user_restaurant_label: str | None = None
-    issue_subject_label: str | None = None
-    status_label: str | None = None
-    status_variant: str | None = None
-    priority_label: str | None = None
-    date_formatted: str | None = None
-    view_endpoint: str | None = None
-    action_button_label: str | None = None
-    actions_menu: list[SupportManagementRowActionResponse] = Field(default_factory=list)
 
 
 class SupportTicketSummaryResponse(BaseSchema):
@@ -107,14 +97,6 @@ class SupportTicketSummaryResponse(BaseSchema):
 
 
 class SupportTicketManagementResponse(BaseSchema):
-    page_title: str = "Support"
-    page_subtitle: str = "Manage support requests from users."
-    search_placeholder: str = "Search support requests..."
-    filter_button_label: str = "Filters"
-    filter_chips: list[SupportManagementFilterChipResponse] = Field(default_factory=list)
-    summary_cards: list[SupportManagementSummaryCardResponse] = Field(default_factory=list)
-    table_columns: list[SupportManagementTableColumnResponse] = Field(default_factory=list)
-    pagination_label: str | None = None
     summary: SupportTicketSummaryResponse
     total: int
     page: int
@@ -137,8 +119,6 @@ class SupportTicketCustomerResponse(BaseSchema):
     phone: str | None = None
     location: str | None = None
     restaurant_name: str | None = None
-    card_title: str = "Customer Details"
-    subtitle: str | None = None
 
 
 class SupportTicketDetailResponse(BaseSchema):
@@ -149,15 +129,9 @@ class SupportTicketDetailResponse(BaseSchema):
     priority: SupportTicketPriority
     submitted_at: datetime
     resolved_at: datetime | None = None
-    page_title: str = "Support Ticket Detail"
-    breadcrumb_label: str | None = None
-    breadcrumb_current: str | None = None
-    submitted_label: str | None = None
-    submitted_meta: str | None = None
     badges: list[SupportTicketDetailBadgeResponse] = Field(default_factory=list)
     customer: SupportTicketCustomerResponse
     messages: list[SupportTicketMessageResponse]
-    composer: SupportTicketReplyComposerResponse | None = None
 
 
 class SupportTicketActionResponse(BaseSchema):

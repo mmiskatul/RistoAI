@@ -70,31 +70,14 @@ class UserManagementListItemResponse(BaseSchema):
     join_date: str
     created_at: str
     updated_at: str
-    user_name: str | None = None
-    restaurant: str | None = None
-    status_label: str | None = None
-    status_color: str | None = None
-    plan_label: str | None = None
-    join_date_formatted: str | None = None
-    view_endpoint: str | None = None
-    edit_endpoint: str | None = None
-    actions_menu: list[UserManagementRowActionResponse] = Field(default_factory=list)
 
 
 class UserManagementListResponse(BaseSchema):
-    page_title: str = "Users Management"
-    page_subtitle: str = "Manage restaurant owners and user accounts across the platform."
-    search_placeholder: str = "Search users, restaurants..."
-    filter_button_label: str = "Filters"
-    filter_chips: list[UserManagementFilterChipResponse] = Field(default_factory=list)
-    summary_cards: list[UserManagementSummaryCardResponse] = Field(default_factory=list)
-    table_columns: list[UserManagementTableColumnResponse] = Field(default_factory=list)
     summary: UserManagementSummaryResponse
     total: int
     page: int
     page_size: int
     pages: int
-    pagination_label: str | None = None
     items: list[UserManagementListItemResponse]
 
 

@@ -10,7 +10,7 @@ T = TypeVar("T")
 
 
 class BaseSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True, populate_by_name=True)
 
 
 class PaginationQuery(BaseSchema):

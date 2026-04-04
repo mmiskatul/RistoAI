@@ -66,31 +66,9 @@ class SubscriptionTableItemResponse(BaseSchema):
     status: SubscriptionStatus | None = None
     start_date: datetime | None = None
     next_billing: datetime | None = None
-    user_restaurant_label: str | None = None
-    user_email_label: str | None = None
-    billing_cycle_label: str | None = None
-    status_label: str | None = None
-    status_color: str | None = None
-    start_date_formatted: str | None = None
-    next_billing_formatted: str | None = None
-    actions_menu: list[SubscriptionRowActionResponse] = Field(default_factory=list)
 
 
 class SubscriptionOverviewResponse(BaseSchema):
-    page_title: str = "Subscriptions Management"
-    page_subtitle: str = "Manage restaurant subscriptions and track platform revenue."
-    export_button_label: str = "Export Data"
-    plan_button_label: str = "Our Subscriptions Plan"
-    plan_button_endpoint: str = "/api/v1/subscriptions/plans/management"
-    search_placeholder: str = "Search by name, restaurant or email..."
-    filter_button_label: str = "Advanced Filters"
-    filter_chips: list[SubscriptionFilterChipResponse] = Field(default_factory=list)
-    summary_cards: list[SubscriptionSummaryCardResponse] = Field(default_factory=list)
-    revenue_chart_title: str = "Monthly Subscription Revenue"
-    revenue_chart_subtitle: str = "Revenue growth across all subscription tiers."
-    revenue_chart_range_label: str = "Last 6 months"
-    table_columns: list[SubscriptionTableColumnResponse] = Field(default_factory=list)
-    pagination_label: str | None = None
     summary: SubscriptionSummaryResponse
     revenue_chart: list[SubscriptionRevenuePointResponse]
     total: int
@@ -193,30 +171,14 @@ class SubscriptionPlanManagementActionResponse(BaseSchema):
 
 class SubscriptionPlanDisplayResponse(BaseSchema):
     id: str
-    badge_label: str = "Best Plan"
     name: str
     monthly_price: float
-    monthly_price_formatted: str
     annual_price: float
-    annual_price_formatted: str
-    annual_savings_label: str | None = None
-    trial_status_label: str
     features: list[str] = Field(default_factory=list)
-    internal_actions_title: str = "Internal Actions"
-    internal_actions: list[SubscriptionPlanManagementActionResponse] = Field(default_factory=list)
-    visibility_label: str = "Plan Visibility"
     visibility_enabled: bool = True
 
 
 class SubscriptionPlanManagementResponse(BaseSchema):
-    page_title: str = "Subscriptions Plan Management"
-    active_plan_section_title: str = "Active Subscription Plans"
-    create_coupon_section_title: str = "Create Coupon"
-    coupon_management_section_title: str = "Coupon Management"
-    create_coupon_button_label: str = "Create Coupon Code"
-    coupon_table_columns: list[CouponTableColumnResponse] = Field(default_factory=list)
-    coupon_form_fields: list[CouponFormFieldResponse] = Field(default_factory=list)
-    coupon_pagination_label: str | None = None
     plan: SubscriptionPlanResponse | None = None
     active_plan: SubscriptionPlanDisplayResponse | None = None
     plans: list[SubscriptionPlanResponse]

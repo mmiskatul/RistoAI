@@ -104,9 +104,6 @@ class InsightRelatedItemResponse(BaseSchema):
 
 class InsightDetailResponse(BaseSchema):
     id: str
-    page_title: str = "AI Business Insights"
-    subtitle: str
-    badge_label: str
     title: str
     priority: str
     metric_value: str
@@ -115,7 +112,6 @@ class InsightDetailResponse(BaseSchema):
     root_causes: list[str]
     recommended_actions: list[InsightActionResponse]
     other_related_insights: list[InsightRelatedItemResponse]
-    export_label: str = "Export"
 
 
 class DocumentLineItemSchema(BaseSchema):
@@ -194,7 +190,6 @@ class DocumentListItemResponse(BaseSchema):
     supplier_name: str
     invoice_number: str | None = None
     invoice_date: str | None = None
-    invoice_date_formatted: str | None = None
     upload_date: str
     total_amount: float
     status: str
@@ -208,24 +203,18 @@ class DocumentDetailResponse(BaseSchema):
     id: str
     supplier_name: str
     invoice_number: str | None = None
-    invoice_number_display: str | None = None
     invoice_date: str | None = None
-    invoice_date_formatted: str | None = None
     upload_date: str
-    upload_date_formatted: str | None = None
     total_amount: float
     status: str
     ai_provider: str
     ai_summary: str
     line_items: list[DocumentLineItemSchema]
-    download_endpoint: str | None = None
     created_at: str
     updated_at: str
 
 
 class DocumentListResponse(BaseSchema):
-    ai_banner_title: str = "AI Data Extraction Active"
-    ai_banner_subtitle: str = "Risto AI automatically extracts supplier, date, line items, quantities, and unit prices from your uploads."
     total: int
     page: int
     page_size: int
@@ -246,7 +235,6 @@ class ExpenseResponse(BaseSchema):
     amount: float
     expense_date: str
     notes: str | None = None
-    subtitle: str | None = None
     created_at: str
 
 
@@ -285,12 +273,8 @@ class CashDepositCreateRequest(BaseSchema):
 class CashDepositResponse(BaseSchema):
     id: str
     deposit_date: str
-    deposit_date_formatted: str | None = None
     amount: float
-    amount_formatted: str | None = None
     deposit_type: str
-    display_title: str | None = None
-    display_subtitle: str | None = None
     notes: str | None = None
     created_at: str
 
@@ -371,16 +355,12 @@ class DailyDataManualMethodResponse(BaseSchema):
 
 
 class DailyDataManualEntryResponse(BaseSchema):
-    page_title: str = "Add Daily Business Data"
-    subtitle: str = "Enter today's revenue and expenses to track your restaurant performance."
-    save_button_label: str = "Save Daily Data"
     methods: list[DailyDataManualMethodResponse] = Field(default_factory=list)
 
 
 class DailyDataRevenueBreakdownItemResponse(BaseSchema):
     label: str
     amount: float
-    amount_formatted: str
 
 
 class DailyDataCoversSummaryResponse(BaseSchema):
@@ -391,24 +371,16 @@ class DailyDataCoversSummaryResponse(BaseSchema):
 
 class DailyDataRegisterSummaryResponse(BaseSchema):
     opening_cash: float = 0.0
-    opening_cash_formatted: str = "$0.00"
     closing_cash: float = 0.0
-    closing_cash_formatted: str = "$0.00"
 
 
 class DailyDataResponse(BaseSchema):
     id: str
-    page_title: str = "Daily Record Details"
-    report_for_label: str = "Reports For"
     business_date: str
     method: str
-    status_label: str = "CLOSED"
     total_revenue: float
     total_expenses: float
     profit: float
-    net_profit_formatted: str = "$0.00"
-    total_revenue_formatted: str = "$0.00"
-    total_expenses_formatted: str = "$0.00"
     lunch_covers: int
     dinner_covers: int
     total_covers: int
@@ -416,9 +388,6 @@ class DailyDataResponse(BaseSchema):
     revenue_breakdown: list[DailyDataRevenueBreakdownItemResponse] = Field(default_factory=list)
     covers_summary: DailyDataCoversSummaryResponse = Field(default_factory=DailyDataCoversSummaryResponse)
     register_summary: DailyDataRegisterSummaryResponse = Field(default_factory=DailyDataRegisterSummaryResponse)
-    edit_endpoint: str | None = None
-    export_endpoint: str | None = None
-    export_label: str = "Export"
     created_at: str
 
 
@@ -426,7 +395,7 @@ class DailyDataSummaryCardResponse(BaseSchema):
     label: str
     value: float
     value_prefix: str | None = None
-    value_formatted: str
+    value_formatted: str | None = None
     icon_key: str | None = None
 
 
@@ -446,33 +415,14 @@ class DailyDataEntrySourceResponse(BaseSchema):
 class DailyDataListItemResponse(BaseSchema):
     id: str
     business_date: str
-    business_date_formatted: str
-    day_label: str
     total_revenue: float
-    total_revenue_formatted: str
     total_expenses: float = 0.0
-    total_expenses_formatted: str = "$0.00"
     total_covers: int
     avg_revenue_per_cover: float
-    avg_revenue_per_cover_formatted: str
-    data_sources: list[DailyDataEntrySourceResponse] = Field(default_factory=list)
-    actions: DailyDataListItemActionResponse
     created_at: str
 
 
-class DailyDataAddButtonResponse(BaseSchema):
-    label: str = "Add Daily Data"
-    endpoint: str
-    method: str = "POST"
-
-
 class DailyDataListResponse(BaseSchema):
-    page_title: str = "Daily Data Management"
-    subtitle: str = "Track and manage your restaurant performance"
-    view_options: list[str] = Field(default_factory=lambda: ["date", "week", "month"])
-    active_view: Literal["date", "week", "month"] = "date"
-    summary_cards: list[DailyDataSummaryCardResponse]
-    add_button: DailyDataAddButtonResponse
     total: int
     page: int
     page_size: int
@@ -494,30 +444,16 @@ class DailyDataDocumentItemResponse(BaseSchema):
 
 
 class DailyDataDetailResponse(BaseSchema):
-    page_title: str = "Daily Data Details"
-    active_view: Literal["date", "week", "month"] = "date"
-    reference_date: str | None = None
-    period_start: str | None = None
-    period_end: str | None = None
     business_date: str
-    business_date_formatted: str
-    day_label: str
-    summary_cards: list[DailyDataSummaryCardResponse] = Field(default_factory=list)
     total_revenue: float
-    total_revenue_formatted: str
     total_expenses: float
-    total_expenses_formatted: str
     total_covers: int
     avg_revenue_per_cover: float
-    avg_revenue_per_cover_formatted: str
     invoices: list[DailyDataDocumentItemResponse] = Field(default_factory=list)
     invoice_count: int = 0
-    data_sources: list[DailyDataEntrySourceResponse] = Field(default_factory=list)
 
 
 class DailyDataCollectionResponse(BaseSchema):
-    page_title: str = "Daily Data Collections"
-    active_view: Literal["date", "week", "month"]
     total: int
     items: list[DailyDataDetailResponse] = Field(default_factory=list)
 
@@ -572,43 +508,23 @@ class InventoryItemResponse(BaseSchema):
     product_name: str
     category: str
     stock_quantity: float
-    stock_quantity_label: str | None = None
     unit_type: str
     supplier_name: str | None = None
-    supplier_subtitle: str | None = None
     unit_price: float
     alert_threshold: float
     stock_status: str
-    stock_status_label: str | None = None
     purchase_date: str | None = None
-    last_purchase_label: str | None = None
-    actions: InventoryListItemActionResponse | None = None
     created_at: str
     updated_at: str
 
 
 class InventoryDetailResponse(InventoryItemResponse):
-    page_title: str = "View Inventory Product"
-    current_stock_label: str = "Current Stock"
     current_stock_value: float = 0.0
-    current_stock_display: str = "0"
-    stock_update_endpoint: str | None = None
-    stock_update_button_label: str = "Update Stock Level"
-    supplier_card: InventorySupplierCardResponse = Field(default_factory=InventorySupplierCardResponse)
-    edit_endpoint: str | None = None
-    delete_endpoint: str | None = None
-    delete_label: str = "Delete"
     history: list[InventoryHistoryItemResponse]
 
 
 class InventoryListResponse(BaseSchema):
-    page_title: str = "Inventory"
-    subtitle: str = "Track and manage your restaurant ingredients and stock."
-    search_placeholder: str = "Search products"
-    add_button_endpoint: str = "/api/v1/restaurant/inventory"
     total_inventory_value: float
-    total_inventory_value_formatted: str = "$0.00"
-    inventory_growth_percent: float = 0.0
     total: int
     page: int
     page_size: int
@@ -617,7 +533,6 @@ class InventoryListResponse(BaseSchema):
 
 
 class AnalyticsInsightBannerResponse(BaseSchema):
-    label: str = "AI Business Insight"
     title: str
     subtitle: str
 
@@ -625,7 +540,7 @@ class AnalyticsInsightBannerResponse(BaseSchema):
 class AnalyticsMetricTileResponse(BaseSchema):
     label: str
     value: float | str
-    value_formatted: str
+    value_formatted: str | None = None
     change_percent: float | None = None
     subtitle: str | None = None
 
@@ -633,13 +548,13 @@ class AnalyticsMetricTileResponse(BaseSchema):
 class AnalyticsSummaryStatResponse(BaseSchema):
     label: str
     value: float | int
-    value_formatted: str
+    value_formatted: str | None = None
 
 
 class AnalyticsComparisonRowResponse(BaseSchema):
     label: str
     value: float
-    value_formatted: str
+    value_formatted: str | None = None
 
 
 class AnalyticsSupplierAlertResponse(BaseSchema):
@@ -648,18 +563,9 @@ class AnalyticsSupplierAlertResponse(BaseSchema):
 
 
 class AnalyticsOverviewResponse(BaseSchema):
-    page_title: str = "Analytics"
-    export_label: str = "Export Data"
-    export_endpoint: str = "/api/v1/restaurant/analytics/export"
-    active_filter: str = "Weekly"
-    available_filters: list[str] = Field(default_factory=lambda: ["Weekly", "Monthly"])
     insight_banner: AnalyticsInsightBannerResponse
     estimated_profit: float
-    estimated_profit_formatted: str
-    peak_hour_label: str
-    peak_hour_subtitle: str
     revenue_total: float
-    revenue_total_formatted: str
     revenue_change_percent: float
     weekly_revenue: list[ChartPointResponse]
     metric_tiles: list[AnalyticsMetricTileResponse] = Field(default_factory=list)
@@ -668,7 +574,6 @@ class AnalyticsOverviewResponse(BaseSchema):
     covers_total: int
     covers_activity: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
     avg_revenue_per_cover: float
-    avg_revenue_per_cover_formatted: str
     cost_breakdown: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
     supplier_price_alerts: list[AnalyticsSupplierAlertResponse] = Field(default_factory=list)
 
@@ -692,8 +597,6 @@ class ChatMessageResponse(BaseSchema):
     role: Literal["user", "assistant", "insight"]
     message: str
     created_at: str
-    sender_label: str | None = None
-    variant: str | None = None
     attachment_name: str | None = None
     attachment_source: str | None = None
     attachment_summary: str | None = None
@@ -709,12 +612,6 @@ class ChatRealtimeConfigResponse(BaseSchema):
 
 
 class ChatConversationResponse(BaseSchema):
-    page_title: str = "AI Chat"
-    subtitle: str = "Ask AI about your restaurant performance and insights."
-    quick_prompts: list[ChatQuickPromptResponse] = Field(default_factory=list)
-    input_placeholder: str = "Ask AI about your restaurant business..."
-    attachment_options: list[ChatAttachmentOptionResponse] = Field(default_factory=list)
-    realtime: ChatRealtimeConfigResponse = Field(default_factory=ChatRealtimeConfigResponse)
     messages: list[ChatMessageResponse]
 
 

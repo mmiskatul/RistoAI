@@ -16,29 +16,16 @@ class AdminSettingsLanguageOptionResponse(BaseSchema):
 class AdminSettingsLegalPageItemResponse(BaseSchema):
     key: str
     title: str
-    last_updated_label: str = 'Last updated:'
     last_updated_value: str
     icon_key: str
-    edit_button_label: str = 'Edit'
     edit_endpoint: str
 
 
 class AdminSettingsOverviewResponse(BaseSchema):
-    page_title: str = 'Settings'
-    page_subtitle: str = 'Manage platform configuration and legal information.'
-    general_settings_title: str = 'General Settings'
-    platform_name_label: str = 'Platform Name'
-    support_email_label: str = 'Support Email'
-    default_language_label: str = 'Default Language'
-    legal_pages_title: str = 'Legal Pages'
-    discard_button_label: str = 'Discard Changes'
-    save_button_label: str = 'Save Changes'
-    save_endpoint: str = '/api/v1/settings/overview'
     profile_image_url: str | None = None
     platform_name: str
     support_email: EmailStr
     default_language: str
-    default_language_options: list[AdminSettingsLanguageOptionResponse] = Field(default_factory=list)
     legal_pages: list[AdminSettingsLegalPageItemResponse] = Field(default_factory=list)
 
 
@@ -60,15 +47,9 @@ class AdminLegalToolbarActionResponse(BaseSchema):
 
 
 class AdminLegalContentEditorResponse(BaseSchema):
-    page_title: str = 'Legal Content Editor'
-    last_updated_label: str = 'Last updated:'
-    auto_save_label: str = 'Auto-save enabled'
-    draft_saved_label: str = 'Draft saved'
-    save_button_label: str = 'Save Changes'
     active_tab: str
     last_updated_value: str
     tabs: list[AdminLegalTabResponse] = Field(default_factory=list)
-    toolbar_actions: list[AdminLegalToolbarActionResponse] = Field(default_factory=list)
     content: str
     save_endpoint: str
 

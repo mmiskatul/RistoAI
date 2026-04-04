@@ -448,38 +448,18 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     daily_list_response = client.get("/api/v1/restaurant/daily-data?view=date&reference_date=2026-03-26", headers=headers)
     assert daily_list_response.status_code == 200
     daily_list_payload = daily_list_response.json()
-    assert daily_list_payload["page_title"] == "Daily Data Management"
-    assert daily_list_payload["subtitle"] == "Track and manage your restaurant performance"
-    assert daily_list_payload["view_options"] == ["date", "week", "month"]
-    assert daily_list_payload["active_view"] == "date"
-    assert len(daily_list_payload["summary_cards"]) == 5
-    assert daily_list_payload["summary_cards"][0]["label"] == "Today's Revenue"
-    assert daily_list_payload["summary_cards"][0]["value"] == 920
-    assert daily_list_payload["summary_cards"][0]["value_formatted"] == "$920.00"
-    assert daily_list_payload["summary_cards"][0]["icon_key"] == "revenue"
-    assert daily_list_payload["summary_cards"][3]["label"] == "Total Covers"
-    assert daily_list_payload["summary_cards"][3]["value"] == 38
-    assert daily_list_payload["add_button"]["label"] == "Add Daily Data"
-    assert daily_list_payload["add_button"]["endpoint"] == "/api/v1/restaurant/manual-entry"
+    assert set(daily_list_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
     assert daily_list_payload["items"][0]["business_date"] == "2026-03-25"
-    assert daily_list_payload["items"][0]["business_date_formatted"] == "Mar 25, 2026"
-    assert daily_list_payload["items"][0]["day_label"] == "YESTERDAY"
+    assert set(daily_list_payload["items"][0].keys()) == {"id", "business_date", "total_revenue", "total_expenses", "total_covers", "avg_revenue_per_cover", "created_at"}
     assert daily_list_payload["items"][0]["total_covers"] == 38
     assert daily_list_payload["items"][0]["total_expenses"] == 0.0
-    assert daily_list_payload["items"][0]["total_revenue_formatted"] == "$920.00"
     assert daily_list_payload["items"][0]["avg_revenue_per_cover"] == 24.21
-    assert daily_list_payload["items"][0]["avg_revenue_per_cover_formatted"] == "$24.21"
-    assert daily_list_payload["items"][0]["data_sources"][0]["kind"] == "daily_record"
-    assert daily_list_payload["items"][0]["actions"]["view_endpoint"] == "/api/v1/restaurant/daily-data/by-date?business_date=2026-03-25"
-    assert daily_list_payload["items"][0]["actions"]["delete_endpoint"].endswith(daily_list_payload["items"][0]["id"])
 
     week_list_response = client.get("/api/v1/restaurant/daily-data?view=week&reference_date=2026-03-26", headers=headers)
     assert week_list_response.status_code == 200
     week_payload = week_list_response.json()
-    assert week_payload["active_view"] == "week"
-    assert week_payload["summary_cards"][0]["label"] == "This Week Revenue"
     assert week_payload["total"] == 2
-    assert week_payload["items"][0]["actions"]["view_endpoint"] == "/api/v1/restaurant/daily-data/by-week?reference_date=2026-03-26"
+    assert set(week_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
 
     detail_id = daily_list_payload["items"][0]["id"]
     detail_response = client.get(f"/api/v1/restaurant/daily-data/{detail_id}", headers=headers)
@@ -526,10 +506,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     month_list_response = client.get("/api/v1/restaurant/daily-data?view=month&reference_date=2026-03-26", headers=headers)
     assert month_list_response.status_code == 200
     month_payload = month_list_response.json()
-    assert month_payload["active_view"] == "month"
-    assert month_payload["summary_cards"][0]["label"] == "This Month Revenue"
     assert month_payload["total"] == 2
-    assert month_payload["items"][0]["actions"]["view_endpoint"] == "/api/v1/restaurant/daily-data/by-month?reference_date=2026-03-26"
+    assert set(month_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
 
     month_business_date_detail_response = client.get("/api/v1/restaurant/daily-data/by-month-business-date?business_date=2026-03-26", headers=headers)
     assert month_business_date_detail_response.status_code == 200

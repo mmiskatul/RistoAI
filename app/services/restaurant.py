@@ -47,14 +47,12 @@ from app.schemas.restaurant import (
     ChatRealtimeConfigResponse,
     DailyDataCollectionResponse,
     DailyDataCreateRequest,
-    DailyDataAddButtonResponse,
     DailyDataDetailResponse,
     DailyDataDocumentItemResponse,
     DailyDataFormFieldResponse,
     DailyDataManualEntryResponse,
     DailyDataManualMethodResponse,
     DailyDataEntrySourceResponse,
-    DailyDataListItemActionResponse,
     DailyDataListItemResponse,
     DailyDataListResponse,
     DailyDataResponse,
@@ -297,8 +295,6 @@ class RestaurantOperationsService(BaseService):
         related_items = self._build_other_related_insights(insight)
         return InsightDetailResponse(
             id=insight["id"],
-            subtitle="Smart recommendations based on your restaurant data.",
-            badge_label=insight["priority"].replace("_", " ").upper() + " PRIORITY",
             title=insight["title"],
             priority=insight["priority"],
             metric_value=insight["metric_value"],
@@ -775,35 +771,8 @@ class RestaurantOperationsService(BaseService):
         page_start = (page - 1) * page_size
         page_end = page_start + page_size
         page_items = buckets[page_start:page_end]
-
-        if view == "date":
-            latest_bucket = page_items[0] if page_items else None
-            latest_revenue = float(latest_bucket.get("total_revenue", 0)) if latest_bucket else 0.0
-            latest_expenses = float(latest_bucket.get("total_expenses", 0)) if latest_bucket else 0.0
-            latest_covers = float(latest_bucket.get("total_covers", 0)) if latest_bucket else 0.0
-        else:
-            latest_bucket = None
-            latest_revenue = round(sum(float(item.get("total_revenue", 0)) for item in buckets), 2)
-            latest_expenses = round(sum(float(item.get("total_expenses", 0)) for item in buckets), 2)
-            latest_covers = float(sum(int(item.get("total_covers", 0)) for item in buckets))
-        latest_profit = round(latest_revenue - latest_expenses, 2)
-        latest_avg = round(latest_revenue / max(latest_covers, 1), 2) if latest_revenue else 0.0
-
-        revenue_label = "Today's Revenue" if view == "date" else ("This Week Revenue" if view == "week" else "This Month Revenue")
-        expense_label = "Total Expenses" if view == "date" else ("This Week Expenses" if view == "week" else "This Month Expenses")
-        profit_label = "Profit" if view == "date" else ("This Week Profit" if view == "week" else "This Month Profit")
-        summary_cards = [
-            DailyDataSummaryCardResponse(label=revenue_label, value=latest_revenue, value_prefix="EUR", value_formatted=self._format_currency(latest_revenue), icon_key="revenue"),
-            DailyDataSummaryCardResponse(label=expense_label, value=latest_expenses, value_prefix="EUR", value_formatted=self._format_currency(latest_expenses), icon_key="expenses"),
-            DailyDataSummaryCardResponse(label=profit_label, value=latest_profit, value_prefix="EUR", value_formatted=self._format_currency(latest_profit), icon_key="profit"),
-            DailyDataSummaryCardResponse(label="Total Covers", value=latest_covers, value_formatted=str(int(latest_covers)), icon_key=None),
-            DailyDataSummaryCardResponse(label="Avg. Rev/Cover", value=latest_avg, value_prefix="USD", value_formatted=self._format_currency(latest_avg), icon_key=None),
-        ]
         return DailyDataListResponse(
-            active_view=view,
-            summary_cards=summary_cards,
-            add_button=DailyDataAddButtonResponse(endpoint="/api/v1/restaurant/manual-entry"),
-            items=[self._to_daily_data_bucket_item(item, anchor_date=anchor_date, active_view=view) for item in page_items],
+            items=[self._to_daily_data_bucket_item(item, anchor_date=anchor_date) for item in page_items],
             **build_pagination_meta(total=total, page=page, page_size=page_size),
         )
 
@@ -1003,7 +972,7 @@ class RestaurantOperationsService(BaseService):
         items, total = await self.inventory_repository.list_by_scope(scope_id=scope_id, page=page, page_size=page_size, search=search, status=status, category=category)
         serialized_items = self.serialize_list(items)
         total_inventory_value = round(sum(item["stock_quantity"] * item["unit_price"] for item in serialized_items), 2)
-        return InventoryListResponse(total_inventory_value=total_inventory_value, total_inventory_value_formatted=self._format_currency(total_inventory_value), inventory_growth_percent=4.2 if serialized_items else 0.0, items=[self._to_inventory_item_response(item) for item in items], **build_pagination_meta(total=total, page=page, page_size=page_size))
+        return InventoryListResponse(total_inventory_value=total_inventory_value, items=[self._to_inventory_item_response(item) for item in items], **build_pagination_meta(total=total, page=page, page_size=page_size))
 
     async def get_inventory_item(self, current_user: dict, item_id: str) -> InventoryDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1083,14 +1052,9 @@ class RestaurantOperationsService(BaseService):
             for item in await self._build_supplier_alerts(serialized_expenses=serialized_expenses, serialized_documents=filtered_documents)
         ]
         return AnalyticsOverviewResponse(
-            active_filter=self._analytics_filter_label(period),
             insight_banner=await self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
             estimated_profit=context["profit_total"],
-            estimated_profit_formatted=self._format_currency(float(context["profit_total"])),
-            peak_hour_label="7:00 PM",
-            peak_hour_subtitle="92% Capacity Avg",
             revenue_total=context["revenue_total"],
-            revenue_total_formatted=self._format_currency(float(context["revenue_total"])),
             revenue_change_percent=context["revenue_change_percent"],
             weekly_revenue=self._build_home_revenue_chart(filtered_daily_records, period=period),
             metric_tiles=[
@@ -1112,7 +1076,6 @@ class RestaurantOperationsService(BaseService):
                 AnalyticsSummaryStatResponse(label="Dinner", value=dinner_covers, value_formatted=str(dinner_covers)),
             ],
             avg_revenue_per_cover=context["avg_revenue_per_cover"],
-            avg_revenue_per_cover_formatted=f"${float(context['avg_revenue_per_cover']):.2f}",
             cost_breakdown=[
                 AnalyticsSummaryStatResponse(label="Food Cost", value=round((food_cost_total / max(this_week_revenue, 1)) * 100, 1), value_formatted=f"{round((food_cost_total / max(this_week_revenue, 1)) * 100, 1):.0f}%"),
                 AnalyticsSummaryStatResponse(label="Staff Cost", value=round((staff_cost_total / max(this_week_revenue, 1)) * 100, 1), value_formatted=f"{round((staff_cost_total / max(this_week_revenue, 1)) * 100, 1):.0f}%"),
@@ -1151,9 +1114,9 @@ class RestaurantOperationsService(BaseService):
 
         pdf_text = [
             f'Risto AI - Analytics Report ({period_label})',
-            f'Estimated Profit: {analytics.estimated_profit_formatted}',
-            f'Revenue Total: {analytics.revenue_total_formatted}',
-            f'Peak Hour: {analytics.peak_hour_label}',
+            f'Estimated Profit: {self._format_currency(float(analytics.estimated_profit))}',
+            f'Revenue Total: {self._format_currency(float(analytics.revenue_total))}',
+            f"Peak Hour: {next((str(item.value) for item in analytics.metric_tiles if item.label == 'Peak Hour'), '7:00 PM')}",
             'Revenue Trend:',
         ]
         for item in analytics.weekly_revenue:
@@ -1192,17 +1155,6 @@ class RestaurantOperationsService(BaseService):
                 )
             ]
         return ChatConversationResponse(
-            quick_prompts=[
-                ChatQuickPromptResponse(label="How can I increase revenue?"),
-                ChatQuickPromptResponse(label="What are my biggest expenses?"),
-            ],
-            attachment_options=[
-                ChatAttachmentOptionResponse(key="attach", label="Attach"),
-                ChatAttachmentOptionResponse(key="camera", label="Camera"),
-                ChatAttachmentOptionResponse(key="gallery", label="Gallery"),
-                ChatAttachmentOptionResponse(key="docs", label="Docs"),
-            ],
-            realtime=self._build_chat_realtime_config(),
             messages=messages,
         )
 
@@ -1271,17 +1223,6 @@ class RestaurantOperationsService(BaseService):
         await self.chat_repository.create({"tenant_id": scope_id, "role": "assistant", "message": assistant_text, "created_by_user_id": str(current_user["_id"])})
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
         return ChatConversationResponse(
-            quick_prompts=[
-                ChatQuickPromptResponse(label="How can I increase revenue?"),
-                ChatQuickPromptResponse(label="What are my biggest expenses?"),
-            ],
-            attachment_options=[
-                ChatAttachmentOptionResponse(key="attach", label="Attach"),
-                ChatAttachmentOptionResponse(key="camera", label="Camera"),
-                ChatAttachmentOptionResponse(key="gallery", label="Gallery"),
-                ChatAttachmentOptionResponse(key="docs", label="Docs"),
-            ],
-            realtime=self._build_chat_realtime_config(),
             messages=[self._to_chat_message_response(item) for item in items],
         )
 
@@ -2373,17 +2314,13 @@ class RestaurantOperationsService(BaseService):
             id=serialized["id"],
             supplier_name=serialized["supplier_name"],
             invoice_number=serialized.get("invoice_number"),
-            invoice_number_display=f"Inv #{serialized.get('invoice_number')}" if serialized.get("invoice_number") else None,
             invoice_date=invoice_date,
-            invoice_date_formatted=self._format_human_date(invoice_date),
             upload_date=upload_date,
-            upload_date_formatted=self._format_human_date(upload_date),
             total_amount=float(serialized.get("total_amount", 0.0)),
             status=status,
             ai_provider=serialized["ai_provider"],
             ai_summary=serialized.get("ai_summary", ""),
             line_items=[DocumentLineItemSchema(**item) for item in serialized.get("line_items", [])],
-            download_endpoint=f"/api/v1/restaurant/documents/{serialized['id']}/download",
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
         )
@@ -2392,30 +2329,22 @@ class RestaurantOperationsService(BaseService):
         serialized = self.serialize(expense)
         amount = float(serialized["amount"])
         category = str(serialized.get("category") or "Expense")
-        subtitle = serialized.get("notes") or category
         return ExpenseResponse(
             id=serialized["id"],
             category=category,
             amount=amount,
             expense_date=serialized["expense_date"],
             notes=serialized.get("notes"),
-            subtitle=subtitle,
             created_at=serialized["created_at"],
         )
 
     def _to_cash_deposit_response(self, deposit: dict) -> CashDepositResponse:
         serialized = self.serialize(deposit)
-        amount = float(serialized["amount"])
-        title = serialized.get("notes") or serialized.get("deposit_type")
         return CashDepositResponse(
             id=serialized["id"],
             deposit_date=serialized["deposit_date"],
-            deposit_date_formatted=self._format_human_date(serialized.get("deposit_date")),
-            amount=amount,
-            amount_formatted=self._format_currency(amount),
+            amount=float(serialized["amount"]),
             deposit_type=serialized["deposit_type"],
-            display_title=title,
-            display_subtitle=self._format_human_date(serialized.get("deposit_date")),
             notes=serialized.get("notes"),
             created_at=serialized["created_at"],
         )
@@ -2427,14 +2356,14 @@ class RestaurantOperationsService(BaseService):
         total_covers = lunch_covers + dinner_covers
         if serialized.get("method") == "method_2":
             revenue_breakdown = [
-                DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0)), amount_formatted=self._format_currency(float(serialized.get("pos_payments", 0)))),
-                DailyDataRevenueBreakdownItemResponse(label="Cash Payments", amount=float(serialized.get("cash_payments", 0)), amount_formatted=self._format_currency(float(serialized.get("cash_payments", 0)))),
-                DailyDataRevenueBreakdownItemResponse(label="Bank Transfer", amount=float(serialized.get("bank_transfer_payments", 0)), amount_formatted=self._format_currency(float(serialized.get("bank_transfer_payments", 0)))),
+                DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0))),
+                DailyDataRevenueBreakdownItemResponse(label="Cash Payments", amount=float(serialized.get("cash_payments", 0))),
+                DailyDataRevenueBreakdownItemResponse(label="Bank Transfer", amount=float(serialized.get("bank_transfer_payments", 0))),
             ]
         else:
             revenue_breakdown = [
-                DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0)), amount_formatted=self._format_currency(float(serialized.get("pos_payments", 0)))),
-                DailyDataRevenueBreakdownItemResponse(label="Cash In", amount=float(serialized.get("cash_in", 0)), amount_formatted=self._format_currency(float(serialized.get("cash_in", 0)))),
+                DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0))),
+                DailyDataRevenueBreakdownItemResponse(label="Cash In", amount=float(serialized.get("cash_in", 0))),
             ]
         return DailyDataResponse(
             id=serialized["id"],
@@ -2443,9 +2372,6 @@ class RestaurantOperationsService(BaseService):
             total_revenue=serialized["total_revenue"],
             total_expenses=serialized["total_expenses"],
             profit=serialized["profit"],
-            net_profit_formatted=self._format_currency(float(serialized["profit"])),
-            total_revenue_formatted=self._format_currency(float(serialized["total_revenue"])),
-            total_expenses_formatted=self._format_currency(float(serialized["total_expenses"])),
             lunch_covers=lunch_covers,
             dinner_covers=dinner_covers,
             total_covers=total_covers,
@@ -2454,49 +2380,23 @@ class RestaurantOperationsService(BaseService):
             covers_summary=DailyDataCoversSummaryResponse(lunch=lunch_covers, dinner=dinner_covers, total=total_covers),
             register_summary=DailyDataRegisterSummaryResponse(
                 opening_cash=float(serialized.get("opening_cash", 0)),
-                opening_cash_formatted=self._format_currency(float(serialized.get("opening_cash", 0))),
                 closing_cash=float(serialized.get("closing_cash", 0)),
-                closing_cash_formatted=self._format_currency(float(serialized.get("closing_cash", 0))),
             ),
-            edit_endpoint=f"/api/v1/restaurant/manual-entry/{serialized['id']}",
-            export_endpoint=f"/api/v1/restaurant/daily-data/{serialized['id']}",
             created_at=serialized["created_at"],
         )
 
-    def _to_daily_data_bucket_item(self, bucket: dict[str, Any], *, anchor_date: date | None = None, active_view: str = "date") -> DailyDataListItemResponse:
+    def _to_daily_data_bucket_item(self, bucket: dict[str, Any], *, anchor_date: date | None = None) -> DailyDataListItemResponse:
         business_date = datetime.fromisoformat(bucket["business_date"]).date()
-        anchor = anchor_date or datetime.now(UTC).date()
-        if business_date == anchor:
-            day_label = "TODAY"
-        elif business_date == anchor - timedelta(days=1):
-            day_label = "YESTERDAY"
-        else:
-            day_label = business_date.strftime("%A").upper()
         revenue = float(bucket.get("total_revenue", 0.0))
         expenses = float(bucket.get("total_expenses", 0.0))
         avg_value = float(bucket.get("avg_revenue_per_cover", 0.0))
-        record_id = bucket.get("record_id")
         return DailyDataListItemResponse(
             id=str(bucket["id"]),
             business_date=bucket["business_date"],
-            business_date_formatted=business_date.strftime("%b %d, %Y"),
-            day_label=day_label,
             total_revenue=revenue,
-            total_revenue_formatted=self._format_currency(revenue),
             total_expenses=expenses,
-            total_expenses_formatted=self._format_currency(expenses),
             total_covers=int(bucket.get("total_covers", 0)),
             avg_revenue_per_cover=avg_value,
-            avg_revenue_per_cover_formatted=self._format_currency(avg_value),
-            data_sources=bucket.get("data_sources", []),
-            actions=DailyDataListItemActionResponse(
-                view_endpoint=(
-                    f"/api/v1/restaurant/daily-data/by-date?business_date={bucket['business_date']}"
-                    if active_view == "date"
-                    else (f"/api/v1/restaurant/daily-data/by-week?reference_date={anchor.isoformat()}" if active_view == "week" else f"/api/v1/restaurant/daily-data/by-month?reference_date={anchor.isoformat()}")
-                ),
-                delete_endpoint=f"/api/v1/restaurant/daily-data/{record_id}" if record_id else None,
-            ),
             created_at=str(bucket.get("created_at")),
         )
 
@@ -2512,29 +2412,12 @@ class RestaurantOperationsService(BaseService):
         period_end: date | None = None,
     ) -> DailyDataDetailResponse:
         list_item = self._to_daily_data_bucket_item(bucket, anchor_date=anchor_date, active_view=active_view)
-        revenue_label = "Revenue" if active_view == "date" else ("Week Revenue" if active_view == "week" else "Month Revenue")
-        covers_label = "Covers" if active_view == "date" else ("Week Covers" if active_view == "week" else "Month Covers")
-        avg_label = "AVG" if active_view == "date" else ("Week AVG" if active_view == "week" else "Month AVG")
         return DailyDataDetailResponse(
-            active_view=active_view,
-            reference_date=reference_date.isoformat() if reference_date else None,
-            period_start=period_start.isoformat() if period_start else None,
-            period_end=period_end.isoformat() if period_end else None,
             business_date=list_item.business_date,
-            business_date_formatted=list_item.business_date_formatted,
-            day_label=list_item.day_label,
-            summary_cards=[
-                DailyDataSummaryCardResponse(label=revenue_label, value=list_item.total_revenue, value_prefix="EUR", value_formatted=list_item.total_revenue_formatted, icon_key="revenue"),
-                DailyDataSummaryCardResponse(label=covers_label, value=float(list_item.total_covers), value_formatted=str(list_item.total_covers), icon_key=None),
-                DailyDataSummaryCardResponse(label=avg_label, value=list_item.avg_revenue_per_cover, value_prefix="USD", value_formatted=list_item.avg_revenue_per_cover_formatted, icon_key=None),
-            ],
             total_revenue=list_item.total_revenue,
-            total_revenue_formatted=list_item.total_revenue_formatted,
             total_expenses=list_item.total_expenses,
-            total_expenses_formatted=list_item.total_expenses_formatted,
             total_covers=list_item.total_covers,
             avg_revenue_per_cover=list_item.avg_revenue_per_cover,
-            avg_revenue_per_cover_formatted=list_item.avg_revenue_per_cover_formatted,
             invoices=[
                 DailyDataDocumentItemResponse(
                     id=item["id"],
@@ -2550,29 +2433,22 @@ class RestaurantOperationsService(BaseService):
                 for item in invoices
             ],
             invoice_count=len(invoices),
-            data_sources=list_item.data_sources,
         )
 
     def _to_inventory_item_response(self, item: dict) -> InventoryItemResponse:
         serialized = self.serialize(item)
         stock_quantity = float(serialized["stock_quantity"])
-        purchase_date = serialized.get("purchase_date")
         return InventoryItemResponse(
             id=serialized["id"],
             product_name=serialized["product_name"],
             category=serialized["category"],
             stock_quantity=stock_quantity,
-            stock_quantity_label=f"{int(stock_quantity) if stock_quantity.is_integer() else stock_quantity} {serialized['unit_type']}",
             unit_type=serialized["unit_type"],
             supplier_name=serialized.get("supplier_name"),
-            supplier_subtitle=serialized.get("supplier_name"),
             unit_price=serialized["unit_price"],
             alert_threshold=serialized["alert_threshold"],
             stock_status=serialized["stock_status"],
-            stock_status_label=serialized["stock_status"].replace("_", " ").upper(),
-            purchase_date=purchase_date,
-            last_purchase_label=datetime.fromisoformat(purchase_date).strftime("%d %b") if purchase_date else None,
-            actions=InventoryListItemActionResponse(view_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}", stock_update_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}/stock-update"),
+            purchase_date=serialized.get("purchase_date"),
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
         )
@@ -2580,21 +2456,10 @@ class RestaurantOperationsService(BaseService):
     def _to_inventory_detail_response(self, item: dict) -> InventoryDetailResponse:
         base_item = self._to_inventory_item_response(item)
         serialized = self.serialize(item)
-        unit_type = serialized.get("unit_type", "unit")
         current_stock = float(serialized.get("stock_quantity", 0))
-        purchase_date = serialized.get("purchase_date")
         return InventoryDetailResponse(
             **base_item.model_dump(),
             current_stock_value=current_stock,
-            current_stock_display=f"{int(current_stock) if current_stock.is_integer() else current_stock} {unit_type}",
-            stock_update_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}/stock-update",
-            supplier_card=InventorySupplierCardResponse(
-                supplier_name=serialized.get("supplier_name"),
-                last_purchase=datetime.fromisoformat(purchase_date).strftime("%b %d, %Y") if purchase_date else None,
-                price_per_unit=f"${float(serialized.get('unit_price', 0)):.2f} / {unit_type}",
-            ),
-            edit_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}",
-            delete_endpoint=f"/api/v1/restaurant/inventory/{serialized['id']}",
             history=[InventoryHistoryItemResponse(**entry) for entry in serialized.get("history", [])],
         )
 
@@ -2610,19 +2475,13 @@ class RestaurantOperationsService(BaseService):
 
     def _to_chat_message_response(self, item: dict) -> ChatMessageResponse:
         serialized = self.serialize(item)
-        role = serialized["role"]
-        sender_label = "YOU" if role == "user" else ("AI Insight" if role == "insight" else "Risto AI")
-        variant = "user" if role == "user" else ("insight" if role == "insight" else "assistant")
         return ChatMessageResponse(
             id=serialized["id"],
-            role=role,
+            role=serialized["role"],
             message=serialized["message"],
             created_at=serialized["created_at"],
-            sender_label=sender_label,
-            variant=variant,
             attachment_name=serialized.get("attachment_name"),
             attachment_source=serialized.get("attachment_source"),
-            attachment_summary=serialized.get("attachment_summary"),
         )
 
     async def _upload_profile_image(self, current_user: dict, file: UploadFile) -> str:
