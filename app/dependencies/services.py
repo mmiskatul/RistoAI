@@ -28,6 +28,7 @@ from app.services.admin_settings import AdminSettingsService
 from app.services.auth import AuthService
 from app.services.dashboard import DashboardService
 from app.services.email import EmailService
+from app.services.image_storage import build_image_storage_service
 from app.services.restaurant import RestaurantOperationsService
 from app.services.onboarding import OnboardingService
 from app.services.openai_ops import OpenAIOperationsService
@@ -42,7 +43,8 @@ async def get_auth_service(db=Depends(get_database)) -> AuthService:
 
 
 async def get_onboarding_service(db=Depends(get_database)) -> OnboardingService:
-    return OnboardingService(OnboardingProfileRepository(db), UserRepository(db))
+    settings = get_settings()
+    return OnboardingService(OnboardingProfileRepository(db), UserRepository(db), build_image_storage_service(settings))
 
 
 async def get_dashboard_service(db=Depends(get_database)) -> DashboardService:
@@ -66,6 +68,7 @@ async def get_admin_settings_service(db=Depends(get_database)) -> AdminSettingsS
 
 
 def build_restaurant_operations_service(db) -> RestaurantOperationsService:
+    settings = get_settings()
     return RestaurantOperationsService(
         UserRepository(db),
         RestaurantDocumentRepository(db),
@@ -79,6 +82,7 @@ def build_restaurant_operations_service(db) -> RestaurantOperationsService:
         RestaurantChatRepository(db),
         RestaurantInsightRepository(db),
         OpenAIOperationsService(),
+        build_image_storage_service(settings),
     )
 
 

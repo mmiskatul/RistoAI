@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.services import get_onboarding_service
@@ -20,8 +20,32 @@ async def get_onboarding_profile(
 
 @router.post("/profile", response_model=OnboardingProfileResponse, status_code=status.HTTP_200_OK)
 async def save_onboarding_profile(
-    payload: OnboardingProfileUpsertRequest,
+    restaurant_name: str = Form(..., min_length=2, max_length=120),
+    restaurant_type: str = Form(..., min_length=2, max_length=60),
+    city_location: str = Form(..., min_length=2, max_length=120),
+    number_of_seats: int = Form(..., ge=1, le=10000),
+    average_spend_per_customer: float = Form(..., ge=0, le=100000),
+    main_business_goal: str = Form(..., min_length=2, max_length=120),
+    biggest_problem: str = Form(..., min_length=10, max_length=1000),
+    improvement_focus: str = Form(..., min_length=5, max_length=1000),
+    interior_photo: UploadFile | None = File(default=None),
+    exterior_photo: UploadFile | None = File(default=None),
     current_user: dict = Depends(get_current_user),
     service: OnboardingService = Depends(get_onboarding_service),
 ) -> OnboardingProfileResponse:
-    return await service.save_profile(current_user, payload)
+    payload = OnboardingProfileUpsertRequest(
+        restaurant_name=restaurant_name,
+        restaurant_type=restaurant_type,
+        city_location=city_location,
+        number_of_seats=number_of_seats,
+        average_spend_per_customer=average_spend_per_customer,
+        main_business_goal=main_business_goal,
+        biggest_problem=biggest_problem,
+        improvement_focus=improvement_focus,
+    )
+    return await service.save_profile_with_uploads(
+        current_user,
+        payload,
+        interior_photo=interior_photo,
+        exterior_photo=exterior_photo,
+    )

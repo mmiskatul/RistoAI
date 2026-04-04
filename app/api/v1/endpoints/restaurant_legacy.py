@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.services import get_restaurant_operations_service
@@ -180,5 +180,25 @@ async def get_profile(current_user: dict = Depends(get_current_user), service: R
 
 
 @router.put("/settings/profile", response_model=RestaurantProfileResponse)
-async def update_profile(payload: RestaurantProfileUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RestaurantProfileResponse:
-    return await service.update_profile(current_user, payload)
+async def update_profile(
+    full_name: str | None = Form(default=None, min_length=2, max_length=120),
+    phone: str | None = Form(default=None, max_length=30),
+    restaurant_name: str | None = Form(default=None, max_length=120),
+    restaurant_type: str | None = Form(default=None, max_length=80),
+    location: str | None = Form(default=None, max_length=120),
+    city_location: str | None = Form(default=None, max_length=120),
+    number_of_seats: int | None = Form(default=None, ge=0),
+    profile_image: UploadFile | None = File(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantProfileResponse:
+    payload = RestaurantProfileUpdateRequest(
+        full_name=full_name,
+        phone=phone,
+        restaurant_name=restaurant_name,
+        restaurant_type=restaurant_type,
+        location=location,
+        city_location=city_location,
+        number_of_seats=number_of_seats,
+    )
+    return await service.update_profile_with_image(current_user, payload, profile_image=profile_image)

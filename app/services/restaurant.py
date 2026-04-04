@@ -5,6 +5,8 @@ from datetime import UTC, date, datetime, timedelta
 from html import escape
 from typing import Any
 
+from fastapi import UploadFile
+
 from app.core.exceptions import ValidationException
 from app.repositories.restaurant_ops import (
     RestaurantCashDepositRepository,
@@ -96,6 +98,7 @@ from app.schemas.restaurant import (
     VatOverviewResponse,
 )
 from app.services.base import BaseService
+from app.services.image_storage import ImageStorageService, UploadedImage
 from app.services.openai_ops import OpenAIOperationsService
 from app.utils.pagination import build_pagination_meta
 
@@ -117,6 +120,7 @@ class RestaurantOperationsService(BaseService):
         chat_repository: RestaurantChatRepository,
         insight_repository: RestaurantInsightRepository,
         openai_service: OpenAIOperationsService,
+        image_storage_service: ImageStorageService | None = None,
     ) -> None:
         self.user_repository = user_repository
         self.document_repository = document_repository
@@ -130,6 +134,7 @@ class RestaurantOperationsService(BaseService):
         self.chat_repository = chat_repository
         self.insight_repository = insight_repository
         self.openai_service = openai_service
+        self.image_storage_service = image_storage_service
 
     async def get_home(self, current_user: dict, *, period: str = "weekly", from_date: date | None = None, to_date: date | None = None) -> RestaurantHomeResponse:
         del period
@@ -1294,7 +1299,6 @@ class RestaurantOperationsService(BaseService):
         preferred_language = serialized.get("preferred_language", "en")
         location = serialized.get("city_location") or serialized.get("location")
         restaurant_name = serialized.get("restaurant_name")
-        profile_subtitle = f"{restaurant_name} ? {location}" if restaurant_name and location else restaurant_name or location
         return RestaurantProfileResponse(
             full_name=serialized["full_name"],
             email=serialized["email"],
@@ -1305,28 +1309,28 @@ class RestaurantOperationsService(BaseService):
             city_location=location,
             number_of_seats=serialized.get("number_of_seats"),
             preferred_language=preferred_language,
-            profile_subtitle=profile_subtitle,
-            language_options=[
-                SettingsLanguageOptionResponse(code="en", label="English", active=preferred_language == "en"),
-                SettingsLanguageOptionResponse(code="it", label="Italian", active=preferred_language == "it"),
-            ],
-            account_settings=[
-                SettingsActionItemResponse(label="Manage Subscription", endpoint="/api/v1/subscriptions/user/current"),
-                SettingsActionItemResponse(label="Notification Settings", endpoint="/api/v1/restaurant/settings/profile"),
-                SettingsActionItemResponse(label="Change Password", endpoint="/api/v1/auth/restaurant/forgot-password"),
-                SettingsActionItemResponse(label="Two-Factor Authentication", endpoint="/api/v1/restaurant/settings/profile"),
-            ],
-            support_legal=[
-                SettingsActionItemResponse(label="Terms & Conditions", endpoint="/api/v1/support/tickets"),
-                SettingsActionItemResponse(label="Privacy Policy", endpoint="/api/v1/support/tickets"),
-                SettingsActionItemResponse(label="Help Center", endpoint="/api/v1/support/tickets"),
-            ],
+            profile_image_url=self._resolve_profile_image_url(serialized.get("profile_image_url")),
         )
 
     async def update_profile(self, current_user: dict, payload: RestaurantProfileUpdateRequest) -> RestaurantProfileResponse:
         updates = payload.model_dump(exclude_none=True)
         if "city_location" in updates and "location" not in updates:
             updates["location"] = updates["city_location"]
+        user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
+        return await self.get_profile(user)
+
+    async def update_profile_with_image(
+        self,
+        current_user: dict,
+        payload: RestaurantProfileUpdateRequest,
+        *,
+        profile_image: UploadFile | None = None,
+    ) -> RestaurantProfileResponse:
+        updates = payload.model_dump(exclude_none=True)
+        if "city_location" in updates and "location" not in updates:
+            updates["location"] = updates["city_location"]
+        if profile_image:
+            updates["profile_image_url"] = await self._upload_profile_image(current_user, profile_image)
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
         return await self.get_profile(user)
 
@@ -2620,4 +2624,18 @@ class RestaurantOperationsService(BaseService):
             attachment_source=serialized.get("attachment_source"),
             attachment_summary=serialized.get("attachment_summary"),
         )
+
+    async def _upload_profile_image(self, current_user: dict, file: UploadFile) -> str:
+        if not self.image_storage_service:
+            raise ValidationException("Image upload service is not configured")
+        uploaded: UploadedImage = await self.image_storage_service.upload_file(
+            file=file,
+            prefix=f"restaurant/profile/{current_user['_id']}",
+        )
+        return uploaded.key
+
+    def _resolve_profile_image_url(self, value: str | None) -> str | None:
+        if not self.image_storage_service:
+            return value
+        return self.image_storage_service.resolve_public_url(value)
 

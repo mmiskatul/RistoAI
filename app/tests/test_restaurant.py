@@ -635,18 +635,23 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     settings_response = client.get("/api/v1/restaurant/settings/profile", headers=headers)
     assert settings_response.status_code == 200
     settings_payload = settings_response.json()
-    assert settings_payload["page_title"] == "Settings"
-    assert settings_payload["edit_page_title"] == "Edit User"
-    assert settings_payload["edit_profile_button_label"] == "Edit Profile"
-    assert settings_payload["language_options"][0]["label"] == "English"
-    assert settings_payload["account_settings_title"] == "Account Settings"
-    assert settings_payload["support_legal_title"] == "Support & Legal"
-    assert settings_payload["logout_button_label"] == "Logout"
+    assert set(settings_payload.keys()) == {
+        "full_name",
+        "email",
+        "phone",
+        "restaurant_name",
+        "restaurant_type",
+        "location",
+        "city_location",
+        "number_of_seats",
+        "preferred_language",
+        "profile_image_url",
+    }
 
     settings_update_response = client.put(
         "/api/v1/restaurant/settings/profile",
         headers=headers,
-        json={
+        data={
             "full_name": "Alexander Chen",
             "phone": "+1 (555) 123-4567",
             "restaurant_name": "The Golden Harvest",
@@ -654,6 +659,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
             "city_location": "San Francisco",
             "number_of_seats": 120,
         },
+        files={"profile_image": ("profile.jpg", b"profile-image-bytes", "image/jpeg")},
     )
     assert settings_update_response.status_code == 200
     updated_settings_payload = settings_update_response.json()
@@ -663,6 +669,11 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert updated_settings_payload["restaurant_type"] == "Fine Dining"
     assert updated_settings_payload["city_location"] == "San Francisco"
     assert updated_settings_payload["number_of_seats"] == 120
-    assert updated_settings_payload["save_button_label"] == "Save Changes"
+    assert updated_settings_payload["profile_image_url"].startswith("https://")
+    assert "/restaurant/profile/" in updated_settings_payload["profile_image_url"]
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    updated_user = asyncio.run(db["users"].find_one({"email": owner_credentials["email"]}))
+    assert updated_user["profile_image_url"].startswith("restaurant/profile/")
 
 

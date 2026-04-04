@@ -730,8 +730,6 @@ class SettingsActionItemResponse(BaseSchema):
 
 
 class RestaurantProfileResponse(BaseSchema):
-    page_title: str = "Settings"
-    edit_page_title: str = "Edit User"
     full_name: str
     email: str
     phone: str | None = None
@@ -742,19 +740,6 @@ class RestaurantProfileResponse(BaseSchema):
     number_of_seats: int | None = None
     preferred_language: str
     profile_image_url: str | None = None
-    profile_subtitle: str | None = None
-    edit_profile_button_label: str = "Edit Profile"
-    edit_profile_endpoint: str = "/api/v1/restaurant/settings/profile"
-    change_photo_label: str = "Change Photo"
-    restaurant_details_title: str = "Restaurant Details"
-    cancel_button_label: str = "Cancel"
-    save_button_label: str = "Save Changes"
-    language_options: list[SettingsLanguageOptionResponse] = Field(default_factory=list)
-    account_settings_title: str = "Account Settings"
-    account_settings: list[SettingsActionItemResponse] = Field(default_factory=list)
-    support_legal_title: str = "Support & Legal"
-    support_legal: list[SettingsActionItemResponse] = Field(default_factory=list)
-    logout_button_label: str = "Logout"
 
 
 class RestaurantProfileUpdateRequest(BaseSchema):
