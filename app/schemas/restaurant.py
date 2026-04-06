@@ -540,7 +540,6 @@ class AnalyticsInsightBannerResponse(BaseSchema):
 class AnalyticsMetricTileResponse(BaseSchema):
     label: str
     value: float | str
-    value_formatted: str | None = None
     change_percent: float | None = None
     subtitle: str | None = None
 
@@ -548,13 +547,11 @@ class AnalyticsMetricTileResponse(BaseSchema):
 class AnalyticsSummaryStatResponse(BaseSchema):
     label: str
     value: float | int
-    value_formatted: str | None = None
 
 
 class AnalyticsComparisonRowResponse(BaseSchema):
     label: str
     value: float
-    value_formatted: str | None = None
 
 
 class AnalyticsSupplierAlertResponse(BaseSchema):
@@ -564,7 +561,6 @@ class AnalyticsSupplierAlertResponse(BaseSchema):
 
 class AnalyticsOverviewResponse(BaseSchema):
     insight_banner: AnalyticsInsightBannerResponse
-    estimated_profit: float
     revenue_total: float
     revenue_change_percent: float
     weekly_revenue: list[ChartPointResponse]

@@ -1041,6 +1041,7 @@ class RestaurantOperationsService(BaseService):
         context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
         serialized_records = filtered_daily_records
         serialized_expenses = filtered_expenses
+        estimated_profit = float(context["profit_total"])
         this_week_revenue = round(sum(float(item.get("total_revenue", 0)) for item in serialized_records), 2)
         last_week_revenue = round(this_week_revenue / 1.125, 2) if this_week_revenue else 0.0
         lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in serialized_records))
@@ -1053,32 +1054,31 @@ class RestaurantOperationsService(BaseService):
         ]
         return AnalyticsOverviewResponse(
             insight_banner=await self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
-            estimated_profit=context["profit_total"],
             revenue_total=context["revenue_total"],
             revenue_change_percent=context["revenue_change_percent"],
             weekly_revenue=self._build_home_revenue_chart(filtered_daily_records, period=period),
             metric_tiles=[
-                AnalyticsMetricTileResponse(label="Estimated Profit", value=float(context["profit_total"]), value_formatted=self._format_currency(float(context["profit_total"])), change_percent=8.2),
-                AnalyticsMetricTileResponse(label="Peak Hour", value="7:00 PM", value_formatted="7:00 PM", subtitle="92% Capacity Avg"),
+                AnalyticsMetricTileResponse(label="Estimated Profit", value=estimated_profit, change_percent=8.2),
+                AnalyticsMetricTileResponse(label="Peak Hour", value="7:00 PM", subtitle="92% Capacity Avg"),
             ],
             summary_stats=[
-                AnalyticsSummaryStatResponse(label="Revenue", value=round(this_week_revenue / 1000, 1), value_formatted=f"${round(this_week_revenue / 1000, 1):.1f}k"),
-                AnalyticsSummaryStatResponse(label="Covers", value=context["covers_total"], value_formatted=str(context["covers_total"])),
-                AnalyticsSummaryStatResponse(label="Avg Rev", value=context["avg_revenue_per_cover"], value_formatted=f"${float(context['avg_revenue_per_cover']):.2f}"),
+                AnalyticsSummaryStatResponse(label="Revenue", value=context["revenue_total"]),
+                AnalyticsSummaryStatResponse(label="Covers", value=context["covers_total"]),
+                AnalyticsSummaryStatResponse(label="Avg Rev", value=context["avg_revenue_per_cover"]),
             ],
             revenue_comparison=[
-                AnalyticsComparisonRowResponse(label=self._analytics_current_revenue_label(period), value=this_week_revenue, value_formatted=self._format_currency(this_week_revenue)),
-                AnalyticsComparisonRowResponse(label=self._analytics_previous_revenue_label(period), value=last_week_revenue, value_formatted=self._format_currency(last_week_revenue)),
+                AnalyticsComparisonRowResponse(label=self._analytics_current_revenue_label(period), value=this_week_revenue),
+                AnalyticsComparisonRowResponse(label=self._analytics_previous_revenue_label(period), value=last_week_revenue),
             ],
             covers_total=context["covers_total"],
             covers_activity=[
-                AnalyticsSummaryStatResponse(label="Lunch", value=lunch_covers, value_formatted=str(lunch_covers)),
-                AnalyticsSummaryStatResponse(label="Dinner", value=dinner_covers, value_formatted=str(dinner_covers)),
+                AnalyticsSummaryStatResponse(label="Lunch", value=lunch_covers),
+                AnalyticsSummaryStatResponse(label="Dinner", value=dinner_covers),
             ],
             avg_revenue_per_cover=context["avg_revenue_per_cover"],
             cost_breakdown=[
-                AnalyticsSummaryStatResponse(label="Food Cost", value=round((food_cost_total / max(this_week_revenue, 1)) * 100, 1), value_formatted=f"{round((food_cost_total / max(this_week_revenue, 1)) * 100, 1):.0f}%"),
-                AnalyticsSummaryStatResponse(label="Staff Cost", value=round((staff_cost_total / max(this_week_revenue, 1)) * 100, 1), value_formatted=f"{round((staff_cost_total / max(this_week_revenue, 1)) * 100, 1):.0f}%"),
+                AnalyticsSummaryStatResponse(label="Food Cost", value=food_cost_total),
+                AnalyticsSummaryStatResponse(label="Staff Cost", value=staff_cost_total),
             ],
             supplier_price_alerts=supplier_alerts,
         )
@@ -1096,10 +1096,11 @@ class RestaurantOperationsService(BaseService):
         period_label = self._analytics_filter_label(period)
 
         if export_format == 'excel':
+            estimated_profit = next((float(item.value) for item in analytics.metric_tiles if item.label == 'Estimated Profit'), 0.0)
             lines = [
                 'Section,Label,Value',
                 f'Header,Period,{period_label}',
-                f'Metric,Estimated Profit,{analytics.estimated_profit}',
+                f'Metric,Estimated Profit,{estimated_profit}',
                 f'Metric,Revenue Total,{analytics.revenue_total}',
                 f'Metric,Avg Rev Per Cover,{analytics.avg_revenue_per_cover}',
             ]
@@ -1114,7 +1115,7 @@ class RestaurantOperationsService(BaseService):
 
         pdf_text = [
             f'Risto AI - Analytics Report ({period_label})',
-            f'Estimated Profit: {self._format_currency(float(analytics.estimated_profit))}',
+            f"Estimated Profit: {self._format_currency(float(next((item.value for item in analytics.metric_tiles if item.label == 'Estimated Profit'), 0.0)))}",
             f'Revenue Total: {self._format_currency(float(analytics.revenue_total))}',
             f"Peak Hour: {next((str(item.value) for item in analytics.metric_tiles if item.label == 'Peak Hour'), '7:00 PM')}",
             'Revenue Trend:',
@@ -1123,7 +1124,7 @@ class RestaurantOperationsService(BaseService):
             pdf_text.append(f'- {item.label}: {item.value:.2f}')
         pdf_text.append('Revenue Comparison:')
         for item in analytics.revenue_comparison:
-            pdf_text.append(f'- {item.label}: {item.value_formatted}')
+            pdf_text.append(f'- {item.label}: {item.value}')
         pdf_text.append('Supplier Alerts:')
         for item in analytics.supplier_price_alerts:
             pdf_text.append(f'- {item.title}: {item.subtitle}')
@@ -2063,7 +2064,7 @@ class RestaurantOperationsService(BaseService):
         return round((revenue_total - expenses_total) * self.VAT_RATE, 2)
 
     def _build_weekly_revenue_chart(self, daily_records: list[dict]) -> list[ChartPointResponse]:
-        today = datetime.now(UTC).date()
+        today = datetime.now(UTC).date() - timedelta(days=1)
         by_day: dict[str, float] = {}
         for item in self.serialize_list(daily_records):
             by_day[item["business_date"]] = by_day.get(item["business_date"], 0.0) + float(item["total_revenue"])

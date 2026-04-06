@@ -320,7 +320,7 @@ async def update_inventory_stock(item_id: str, payload: InventoryStockUpdateRequ
     return await service.update_inventory_stock(current_user, item_id, payload)
 
 
-@router.get('/analytics/overview', response_model=AnalyticsOverviewResponse, tags=['Restaurant Analytics'], summary='Analytics Overview', description='Returns the analytics screen payload including cards, trend, comparisons, and alerts.')
+@router.get('/analytics/overview', response_model=AnalyticsOverviewResponse, response_model_exclude_none=True, tags=['Restaurant Analytics'], summary='Analytics Overview', description='Returns the analytics screen payload including cards, trend, comparisons, and alerts.')
 async def get_analytics(
     period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
     from_date: date | None = Query(default=None),

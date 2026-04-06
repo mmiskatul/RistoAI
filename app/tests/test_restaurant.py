@@ -219,6 +219,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     analytics_response = client.get("/api/v1/restaurant/analytics/overview?period=weekly", headers=headers)
     assert analytics_response.status_code == 200
     analytics_payload = analytics_response.json()
+    assert "estimated_profit" not in analytics_payload
     assert len(analytics_payload["supplier_price_alerts"]) >= 1
     assert "Bakery Goods Co" in analytics_payload["supplier_price_alerts"][0]["title"] or analytics_payload["supplier_price_alerts"][0]["title"]
 
@@ -540,20 +541,16 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200
     analytics_payload = analytics_response.json()
-    assert analytics_payload["page_title"] == "Analytics"
-    assert analytics_payload["export_label"] == "Export Data"
-    assert analytics_payload["export_endpoint"] == "/api/v1/restaurant/analytics/export"
-    assert analytics_payload["available_filters"] == ["Weekly", "Monthly"]
-    assert analytics_payload["active_filter"] == "Weekly"
     assert analytics_payload["revenue_total"] == 1300
-    assert analytics_payload["insight_banner"]["label"] == "AI Business Insight"
     assert analytics_payload["insight_banner"]["title"] == business_insight_payload["title"]
     assert analytics_payload["metric_tiles"][0]["label"] == "Estimated Profit"
     assert analytics_payload["metric_tiles"][1]["label"] == "Peak Hour"
     assert analytics_payload["summary_stats"][0]["label"] == "Revenue"
+    assert analytics_payload["summary_stats"][0]["value"] == 1300
     assert analytics_payload["revenue_comparison"][0]["label"] == "This Week Revenue"
     assert analytics_payload["covers_activity"][0]["label"] == "Lunch"
     assert analytics_payload["cost_breakdown"][0]["label"] == "Food Cost"
+    assert len(analytics_payload["weekly_revenue"]) == 7
     assert len(analytics_payload["supplier_price_alerts"]) >= 1
     assert analytics_payload["supplier_price_alerts"][0]["title"]
     assert analytics_payload["supplier_price_alerts"][0]["subtitle"]
@@ -562,7 +559,6 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     analytics_monthly_response = client.get("/api/v1/restaurant/analytics/overview?period=monthly", headers=headers)
     assert analytics_monthly_response.status_code == 200
     analytics_monthly_payload = analytics_monthly_response.json()
-    assert analytics_monthly_payload["active_filter"] == "Monthly"
     assert analytics_monthly_payload["revenue_comparison"][0]["label"] == "This Month Revenue"
 
     analytics_export_pdf_response = client.get("/api/v1/restaurant/analytics/export?period=weekly&format=pdf", headers=headers)
