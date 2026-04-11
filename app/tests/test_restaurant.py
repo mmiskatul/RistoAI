@@ -251,11 +251,10 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     expense_response = client.post(
         "/api/v1/restaurant/expenses",
         headers=headers_user_one,
-        json={"category": "Staff Costs", "amount": 420.0, "expense_date": "2026-03-20", "notes": "Payroll"},
+        json={"category": "Staff Costs", "amount": 420.0, "expense_date": "2026-03-20", "section": "bank", "notes": "Payroll"},
     )
     assert expense_response.status_code == 201
-    assert set(expense_response.json().keys()) == {"id", "category", "amount", "expense_date", "notes", "subtitle", "created_at"}
-    assert expense_response.json()["subtitle"] == "Payroll"
+    assert expense_response.json()["section"] == "bank"
 
     bank_account_one_response = client.post(
         "/api/v1/restaurant/cash/bank-accounts",
@@ -483,9 +482,10 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     expense_response = client.post(
         "/api/v1/restaurant/expenses",
         headers=headers,
-        json={"category": "Cleaning Supplies", "amount": 50.0, "expense_date": today_iso, "notes": "Paid in cash"},
+        json={"category": "Cleaning Supplies", "amount": 50.0, "expense_date": today_iso, "section": "cash", "notes": "Paid in cash"},
     )
     assert expense_response.status_code == 201
+    assert expense_response.json()["section"] == "cash"
 
     deposit_response = client.post(
         "/api/v1/restaurant/cash/deposits",

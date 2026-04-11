@@ -2507,6 +2507,7 @@ class RestaurantOperationsService(BaseService):
             category=category,
             amount=amount,
             expense_date=serialized["expense_date"],
+            section=str(serialized.get("section", "cash")).lower(),
             notes=serialized.get("notes"),
             created_at=serialized["created_at"],
         )
