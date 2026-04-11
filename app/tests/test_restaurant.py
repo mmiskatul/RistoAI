@@ -83,6 +83,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert documents_payload["items"][0]["status"] == "processed"
     assert documents_payload["items"][0]["line_item_count"] == 3
 
+    today_iso = datetime.now(UTC).date().isoformat()
     document_detail_response = client.get(f"/api/v1/restaurant/documents/{confirm_response.json()['id']}", headers=headers)
     assert document_detail_response.status_code == 200
     document_detail_payload = document_detail_response.json()
@@ -104,32 +105,25 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert "attachment; filename=" in download_svg_response.headers["content-disposition"]
     assert b"<svg" in download_svg_response.content
 
-    today_iso = datetime.now(UTC).date().isoformat()
     date_data_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={today_iso}", headers=headers)
     assert date_data_response.status_code == 200
     date_payload = date_data_response.json()
-    assert date_payload["summary_cards"][1]["label"] == "Total Expenses"
-    assert date_payload["summary_cards"][1]["value"] == 425.0
+    assert set(date_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
     assert date_payload["items"][0]["business_date"] == today_iso
     assert date_payload["items"][0]["total_expenses"] == 425.0
-    assert date_payload["items"][0]["total_expenses_formatted"] == "$425.00"
-    assert date_payload["items"][0]["actions"]["view_endpoint"] == f"/api/v1/restaurant/daily-data/by-date?business_date={today_iso}"
-    assert date_payload["items"][0]["data_sources"][0]["kind"] == "uploaded_invoice"
-    assert date_payload["items"][0]["data_sources"][0]["label"] == "Uploaded invoices"
-    assert date_payload["items"][0]["data_sources"][0]["count"] == 1
+    assert date_payload["items"][0]["total_revenue"] == 0.0
 
     week_data_response = client.get(f"/api/v1/restaurant/daily-data?view=week&reference_date={today_iso}", headers=headers)
     assert week_data_response.status_code == 200
-    assert week_data_response.json()["summary_cards"][1]["label"] == "This Week Expenses"
-    assert week_data_response.json()["summary_cards"][1]["value"] == 425.0
+    assert set(week_data_response.json().keys()) == {"total", "page", "page_size", "pages", "items"}
 
     invoice_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-date?business_date={today_iso}", headers=headers)
     assert invoice_detail_response.status_code == 200
     invoice_detail_payload = invoice_detail_response.json()
     assert invoice_detail_payload["business_date"] == today_iso
-    assert invoice_detail_payload["summary_cards"][0]["label"] == "Revenue"
-    assert invoice_detail_payload["summary_cards"][1]["label"] == "Covers"
-    assert invoice_detail_payload["summary_cards"][2]["label"] == "AVG"
+    assert invoice_detail_payload["total_revenue"] == 0.0
+    assert invoice_detail_payload["total_expenses"] == 425.0
+    assert invoice_detail_payload["total_covers"] == 0
     assert invoice_detail_payload["invoice_count"] == 1
     assert invoice_detail_payload["invoices"][0]["supplier_name"] == "Bakery Goods Co"
     assert invoice_detail_payload["invoices"][0]["total_amount"] == 425.0
@@ -137,20 +131,16 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     week_invoice_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-week?reference_date={today_iso}", headers=headers)
     assert week_invoice_detail_response.status_code == 200
     week_invoice_detail_payload = week_invoice_detail_response.json()
-    assert week_invoice_detail_payload["active_view"] == "week"
-    assert week_invoice_detail_payload["summary_cards"][0]["label"] == "Week Revenue"
-    assert week_invoice_detail_payload["summary_cards"][1]["label"] == "Week Covers"
-    assert week_invoice_detail_payload["summary_cards"][2]["label"] == "Week AVG"
+    assert week_invoice_detail_payload["business_date"] == today_iso
+    assert week_invoice_detail_payload["total_expenses"] == 425.0
     assert week_invoice_detail_payload["invoice_count"] == 1
     assert week_invoice_detail_payload["invoices"][0]["supplier_name"] == "Bakery Goods Co"
 
     month_invoice_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-month?reference_date={today_iso}", headers=headers)
     assert month_invoice_detail_response.status_code == 200
     month_invoice_detail_payload = month_invoice_detail_response.json()
-    assert month_invoice_detail_payload["active_view"] == "month"
-    assert month_invoice_detail_payload["summary_cards"][0]["label"] == "Month Revenue"
-    assert month_invoice_detail_payload["summary_cards"][1]["label"] == "Month Covers"
-    assert month_invoice_detail_payload["summary_cards"][2]["label"] == "Month AVG"
+    assert month_invoice_detail_payload["business_date"] == today_iso
+    assert month_invoice_detail_payload["total_expenses"] == 425.0
     assert month_invoice_detail_payload["invoice_count"] == 1
     assert month_invoice_detail_payload["invoices"][0]["supplier_name"] == "Bakery Goods Co"
 
@@ -160,7 +150,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
 
     week_business_date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-week-business-date?business_date={today_iso}", headers=headers)
     assert week_business_date_detail_response.status_code == 200
-    assert week_business_date_detail_response.json()["active_view"] == "week"
+    assert week_business_date_detail_response.json()["business_date"] == today_iso
     assert week_business_date_detail_response.json()["invoice_count"] == 1
 
     month_business_date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-month-business-date?business_date={today_iso}", headers=headers)
@@ -691,9 +681,9 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
 
     insights_response = client.get("/api/v1/restaurant/insights", headers=headers)
     assert insights_response.status_code == 200
-    assert isinstance(insights_response.json(), list)
-    assert len(insights_response.json()) >= 1
-    assert insights_response.json()[0]["title"]
+    assert insights_response.json()["title"]
+    assert len(insights_response.json()["root_causes"]) == 3
+    assert len(insights_response.json()["recommended_actions"]) == 3
 
     second_daily_response = client.post(
         "/api/v1/restaurant/manual-entry",
@@ -714,17 +704,17 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     )
     assert second_daily_response.status_code == 201
 
-    daily_list_response = client.get("/api/v1/restaurant/daily-data?view=date&reference_date=2026-03-26", headers=headers)
+    daily_list_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={today_iso}", headers=headers)
     assert daily_list_response.status_code == 200
     daily_list_payload = daily_list_response.json()
     assert set(daily_list_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
-    assert daily_list_payload["items"][0]["business_date"] == "2026-03-25"
+    assert daily_list_payload["items"][0]["business_date"] == today_iso
     assert set(daily_list_payload["items"][0].keys()) == {"id", "business_date", "total_revenue", "total_expenses", "total_covers", "avg_revenue_per_cover", "created_at"}
     assert daily_list_payload["items"][0]["total_covers"] == 38
     assert daily_list_payload["items"][0]["total_expenses"] == 0.0
     assert daily_list_payload["items"][0]["avg_revenue_per_cover"] == 24.21
 
-    week_list_response = client.get("/api/v1/restaurant/daily-data?view=week&reference_date=2026-03-26", headers=headers)
+    week_list_response = client.get(f"/api/v1/restaurant/daily-data?view=week&reference_date={today_iso}", headers=headers)
     assert week_list_response.status_code == 200
     week_payload = week_list_response.json()
     assert week_payload["total"] == 2
@@ -734,77 +724,68 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     detail_response = client.get(f"/api/v1/restaurant/daily-data/{detail_id}", headers=headers)
     assert detail_response.status_code == 200
     detail_payload = detail_response.json()
-    assert detail_payload["business_date"] == "2026-03-25"
-    assert detail_payload["page_title"] == "Daily Record Details"
-    assert detail_payload["report_for_label"] == "Reports For"
-    assert detail_payload["status_label"] == "CLOSED"
+    assert detail_payload["business_date"] == today_iso
     assert detail_payload["revenue_breakdown"][0]["label"] == "POS Payments"
     assert detail_payload["covers_summary"]["total"] == 38
     assert detail_payload["register_summary"]["closing_cash"] == 220
-    assert detail_payload["edit_endpoint"].endswith(detail_id)
 
-    date_detail_response = client.get("/api/v1/restaurant/daily-data/by-date?business_date=2026-03-25", headers=headers)
+    date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-date?business_date={today_iso}", headers=headers)
     assert date_detail_response.status_code == 200
     date_detail_payload = date_detail_response.json()
-    assert date_detail_payload["business_date"] == "2026-03-25"
-    assert date_detail_payload["summary_cards"][0]["label"] == "Revenue"
-    assert date_detail_payload["summary_cards"][1]["label"] == "Covers"
-    assert date_detail_payload["summary_cards"][2]["label"] == "AVG"
+    assert date_detail_payload["business_date"] == today_iso
+    assert date_detail_payload["total_revenue"] == 920
+    assert date_detail_payload["total_covers"] == 38
     assert date_detail_payload["invoice_count"] == 0
 
-    week_detail_response = client.get("/api/v1/restaurant/daily-data/by-week?reference_date=2026-03-26", headers=headers)
+    week_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-week?reference_date={today_iso}", headers=headers)
     assert week_detail_response.status_code == 200
     week_detail_payload = week_detail_response.json()
-    assert week_detail_payload["active_view"] == "week"
-    assert week_detail_payload["summary_cards"][0]["label"] == "Week Revenue"
-    assert week_detail_payload["summary_cards"][1]["label"] == "Week Covers"
-    assert week_detail_payload["summary_cards"][2]["label"] == "Week AVG"
-    assert week_detail_payload["reference_date"] == "2026-03-26"
-    assert week_detail_payload["period_start"] == "2026-03-23"
-    assert week_detail_payload["period_end"] == "2026-03-29"
+    assert week_detail_payload["business_date"] == today_iso
+    assert week_detail_payload["total_revenue"] == 2220
+    assert week_detail_payload["total_covers"] == 143
     assert week_detail_payload["invoice_count"] == 0
 
-    date_reference_detail_response = client.get("/api/v1/restaurant/daily-data/by-date-reference?reference_date=2026-03-25", headers=headers)
+    date_reference_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-date-reference?reference_date={today_iso}", headers=headers)
     assert date_reference_detail_response.status_code == 200
-    assert date_reference_detail_response.json()["business_date"] == "2026-03-25"
+    assert date_reference_detail_response.json()["business_date"] == today_iso
 
-    week_business_date_detail_response = client.get("/api/v1/restaurant/daily-data/by-week-business-date?business_date=2026-03-26", headers=headers)
+    week_business_date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-week-business-date?business_date={today_iso}", headers=headers)
     assert week_business_date_detail_response.status_code == 200
-    assert week_business_date_detail_response.json()["active_view"] == "week"
+    assert week_business_date_detail_response.json()["business_date"] == today_iso
 
-    month_list_response = client.get("/api/v1/restaurant/daily-data?view=month&reference_date=2026-03-26", headers=headers)
+    month_list_response = client.get(f"/api/v1/restaurant/daily-data?view=month&reference_date={today_iso}", headers=headers)
     assert month_list_response.status_code == 200
     month_payload = month_list_response.json()
     assert month_payload["total"] == 2
     assert set(month_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
 
-    month_business_date_detail_response = client.get("/api/v1/restaurant/daily-data/by-month-business-date?business_date=2026-03-26", headers=headers)
+    month_business_date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-month-business-date?business_date={today_iso}", headers=headers)
     assert month_business_date_detail_response.status_code == 200
-    assert month_business_date_detail_response.json()["active_view"] == "month"
+    assert month_business_date_detail_response.json()["business_date"] == today_iso
 
     all_dates_response = client.get("/api/v1/restaurant/daily-data/by-date", headers=headers)
     assert all_dates_response.status_code == 200
-    assert all_dates_response.json()["active_view"] == "date"
+    assert set(all_dates_response.json().keys()) == {"total", "items"}
 
     all_weeks_response = client.get("/api/v1/restaurant/daily-data/by-week", headers=headers)
     assert all_weeks_response.status_code == 200
-    assert all_weeks_response.json()["active_view"] == "week"
+    assert set(all_weeks_response.json().keys()) == {"total", "items"}
 
     all_months_response = client.get("/api/v1/restaurant/daily-data/by-month", headers=headers)
     assert all_months_response.status_code == 200
-    assert all_months_response.json()["active_view"] == "month"
+    assert set(all_months_response.json().keys()) == {"total", "items"}
 
     delete_response = client.delete(f"/api/v1/restaurant/daily-data/{detail_id}", headers=headers)
     assert delete_response.status_code == 204
-    after_delete_response = client.get("/api/v1/restaurant/daily-data?view=date&reference_date=2026-03-26", headers=headers)
+    after_delete_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={today_iso}", headers=headers)
     assert after_delete_response.status_code == 200
     assert after_delete_response.json()["total"] == 1
 
     business_insight_response = client.get("/api/v1/restaurant/analytics/business-insight", headers=headers)
     assert business_insight_response.status_code == 200
     business_insight_payload = business_insight_response.json()
-    assert business_insight_payload["label"] == "AI Business Insight"
-    assert "Optimization Tip:" in business_insight_payload["title"]
+    assert business_insight_payload["title"]
+    assert business_insight_payload["subtitle"]
 
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200
@@ -833,27 +814,20 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert analytics_export_pdf_response.status_code == 200
     assert analytics_export_pdf_response.headers["content-type"].startswith("application/pdf")
 
-    analytics_export_excel_response = client.get("/api/v1/restaurant/analytics/export?period=monthly&format=excel&from_date=2026-03-24&to_date=2026-03-26", headers=headers)
+    analytics_export_excel_response = client.get(f"/api/v1/restaurant/analytics/export?period=monthly&format=excel&from_date={previous_day_iso}&to_date={today_iso}", headers=headers)
     assert analytics_export_excel_response.status_code == 200
     assert "text/csv" in analytics_export_excel_response.headers["content-type"]
 
     chat_list_response = client.get("/api/v1/restaurant/chat/messages", headers=headers)
     assert chat_list_response.status_code == 200
     chat_list_payload = chat_list_response.json()
-    assert chat_list_payload["page_title"] == "AI Chat"
-    assert chat_list_payload["quick_prompts"][0]["label"] == "How can I increase revenue?"
-    assert chat_list_payload["attachment_options"][0]["label"] == "Attach"
-    assert chat_list_payload["attachment_options"][1]["label"] == "Camera"
-    assert chat_list_payload["attachment_options"][2]["label"] == "Gallery"
-    assert chat_list_payload["attachment_options"][3]["label"] == "Docs"
-    assert chat_list_payload["realtime"]["provider"] == "socket.io"
-    assert chat_list_payload["realtime"]["namespace"] == "/restaurant-chat"
+    assert set(chat_list_payload.keys()) == {"messages"}
+    assert len(chat_list_payload["messages"]) >= 1
 
     chat_response = client.post("/api/v1/restaurant/chat/messages", headers=headers, json={"message": "How can I improve profit?"})
     assert chat_response.status_code == 201
     chat_payload = chat_response.json()
-    assert chat_payload["page_title"] == "AI Chat"
-    assert chat_payload["input_placeholder"] == "Ask AI about your restaurant business..."
+    assert set(chat_payload.keys()) == {"messages"}
     messages = chat_payload["messages"]
     assert any(message["role"] == "insight" for message in messages)
     assert messages[-1]["role"] == "assistant"
@@ -870,7 +844,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     attachment_messages = [message for message in chat_attachment_payload["messages"] if message.get("attachment_name")]
     assert attachment_messages[-1]["attachment_name"] == "suppliers.csv"
     assert attachment_messages[-1]["attachment_source"] == "docs"
-    assert attachment_messages[-1]["attachment_summary"]
+    assert attachment_messages[-1]["role"] == "user"
     assert chat_attachment_payload["messages"][-1]["role"] == "assistant"
 
 
@@ -915,7 +889,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert "/restaurant/profile/" in updated_settings_payload["profile_image_url"]
 
     db = asyncio.run(app.dependency_overrides[get_database]())
-    updated_user = asyncio.run(db["users"].find_one({"email": owner_credentials["email"]}))
+    updated_user = asyncio.run(db["users"].find_one({"email": "alex@example.com"}))
     assert updated_user["profile_image_url"].startswith("restaurant/profile/")
 
 

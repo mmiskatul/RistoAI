@@ -2534,7 +2534,7 @@ class RestaurantOperationsService(BaseService):
         period_start: date | None = None,
         period_end: date | None = None,
     ) -> DailyDataDetailResponse:
-        list_item = self._to_daily_data_bucket_item(bucket, anchor_date=anchor_date, active_view=active_view)
+        list_item = self._to_daily_data_bucket_item(bucket, anchor_date=anchor_date)
         return DailyDataDetailResponse(
             business_date=list_item.business_date,
             total_revenue=list_item.total_revenue,
