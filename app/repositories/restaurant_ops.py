@@ -89,6 +89,21 @@ class RestaurantCashDepositRepository(ScopedRepository):
         return await self.get_multi(filters=self.scope_filters(scope_id), page=page, page_size=page_size)
 
 
+class RestaurantBankAccountRepository(ScopedRepository):
+    collection_name = RestaurantCollections.BANK_ACCOUNTS
+
+    async def list_by_scope(self, *, scope_id: str, page: int = 1, page_size: int = 100) -> tuple[list[dict[str, Any]], int]:
+        return await self.get_multi(
+            filters=self.scope_filters(scope_id),
+            page=page,
+            page_size=page_size,
+            sort=[("bank_account", ASCENDING), ("created_at", DESCENDING)],
+        )
+
+    async def find_by_normalized_name(self, *, scope_id: str, normalized_name: str) -> dict[str, Any] | None:
+        return await self.get_one(self.scope_filters(scope_id, {"normalized_name": normalized_name}))
+
+
 class RestaurantDailyRecordRepository(ScopedRepository):
     collection_name = RestaurantCollections.MANUAL_ENTRIES
 

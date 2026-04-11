@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, computed_field, field_validator
 
 from app.schemas.common import BaseSchema
 
@@ -226,6 +226,7 @@ class ExpenseCreateRequest(BaseSchema):
     category: str = Field(min_length=2, max_length=120)
     amount: float = Field(ge=0)
     expense_date: date
+    section: Literal["cash", "bank"] = "cash"
     notes: str | None = Field(default=None, max_length=500)
 
 
@@ -234,6 +235,7 @@ class ExpenseResponse(BaseSchema):
     category: str
     amount: float
     expense_date: str
+    section: Literal["cash", "bank"] = "cash"
     notes: str | None = None
     created_at: str
 
@@ -263,10 +265,33 @@ class ExpenseListResponse(BaseSchema):
     this_month: ExpensePeriodResponse
 
 
+class BankAccountCreateRequest(BaseSchema):
+    bank_account: str = Field(
+        min_length=2,
+        max_length=80,
+        validation_alias=AliasChoices("bank_account", "bank account", "bank account "),
+    )
+
+
+class BankAccountResponse(BaseSchema):
+    id: str
+    bank_account: str
+    created_at: str
+
+
+class BankAccountListResponse(BaseSchema):
+    total_accounts: int
+    items: list[BankAccountResponse] = Field(default_factory=list)
+
+
 class CashDepositCreateRequest(BaseSchema):
     deposit_date: date
     amount: float = Field(ge=0)
-    deposit_type: str = Field(min_length=2, max_length=80)
+    bank_account: str = Field(
+        min_length=2,
+        max_length=80,
+        validation_alias=AliasChoices("bank_account", "bank account", "bank account "),
+    )
     notes: str | None = Field(default=None, max_length=500)
 
 
@@ -274,9 +299,32 @@ class CashDepositResponse(BaseSchema):
     id: str
     deposit_date: str
     amount: float
-    deposit_type: str
+    bank_account: str
     notes: str | None = None
     created_at: str
+
+    @computed_field
+    @property
+    def amount_formatted(self) -> str:
+        return f"${self.amount:,.2f}"
+
+    @computed_field
+    @property
+    def deposit_date_formatted(self) -> str:
+        parsed = _parse_flexible_date(self.deposit_date)
+        if isinstance(parsed, date):
+            return parsed.strftime("%b %d, %Y")
+        if isinstance(self.deposit_date, str):
+            try:
+                return datetime.fromisoformat(self.deposit_date.replace("Z", "+00:00")).strftime("%b %d, %Y")
+            except ValueError:
+                pass
+        return self.deposit_date
+
+    @computed_field
+    @property
+    def display_title(self) -> str:
+        return self.bank_account
 
 
 class CashPeriodSummaryResponse(BaseSchema):

@@ -7,8 +7,9 @@ from typing import Any
 
 from fastapi import UploadFile
 
-from app.core.exceptions import ValidationException
+from app.core.exceptions import ConflictException, ValidationException
 from app.repositories.restaurant_ops import (
+    RestaurantBankAccountRepository,
     RestaurantCashDepositRepository,
     RestaurantChatRepository,
     RestaurantDailyRecordRepository,
@@ -30,6 +31,9 @@ from app.schemas.restaurant import (
     AnalyticsSummaryStatResponse,
     AnalyticsComparisonRowResponse,
     AnalyticsSupplierAlertResponse,
+    BankAccountCreateRequest,
+    BankAccountListResponse,
+    BankAccountResponse,
     CashDepositCreateRequest,
     CashDepositResponse,
     CashManagementItemResponse,
@@ -110,6 +114,7 @@ class RestaurantOperationsService(BaseService):
         document_repository: RestaurantDocumentRepository,
         expense_repository: RestaurantExpenseRepository,
         cash_repository: RestaurantCashDepositRepository,
+        bank_account_repository: RestaurantBankAccountRepository,
         daily_record_repository: RestaurantDailyRecordRepository,
         record_repository: RestaurantRecordRepository,
         weekly_record_repository: RestaurantWeeklyRecordRepository,
@@ -124,6 +129,7 @@ class RestaurantOperationsService(BaseService):
         self.document_repository = document_repository
         self.expense_repository = expense_repository
         self.cash_repository = cash_repository
+        self.bank_account_repository = bank_account_repository
         self.daily_record_repository = daily_record_repository
         self.record_repository = record_repository
         self.weekly_record_repository = weekly_record_repository
@@ -139,12 +145,14 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
+        documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
         cash_deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=120)
 
         weekly_snapshot = await self._build_home_period_snapshot(
             scope_id=scope_id,
             daily_records=daily_records,
             expenses=expenses,
+            documents=documents,
             cash_deposits=cash_deposits,
             period='weekly',
             from_date=from_date,
@@ -154,6 +162,7 @@ class RestaurantOperationsService(BaseService):
             scope_id=scope_id,
             daily_records=daily_records,
             expenses=expenses,
+            documents=documents,
             cash_deposits=cash_deposits,
             period='monthly',
             from_date=from_date,
@@ -231,6 +240,7 @@ class RestaurantOperationsService(BaseService):
         scope_id: str,
         daily_records: list[dict],
         expenses: list[dict],
+        documents: list[dict],
         cash_deposits: list[dict],
         period: str,
         from_date: date | None,
@@ -239,9 +249,16 @@ class RestaurantOperationsService(BaseService):
         filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
         filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
         filtered_cash_deposits = self._filter_home_cash_deposits(cash_deposits, period=period, from_date=from_date, to_date=to_date)
+        filtered_documents = self._filter_home_documents(documents, period=period, from_date=from_date, to_date=to_date)
 
         insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=filtered_daily_records, expenses=filtered_expenses)
         metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
+        cash_context = self._calculate_cash_summary(
+            daily_records=self.serialize_list(filtered_daily_records),
+            expenses=self.serialize_list(filtered_expenses),
+            documents=self.serialize_list(filtered_documents),
+            deposits=self.serialize_list(filtered_cash_deposits),
+        )
 
         revenue_points = self._build_home_revenue_chart(filtered_daily_records, period=period)
         if period == 'monthly':
@@ -255,9 +272,9 @@ class RestaurantOperationsService(BaseService):
                 MetricCardResponse(label="Profit", value=metrics_context["profit_total"], change_percent=metrics_context["profit_change_percent"]),
             ],
             cash_management=[
-                CashManagementItemResponse(label="Total Cash Collected", amount=metrics_context["cash_collected_total"], subtitle="From recorded daily entries"),
-                CashManagementItemResponse(label="Cash Available", amount=metrics_context["cash_available"], subtitle="Estimated from register movements"),
-                CashManagementItemResponse(label="Cash Deposited", amount=sum(float(item.get("amount", 0)) for item in filtered_cash_deposits), subtitle="Bank deposits logged"),
+                CashManagementItemResponse(label="Total Cash Collected", amount=cash_context["total_collected"], subtitle="From recorded daily entries"),
+                CashManagementItemResponse(label="Cash Available", amount=cash_context["cash_available"], subtitle="After expenses and bank deposits"),
+                CashManagementItemResponse(label="Cash Deposited", amount=cash_context["bank_deposits_total"], subtitle="Bank deposits logged"),
             ],
             vat_balance=self._calculate_vat_balance(metrics_context["revenue_total"], metrics_context["expenses_total"]),
             revenue=revenue_points,
@@ -530,20 +547,50 @@ class RestaurantOperationsService(BaseService):
                 "tenant_id": scope_id,
                 "deposit_date": datetime.combine(payload.deposit_date, datetime.min.time(), tzinfo=UTC),
                 "amount": payload.amount,
-                "deposit_type": payload.deposit_type,
+                "bank_account": payload.bank_account,
                 "notes": payload.notes,
                 "created_by_user_id": str(current_user["_id"]),
             }
         )
+        await self._sync_restaurant_record(scope_id=scope_id, business_date=payload.deposit_date, current_user=current_user)
         return self._to_cash_deposit_response(document)
+
+    async def create_bank_account(self, current_user: dict, payload: BankAccountCreateRequest) -> BankAccountResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        normalized_name = self._normalize_bank_account_name(payload.bank_account)
+        existing = await self.bank_account_repository.find_by_normalized_name(scope_id=scope_id, normalized_name=normalized_name)
+        if existing is not None:
+            raise ConflictException("Bank account already exists", details={"bank_account": payload.bank_account})
+
+        document = await self.bank_account_repository.create(
+            {
+                "tenant_id": scope_id,
+                "bank_account": payload.bank_account,
+                "normalized_name": normalized_name,
+                "created_by_user_id": str(current_user["_id"]),
+            }
+        )
+        return self._to_bank_account_response(document)
+
+    async def list_bank_accounts(self, current_user: dict) -> BankAccountListResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        accounts, total = await self.bank_account_repository.list_by_scope(scope_id=scope_id, page=1, page_size=100)
+        return BankAccountListResponse(
+            total_accounts=total,
+            items=[self._to_bank_account_response(item) for item in accounts],
+        )
 
     async def get_cash_management(self, current_user: dict) -> CashManagementSummaryResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200)
         daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200)
+        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200)
+        documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200)
 
         serialized_deposits = self.serialize_list(deposits)
         serialized_daily = self.serialize_list(daily_records)
+        serialized_expenses = self.serialize_list(expenses)
+        serialized_documents = self.serialize_list(documents)
         today = datetime.now(UTC).date()
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
@@ -559,21 +606,21 @@ class RestaurantOperationsService(BaseService):
 
         def build_period(start: date, end: date, label: str) -> CashPeriodOverviewResponse:
             daily_in_period = [item for item in serialized_daily if in_range(parse_iso_date(item.get("business_date")), start, end)]
+            expenses_in_period = [item for item in serialized_expenses if in_range(parse_iso_date(item.get("expense_date")), start, end)]
+            documents_in_period = [
+                item
+                for item in serialized_documents
+                if item.get("status") == "processed"
+                and item.get("invoice_date")
+                and in_range(parse_iso_date(item.get("invoice_date")), start, end)
+            ]
             deposits_in_period = [item for item in serialized_deposits if in_range(parse_iso_date(item.get("deposit_date")), start, end)]
-
-            total_collected = round(
-                sum(float(item.get("cash_collected_total", item.get("cash_payments", 0) + item.get("cash_in", 0))) for item in daily_in_period),
-                2,
+            summary = self._calculate_cash_summary(
+                daily_records=daily_in_period,
+                expenses=expenses_in_period,
+                documents=documents_in_period,
+                deposits=deposits_in_period,
             )
-            cash_available = round(
-                sum(float(item.get("cash_available", item.get("closing_cash", 0) + item.get("cash_in", 0) - item.get("cash_out", 0))) for item in daily_in_period),
-                2,
-            )
-            withdrawals_total = round(
-                sum(float(item.get("cash_withdrawals", 0) + item.get("cash_out", 0)) for item in daily_in_period),
-                2,
-            )
-            bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposits_in_period), 2)
 
             period_status = CashPeriodStatusResponse(
                 total_collected=label,
@@ -582,10 +629,10 @@ class RestaurantOperationsService(BaseService):
                 bank_deposits=label,
             )
             period_summary = CashPeriodSummaryResponse(
-                total_collected=total_collected,
-                cash_available=cash_available,
-                withdrawals_total=withdrawals_total,
-                bank_deposits_total=bank_deposits_total,
+                total_collected=summary["total_collected"],
+                cash_available=summary["cash_available"],
+                withdrawals_total=summary["withdrawals_total"],
+                bank_deposits_total=summary["bank_deposits_total"],
             )
             return CashPeriodOverviewResponse(
                 summary=period_summary,
@@ -1348,16 +1395,71 @@ class RestaurantOperationsService(BaseService):
             "cash_available": cash_available,
         }
 
+    def _calculate_cash_summary(
+        self,
+        *,
+        daily_records: list[dict[str, Any]],
+        expenses: list[dict[str, Any]],
+        documents: list[dict[str, Any]],
+        deposits: list[dict[str, Any]],
+    ) -> dict[str, float]:
+        total_collected = round(
+            sum(float(item.get("cash_collected_total", item.get("cash_payments", 0) + item.get("cash_in", 0))) for item in daily_records),
+            2,
+        )
+        base_cash_available = round(
+            sum(float(item.get("cash_available", item.get("closing_cash", 0) + item.get("cash_in", 0) - item.get("cash_out", 0))) for item in daily_records),
+            2,
+        )
+        withdrawals_total = round(
+            sum(float(item.get("cash_withdrawals", 0) + item.get("cash_out", 0)) for item in daily_records),
+            2,
+        )
+        manual_expenses_total = round(sum(float(item.get("amount", 0)) for item in expenses), 2)
+        uploaded_invoice_total = round(
+            sum(float(item.get("total_amount", 0)) for item in documents if item.get("status") == "processed" and item.get("invoice_date")),
+            2,
+        )
+        bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposits), 2)
+        cash_available = round(max(base_cash_available - manual_expenses_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
+        return {
+            "total_collected": total_collected,
+            "cash_available": cash_available,
+            "withdrawals_total": withdrawals_total,
+            "bank_deposits_total": bank_deposits_total,
+            "manual_expenses_total": manual_expenses_total,
+            "uploaded_invoice_total": uploaded_invoice_total,
+        }
+
+    def _filter_home_documents(self, documents: list[dict], *, period: str, from_date: date | None = None, to_date: date | None = None) -> list[dict]:
+        start_date, end_date = self._resolve_home_date_range(period, from_date=from_date, to_date=to_date)
+        records = self.serialize_list(documents)
+        filtered: list[dict] = []
+        for item in records:
+            if item.get("status") != "processed" or not item.get("invoice_date"):
+                continue
+            invoice_date = self._safe_parse_date(item.get("invoice_date"))
+            if invoice_date is None:
+                continue
+            if start_date is not None and invoice_date < start_date:
+                continue
+            if end_date is not None and invoice_date > end_date:
+                continue
+            filtered.append(item)
+        return filtered
+
     async def _sync_restaurant_record(self, *, scope_id: str, business_date: date, current_user: dict) -> None:
         resolved_business_date = business_date if hasattr(business_date, "isoformat") else datetime.fromisoformat(str(business_date)).date()
         all_daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
         all_expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
         all_documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        all_deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
 
         target_date = resolved_business_date.isoformat()
         serialized_daily_records = self.serialize_list(all_daily_records)
         serialized_expenses = self.serialize_list(all_expenses)
         serialized_documents = self.serialize_list(all_documents)
+        serialized_deposits = self.serialize_list(all_deposits)
 
         manual_record = next((item for item in serialized_daily_records if str(item.get("business_date", "")).startswith(target_date)), None)
         manual_expenses = [
@@ -1370,9 +1472,14 @@ class RestaurantOperationsService(BaseService):
             for item in serialized_documents
             if item.get("status") == "processed" and str(item.get("invoice_date", "")).startswith(target_date)
         ]
+        deposits = [
+            item
+            for item in serialized_deposits
+            if str(item.get("deposit_date", "")).startswith(target_date)
+        ]
 
         now = datetime.now(UTC)
-        if not manual_record and not manual_expenses and not uploaded_invoices:
+        if not manual_record and not manual_expenses and not uploaded_invoices and not deposits:
             existing = await self.record_repository.find_by_business_date(scope_id=scope_id, business_date=resolved_business_date)
             if existing:
                 await self.record_repository.delete(existing["_id"])
@@ -1381,11 +1488,14 @@ class RestaurantOperationsService(BaseService):
             manual_entry_expenses = float(manual_record.get("total_expenses", 0)) if manual_record else 0.0
             uploaded_invoice_total = round(sum(float(item.get("total_amount", 0)) for item in uploaded_invoices), 2)
             manual_expense_total = round(sum(float(item.get("amount", 0)) for item in manual_expenses), 2)
+            bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposits), 2)
             lunch_covers = int(manual_record.get("lunch_covers", 0)) if manual_record else 0
             dinner_covers = int(manual_record.get("dinner_covers", 0)) if manual_record else 0
             total_covers = lunch_covers + dinner_covers
             total_expenses = round(manual_entry_expenses + uploaded_invoice_total + manual_expense_total, 2)
             total_revenue = round(manual_revenue, 2)
+            base_cash_available = float(manual_record.get("cash_available", 0)) if manual_record else 0.0
+            net_cash_available = round(max(base_cash_available - manual_expense_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
 
             await self.record_repository.upsert_by_business_date(
                 scope_id=scope_id,
@@ -1401,6 +1511,12 @@ class RestaurantOperationsService(BaseService):
                     "manual_expense_total": manual_expense_total,
                     "manual_expense_count": len(manual_expenses),
                     "manual_expense_ids": [item["id"] for item in manual_expenses],
+                    "bank_deposits_total": bank_deposits_total,
+                    "bank_deposit_count": len(deposits),
+                    "bank_deposit_ids": [item["id"] for item in deposits],
+                    "cash_collected_total": float(manual_record.get("cash_collected_total", 0)) if manual_record else 0.0,
+                    "base_cash_available": base_cash_available,
+                    "cash_available": net_cash_available,
                     "total_revenue": total_revenue,
                     "total_expenses": total_expenses,
                     "profit": round(total_revenue - total_expenses, 2),
@@ -1412,6 +1528,7 @@ class RestaurantOperationsService(BaseService):
                         "manual_entry": bool(manual_record),
                         "uploaded_invoice_count": len(uploaded_invoices),
                         "manual_expense_count": len(manual_expenses),
+                        "bank_deposit_count": len(deposits),
                     },
                     "last_synced_by_user_id": str(current_user["_id"]),
                     "last_synced_at": now,
@@ -1424,6 +1541,7 @@ class RestaurantOperationsService(BaseService):
             serialized_daily_records=serialized_daily_records,
             serialized_expenses=serialized_expenses,
             serialized_documents=serialized_documents,
+            serialized_deposits=serialized_deposits,
             current_user=current_user,
         )
         await self._sync_restaurant_month_record(
@@ -1432,6 +1550,7 @@ class RestaurantOperationsService(BaseService):
             serialized_daily_records=serialized_daily_records,
             serialized_expenses=serialized_expenses,
             serialized_documents=serialized_documents,
+            serialized_deposits=serialized_deposits,
             current_user=current_user,
         )
 
@@ -1443,6 +1562,7 @@ class RestaurantOperationsService(BaseService):
         serialized_daily_records: list[dict[str, Any]],
         serialized_expenses: list[dict[str, Any]],
         serialized_documents: list[dict[str, Any]],
+        serialized_deposits: list[dict[str, Any]],
         current_user: dict,
     ) -> None:
         week_start = business_date - timedelta(days=business_date.weekday())
@@ -1460,7 +1580,12 @@ class RestaurantOperationsService(BaseService):
             and item.get("invoice_date")
             and week_start <= datetime.fromisoformat(str(item["invoice_date"])).date() <= week_end
         ]
-        if not weekly_manual_records and not weekly_expenses and not weekly_invoices:
+        weekly_deposits = []
+        for item in serialized_deposits:
+            deposit_date = self._safe_parse_date(item.get("deposit_date"))
+            if deposit_date is not None and week_start <= deposit_date <= week_end:
+                weekly_deposits.append(item)
+        if not weekly_manual_records and not weekly_expenses and not weekly_invoices and not weekly_deposits:
             existing = await self.weekly_record_repository.find_by_week_start_date(scope_id=scope_id, week_start_date=week_start)
             if existing:
                 await self.weekly_record_repository.delete(existing["_id"])
@@ -1469,8 +1594,12 @@ class RestaurantOperationsService(BaseService):
         manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in weekly_manual_records), 2)
         manual_expense_total = round(sum(float(item.get("amount", 0)) for item in weekly_expenses), 2)
         uploaded_invoice_total = round(sum(float(item.get("total_amount", 0)) for item in weekly_invoices), 2)
+        bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in weekly_deposits), 2)
         total_expenses = round(manual_entry_expenses + manual_expense_total + uploaded_invoice_total, 2)
         total_covers = int(sum(int(item.get("lunch_covers", 0)) + int(item.get("dinner_covers", 0)) for item in weekly_manual_records))
+        cash_collected_total = round(sum(float(item.get("cash_collected_total", 0)) for item in weekly_manual_records), 2)
+        base_cash_available = round(sum(float(item.get("cash_available", 0)) for item in weekly_manual_records), 2)
+        net_cash_available = round(max(base_cash_available - manual_expense_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
         await self.weekly_record_repository.upsert_by_week_start_date(
             scope_id=scope_id,
             week_start_date=week_start,
@@ -1479,10 +1608,15 @@ class RestaurantOperationsService(BaseService):
                 "manual_entry_ids": [item["id"] for item in weekly_manual_records],
                 "manual_expense_ids": [item["id"] for item in weekly_expenses],
                 "uploaded_invoice_document_ids": [item["id"] for item in weekly_invoices],
+                "bank_deposit_ids": [item["id"] for item in weekly_deposits],
+                "cash_collected_total": cash_collected_total,
+                "base_cash_available": base_cash_available,
+                "cash_available": net_cash_available,
                 "total_revenue": total_revenue,
                 "manual_entry_expenses": manual_entry_expenses,
                 "manual_expense_total": manual_expense_total,
                 "uploaded_invoice_total": uploaded_invoice_total,
+                "bank_deposits_total": bank_deposits_total,
                 "total_expenses": total_expenses,
                 "profit": round(total_revenue - total_expenses, 2),
                 "total_covers": total_covers,
@@ -1490,6 +1624,7 @@ class RestaurantOperationsService(BaseService):
                 "invoice_count": len(weekly_invoices),
                 "manual_entry_count": len(weekly_manual_records),
                 "manual_expense_count": len(weekly_expenses),
+                "bank_deposit_count": len(weekly_deposits),
                 "last_synced_by_user_id": str(current_user["_id"]),
                 "last_synced_at": datetime.now(UTC),
             },
@@ -1503,6 +1638,7 @@ class RestaurantOperationsService(BaseService):
         serialized_daily_records: list[dict[str, Any]],
         serialized_expenses: list[dict[str, Any]],
         serialized_documents: list[dict[str, Any]],
+        serialized_deposits: list[dict[str, Any]],
         current_user: dict,
     ) -> None:
         month_start = business_date.replace(day=1)
@@ -1522,7 +1658,12 @@ class RestaurantOperationsService(BaseService):
             and item.get("invoice_date")
             and month_start <= datetime.fromisoformat(str(item["invoice_date"])).date() <= month_end
         ]
-        if not monthly_manual_records and not monthly_expenses and not monthly_invoices:
+        monthly_deposits = []
+        for item in serialized_deposits:
+            deposit_date = self._safe_parse_date(item.get("deposit_date"))
+            if deposit_date is not None and month_start <= deposit_date <= month_end:
+                monthly_deposits.append(item)
+        if not monthly_manual_records and not monthly_expenses and not monthly_invoices and not monthly_deposits:
             existing = await self.monthly_record_repository.find_by_month_key(scope_id=scope_id, month_key=month_key)
             if existing:
                 await self.monthly_record_repository.delete(existing["_id"])
@@ -1531,8 +1672,12 @@ class RestaurantOperationsService(BaseService):
         manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in monthly_manual_records), 2)
         manual_expense_total = round(sum(float(item.get("amount", 0)) for item in monthly_expenses), 2)
         uploaded_invoice_total = round(sum(float(item.get("total_amount", 0)) for item in monthly_invoices), 2)
+        bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in monthly_deposits), 2)
         total_expenses = round(manual_entry_expenses + manual_expense_total + uploaded_invoice_total, 2)
         total_covers = int(sum(int(item.get("lunch_covers", 0)) + int(item.get("dinner_covers", 0)) for item in monthly_manual_records))
+        cash_collected_total = round(sum(float(item.get("cash_collected_total", 0)) for item in monthly_manual_records), 2)
+        base_cash_available = round(sum(float(item.get("cash_available", 0)) for item in monthly_manual_records), 2)
+        net_cash_available = round(max(base_cash_available - manual_expense_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
         await self.monthly_record_repository.upsert_by_month_key(
             scope_id=scope_id,
             month_key=month_key,
@@ -1542,10 +1687,15 @@ class RestaurantOperationsService(BaseService):
                 "manual_entry_ids": [item["id"] for item in monthly_manual_records],
                 "manual_expense_ids": [item["id"] for item in monthly_expenses],
                 "uploaded_invoice_document_ids": [item["id"] for item in monthly_invoices],
+                "bank_deposit_ids": [item["id"] for item in monthly_deposits],
+                "cash_collected_total": cash_collected_total,
+                "base_cash_available": base_cash_available,
+                "cash_available": net_cash_available,
                 "total_revenue": total_revenue,
                 "manual_entry_expenses": manual_entry_expenses,
                 "manual_expense_total": manual_expense_total,
                 "uploaded_invoice_total": uploaded_invoice_total,
+                "bank_deposits_total": bank_deposits_total,
                 "total_expenses": total_expenses,
                 "profit": round(total_revenue - total_expenses, 2),
                 "total_covers": total_covers,
@@ -1553,6 +1703,7 @@ class RestaurantOperationsService(BaseService):
                 "invoice_count": len(monthly_invoices),
                 "manual_entry_count": len(monthly_manual_records),
                 "manual_expense_count": len(monthly_expenses),
+                "bank_deposit_count": len(monthly_deposits),
                 "last_synced_by_user_id": str(current_user["_id"]),
                 "last_synced_at": datetime.now(UTC),
             },
@@ -2081,7 +2232,7 @@ class RestaurantOperationsService(BaseService):
         for item in self.serialize_list(expenses[:3]):
             items.append(ActivityItemResponse(kind="expense", title="Expense added", subtitle=item["category"], timestamp=item["created_at"]))
         for item in self.serialize_list(cash_deposits[:3]):
-            items.append(ActivityItemResponse(kind="cash", title="Bank deposit logged", subtitle=item["deposit_type"], timestamp=item["created_at"]))
+            items.append(ActivityItemResponse(kind="cash", title="Bank deposit logged", subtitle=item.get("bank_account") or item.get("deposit_type", ""), timestamp=item["created_at"]))
         return sorted(items, key=lambda value: value.timestamp, reverse=True)[:6]
 
     @staticmethod
@@ -2345,10 +2496,22 @@ class RestaurantOperationsService(BaseService):
             id=serialized["id"],
             deposit_date=serialized["deposit_date"],
             amount=float(serialized["amount"]),
-            deposit_type=serialized["deposit_type"],
+            bank_account=serialized.get("bank_account") or serialized.get("deposit_type", ""),
             notes=serialized.get("notes"),
             created_at=serialized["created_at"],
         )
+
+    def _to_bank_account_response(self, account: dict) -> BankAccountResponse:
+        serialized = self.serialize(account)
+        return BankAccountResponse(
+            id=serialized["id"],
+            bank_account=serialized["bank_account"],
+            created_at=serialized["created_at"],
+        )
+
+    @staticmethod
+    def _normalize_bank_account_name(value: str) -> str:
+        return " ".join(value.strip().lower().split())
 
     def _to_daily_data_response(self, record: dict) -> DailyDataResponse:
         serialized = self.serialize(record)

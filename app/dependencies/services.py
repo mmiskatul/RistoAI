@@ -8,6 +8,7 @@ from app.repositories.admin_settings import AdminSettingsRepository
 from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.coupon import CouponRepository
 from app.repositories.restaurant_ops import (
+    RestaurantBankAccountRepository,
     RestaurantCashDepositRepository,
     RestaurantChatRepository,
     RestaurantDailyRecordRepository,
@@ -74,6 +75,7 @@ def build_restaurant_operations_service(db) -> RestaurantOperationsService:
         RestaurantDocumentRepository(db),
         RestaurantExpenseRepository(db),
         RestaurantCashDepositRepository(db),
+        RestaurantBankAccountRepository(db),
         RestaurantDailyRecordRepository(db),
         RestaurantRecordRepository(db),
         RestaurantWeeklyRecordRepository(db),

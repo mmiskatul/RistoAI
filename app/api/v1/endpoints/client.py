@@ -6,6 +6,9 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.services import get_restaurant_operations_service
 from app.schemas.restaurant import (
     AnalyticsOverviewResponse,
+    BankAccountCreateRequest,
+    BankAccountListResponse,
+    BankAccountResponse,
     CashDepositCreateRequest,
     CashDepositResponse,
     CashManagementSummaryResponse,
@@ -109,6 +112,16 @@ async def list_expenses(page: int = Query(default=1, ge=1), page_size: int = Que
 @router.post("/cash/deposits", response_model=CashDepositResponse, status_code=status.HTTP_201_CREATED)
 async def create_cash_deposit(payload: CashDepositCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> CashDepositResponse:
     return await service.create_cash_deposit(current_user, payload)
+
+
+@router.post("/cash/bank-accounts", response_model=BankAccountResponse, status_code=status.HTTP_201_CREATED)
+async def create_bank_account(payload: BankAccountCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> BankAccountResponse:
+    return await service.create_bank_account(current_user, payload)
+
+
+@router.get("/cash/bank-accounts", response_model=BankAccountListResponse)
+async def list_bank_accounts(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> BankAccountListResponse:
+    return await service.list_bank_accounts(current_user)
 
 
 @router.get("/cash/overview", response_model=CashManagementSummaryResponse)
