@@ -680,7 +680,7 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     assert cash_overview_response.status_code == 200
     cash_overview_payload = cash_overview_response.json()
     assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 300.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 150.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 125.0
     assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 120.0
 
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)

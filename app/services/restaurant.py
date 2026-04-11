@@ -718,7 +718,7 @@ class RestaurantOperationsService(BaseService):
                 total_collected=summary.total_collected,
                 cash_available=summary.cash_available,
                 withdrawals_total=summary.withdrawals_total,
-                bank_deposits=summary.deposits_collection_total,
+                bank_deposits=summary.bank_deposits_total,
             )
             return CashPeriodOverviewResponse(
                 summary=period_summary,
