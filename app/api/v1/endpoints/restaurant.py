@@ -16,6 +16,7 @@ from app.schemas.restaurant import (
     BankAccountUpdateRequest,
     CashDepositCreateRequest,
     CashDepositResponse,
+    CashDepositUpdateRequest,
     CashManagementSummaryResponse,
     ChatConversationResponse,
     ChatMessageCreateRequest,
@@ -191,6 +192,16 @@ async def list_expenses(page: int = Query(default=1, ge=1), page_size: int = Que
 @router.post('/cash/deposits', response_model=CashDepositResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Cash Management'], summary='Create Bank Deposit', description='Creates a cash deposit or bank drop record.')
 async def create_cash_deposit(payload: CashDepositCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> CashDepositResponse:
     return await service.create_cash_deposit(current_user, payload)
+
+
+@router.patch('/cash/deposits/{deposit_id}', response_model=CashDepositResponse, tags=['Restaurant Cash Management'], summary='Update Bank Deposit', description='Updates a saved cash deposit or bank drop record.')
+async def update_cash_deposit(deposit_id: str, payload: CashDepositUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> CashDepositResponse:
+    return await service.update_cash_deposit(current_user, deposit_id, payload)
+
+
+@router.delete('/cash/deposits/{deposit_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Cash Management'], summary='Delete Bank Deposit', description='Deletes a saved cash deposit or bank drop record.')
+async def delete_cash_deposit(deposit_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> None:
+    await service.delete_cash_deposit(current_user, deposit_id)
 
 
 @router.post('/cash/bank-accounts', response_model=BankAccountResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Cash Management'], summary='Create Bank Account', description='Creates a bank account option for the cash deposit dropdown.')

@@ -37,6 +37,7 @@ from app.schemas.restaurant import (
     BankAccountUpdateRequest,
     CashDepositCreateRequest,
     CashDepositResponse,
+    CashDepositUpdateRequest,
     CashManagementItemResponse,
     CashManagementSummaryResponse,
     CashOverviewPeriodsResponse,
@@ -557,6 +558,32 @@ class RestaurantOperationsService(BaseService):
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=payload.deposit_date, current_user=current_user)
         return self._to_cash_deposit_response(document)
+
+    async def update_cash_deposit(self, current_user: dict, deposit_id: str, payload: CashDepositUpdateRequest) -> CashDepositResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        deposit = await self.cash_repository.get_scoped_by_id(deposit_id, scope_id)
+        previous_deposit_date = self._safe_parse_date(deposit.get("deposit_date")) or payload.deposit_date
+        updated = await self.cash_repository.update(
+            deposit["_id"],
+            {
+                "deposit_date": datetime.combine(payload.deposit_date, datetime.min.time(), tzinfo=UTC),
+                "amount": payload.amount,
+                "bank_account": payload.bank_account,
+                "notes": payload.notes,
+            },
+        )
+        await self._sync_restaurant_record(scope_id=scope_id, business_date=previous_deposit_date, current_user=current_user)
+        if payload.deposit_date != previous_deposit_date:
+            await self._sync_restaurant_record(scope_id=scope_id, business_date=payload.deposit_date, current_user=current_user)
+        return self._to_cash_deposit_response(updated)
+
+    async def delete_cash_deposit(self, current_user: dict, deposit_id: str) -> None:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        deposit = await self.cash_repository.get_scoped_by_id(deposit_id, scope_id)
+        previous_deposit_date = self._safe_parse_date(deposit.get("deposit_date"))
+        await self.cash_repository.delete(deposit["_id"])
+        if previous_deposit_date is not None:
+            await self._sync_restaurant_record(scope_id=scope_id, business_date=previous_deposit_date, current_user=current_user)
 
     async def create_bank_account(self, current_user: dict, payload: BankAccountCreateRequest) -> BankAccountResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)

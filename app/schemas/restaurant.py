@@ -304,6 +304,17 @@ class CashDepositCreateRequest(BaseSchema):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class CashDepositUpdateRequest(BaseSchema):
+    deposit_date: date
+    amount: float = Field(ge=0)
+    bank_account: str = Field(
+        min_length=2,
+        max_length=80,
+        validation_alias=AliasChoices("bank_account", "bank account", "bank account "),
+    )
+    notes: str | None = Field(default=None, max_length=500)
+
+
 class CashDepositResponse(BaseSchema):
     id: str
     deposit_date: str

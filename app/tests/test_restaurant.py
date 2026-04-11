@@ -525,6 +525,78 @@ def test_restaurant_bank_account_list_includes_deposited_amount_by_bank_name(cli
     assert amounts_by_name["Citi Bank - Payroll"] == 40.0
 
 
+def test_restaurant_cash_deposit_update_and_delete_endpoints(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Deposit Editor",
+            "email": "depositeditor@example.com",
+            "password": "DepositEditor123",
+            "phone": "+15550009998",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    assert client.post(
+        "/api/v1/restaurant/cash/bank-accounts",
+        headers=headers,
+        json={"bank_account": "Main Bank"},
+    ).status_code == 201
+    assert client.post(
+        "/api/v1/restaurant/cash/bank-accounts",
+        headers=headers,
+        json={"bank_account": "Secondary Bank"},
+    ).status_code == 201
+
+    today = datetime.now(UTC).date()
+    tomorrow = today + timedelta(days=1)
+
+    create_response = client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={
+            "deposit_date": today.isoformat(),
+            "amount": 100.0,
+            "bank_account": "Main Bank",
+            "notes": "Initial deposit",
+        },
+    )
+    assert create_response.status_code == 201
+    deposit_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"/api/v1/restaurant/cash/deposits/{deposit_id}",
+        headers=headers,
+        json={
+            "deposit_date": tomorrow.isoformat(),
+            "amount": 150.0,
+            "bank_account": "Secondary Bank",
+            "notes": "Updated deposit",
+        },
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["amount"] == 150.0
+    assert update_response.json()["bank_account"] == "Secondary Bank"
+    assert update_response.json()["notes"] == "Updated deposit"
+    assert update_response.json()["deposit_date"][:10] == tomorrow.isoformat()
+
+    bank_account_list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
+    assert bank_account_list_response.status_code == 200
+    amounts_by_name = {item["bank_account"]: item["deposited_amount"] for item in bank_account_list_response.json()["items"]}
+    assert amounts_by_name["Main Bank"] == 0.0
+    assert amounts_by_name["Secondary Bank"] == 150.0
+
+    delete_response = client.delete(f"/api/v1/restaurant/cash/deposits/{deposit_id}", headers=headers)
+    assert delete_response.status_code == 204
+
+    bank_account_list_after_delete_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
+    assert bank_account_list_after_delete_response.status_code == 200
+    amounts_after_delete = {item["bank_account"]: item["deposited_amount"] for item in bank_account_list_after_delete_response.json()["items"]}
+    assert amounts_after_delete["Main Bank"] == 0.0
+    assert amounts_after_delete["Secondary Bank"] == 0.0
+
+
 def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(
