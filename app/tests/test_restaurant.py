@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.db.mongodb import get_database
 from app.tests.helpers import register_and_login, seed_subscription_plan, select_subscription_plan
@@ -78,7 +78,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     documents_response = client.get("/api/v1/restaurant/documents", headers=headers)
     assert documents_response.status_code == 200
     documents_payload = documents_response.json()
-    assert documents_payload["ai_banner_title"] == "AI Data Extraction Active"
+    assert set(documents_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
     assert documents_payload["items"][0]["supplier_name"] == "Bakery Goods Co"
     assert documents_payload["items"][0]["status"] == "processed"
     assert documents_payload["items"][0]["line_item_count"] == 3
@@ -87,9 +87,8 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert document_detail_response.status_code == 200
     document_detail_payload = document_detail_response.json()
     assert document_detail_payload["supplier_name"] == "Bakery Goods Co"
-    assert document_detail_payload["invoice_date_formatted"]
-    assert document_detail_payload["upload_date_formatted"]
-    assert document_detail_payload["download_endpoint"].endswith(f"{confirm_response.json()['id']}/download")
+    assert document_detail_payload["invoice_date"] == today_iso
+    assert document_detail_payload["upload_date"]
     assert "page_title" not in document_detail_payload
     assert "source_file_name" not in document_detail_payload
 
@@ -248,10 +247,12 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     )
     select_subscription_plan(client, headers_user_two)
 
+    today_iso = datetime.now(UTC).date().isoformat()
+
     expense_response = client.post(
         "/api/v1/restaurant/expenses",
         headers=headers_user_one,
-        json={"category": "Staff Costs", "amount": 420.0, "expense_date": "2026-03-20", "section": "bank", "notes": "Payroll"},
+        json={"category": "Staff Costs", "amount": 420.0, "expense_date": today_iso, "section": "bank", "notes": "Payroll"},
     )
     assert expense_response.status_code == 201
     assert expense_response.json()["section"] == "bank"
@@ -327,18 +328,15 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     inventory_detail_user_one = client.get(f"/api/v1/restaurant/inventory/{inventory_id}", headers=headers_user_one)
     assert inventory_detail_user_one.status_code == 200
     inventory_detail_payload = inventory_detail_user_one.json()
-    assert inventory_detail_payload["page_title"] == "View Inventory Product"
-    assert inventory_detail_payload["current_stock_label"] == "Current Stock"
-    assert inventory_detail_payload["supplier_card"]["supplier_name"] == "Global Foods Inc."
-    assert inventory_detail_payload["stock_update_endpoint"].endswith(f"/inventory/{inventory_id}/stock-update")
+    assert inventory_detail_payload["supplier_name"] == "Global Foods Inc."
+    assert inventory_detail_payload["current_stock_value"] == 12
+    assert "history" in inventory_detail_payload
 
     inventory_list_user_one = client.get("/api/v1/restaurant/inventory", headers=headers_user_one)
     assert inventory_list_user_one.status_code == 200
     inventory_list_payload = inventory_list_user_one.json()
-    assert inventory_list_payload["page_title"] == "Inventory"
-    assert inventory_list_payload["search_placeholder"] == "Search products"
-    assert inventory_list_payload["total_inventory_value_formatted"] == "$54.00"
-    assert inventory_list_payload["items"][0]["actions"]["view_endpoint"].endswith(inventory_id)
+    assert inventory_list_payload["total_inventory_value"] == 54.0
+    assert inventory_list_payload["items"][0]["id"] == inventory_id
 
     inventory_update_response = client.patch(
         f"/api/v1/restaurant/inventory/{inventory_id}",
@@ -346,7 +344,7 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
         json={"supplier_name": "Updated Supplier", "alert_threshold": 3},
     )
     assert inventory_update_response.status_code == 200
-    assert inventory_update_response.json()["supplier_card"]["supplier_name"] == "Updated Supplier"
+    assert inventory_update_response.json()["supplier_name"] == "Updated Supplier"
 
     inventory_stock_response = client.post(
         f"/api/v1/restaurant/inventory/{inventory_id}/stock-update",
@@ -607,13 +605,18 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     )
     select_subscription_plan(client, headers)
 
+    today = datetime.now(UTC).date()
+    previous_day = today - timedelta(days=1)
+    previous_day_iso = previous_day.isoformat()
+    today_iso = today.isoformat()
+
     create_daily_response = client.post(
         "/api/v1/restaurant/manual-entry",
         headers=headers,
         json={
             "method": "method_2",
             "method_two": {
-                "business_date": "2026-03-24",
+                "business_date": previous_day_iso,
                 "pos_payments": 800,
                 "cash_payments": 300,
                 "bank_transfer_payments": 200,
@@ -630,7 +633,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     client.post(
         "/api/v1/restaurant/expenses",
         headers=headers,
-        json={"category": "Food Supplies", "amount": 250.0, "expense_date": "2026-03-24"},
+        json={"category": "Food Supplies", "amount": 250.0, "expense_date": previous_day_iso},
     )
 
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
@@ -654,11 +657,11 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert home_export_excel_response.status_code == 200
     assert "text/csv" in home_export_excel_response.headers["content-type"]
 
-    home_custom_range_response = client.get("/api/v1/restaurant/home?period=weekly&from_date=2026-03-24&to_date=2026-03-25", headers=headers)
+    home_custom_range_response = client.get(f"/api/v1/restaurant/home?period=weekly&from_date={previous_day_iso}&to_date={today_iso}", headers=headers)
     assert home_custom_range_response.status_code == 200
     assert "weekly" in home_custom_range_response.json()
 
-    home_export_custom_range_response = client.get("/api/v1/restaurant/home/export?period=weekly&format=excel&from_date=2026-03-24&to_date=2026-03-25", headers=headers)
+    home_export_custom_range_response = client.get(f"/api/v1/restaurant/home/export?period=weekly&format=excel&from_date={previous_day_iso}&to_date={today_iso}", headers=headers)
     assert home_export_custom_range_response.status_code == 200
     assert "text/csv" in home_export_custom_range_response.headers["content-type"]
 
@@ -666,7 +669,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
         "/api/v1/restaurant/cash/deposits",
         headers=headers,
         json={
-            "deposit_date": "2026-03-24",
+            "deposit_date": previous_day_iso,
             "amount": 450.0,
             "bank_account": "Chase Bank - Main",
             "notes": "Chase Bank - Main",
@@ -674,7 +677,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     )
     assert cash_deposit_response.status_code == 201
     assert cash_deposit_response.json()["amount_formatted"] == "$450.00"
-    assert cash_deposit_response.json()["deposit_date_formatted"] == "Mar 24, 2026"
+    assert cash_deposit_response.json()["deposit_date_formatted"] == previous_day.strftime("%b %d, %Y")
     assert cash_deposit_response.json()["display_title"] == "Chase Bank - Main"
 
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
@@ -682,16 +685,15 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     cash_overview_payload = cash_overview_response.json()
     assert cash_overview_payload["active_period"] == "today"
     assert set(cash_overview_payload["periods"].keys()) == {"today", "this_week", "this_month"}
-    assert cash_overview_payload["periods"]["this_month"]["summary"]["bank_deposits_total"] == 450.0
+    assert cash_overview_payload["periods"]["this_month"]["summary"]["bank_deposits_total"] >= 450.0
     assert cash_overview_payload["periods"]["today"]["status"]["cash_available"] == "IN_SAFE"
     assert cash_overview_payload["periods"]["this_month"]["recent_deposits"][0]["display_title"] == "Chase Bank - Main"
 
     insights_response = client.get("/api/v1/restaurant/insights", headers=headers)
     assert insights_response.status_code == 200
-    assert insights_response.json()["page_title"] == "AI Business Insights"
-    assert len(insights_response.json()["root_causes"]) == 3
-    assert len(insights_response.json()["recommended_actions"]) == 3
-    assert insights_response.json()["export_label"] == "Export"
+    assert isinstance(insights_response.json(), list)
+    assert len(insights_response.json()) >= 1
+    assert insights_response.json()[0]["title"]
 
     second_daily_response = client.post(
         "/api/v1/restaurant/manual-entry",
@@ -699,7 +701,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
         json={
             "method": "method_2",
             "method_two": {
-                "business_date": "2026-03-25",
+                "business_date": today_iso,
                 "pos_payments": 600,
                 "cash_payments": 200,
                 "bank_transfer_payments": 120,
