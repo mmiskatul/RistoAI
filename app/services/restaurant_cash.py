@@ -14,6 +14,8 @@ class CashLedgerSummary:
     cash_expenses_total: float
     uploaded_invoice_total: float
     bank_deposits_total: float
+    cash_deposits_total: float
+    deposits_collection_total: float
 
 
 def calculate_cash_ledger(
@@ -49,8 +51,16 @@ def calculate_cash_ledger(
         sum(float(item.get("total_amount", 0)) for item in document_items if item.get("status") == "processed" and item.get("invoice_date")),
         2,
     )
-    bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposit_items), 2)
-    cash_available = round(max(base_cash_available - cash_expenses_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
+    bank_deposits_total = round(
+        sum(float(item.get("amount", 0)) for item in deposit_items if str(item.get("type", "bank_deposit")).lower() == "bank_deposit"),
+        2,
+    )
+    cash_deposits_total = round(
+        sum(float(item.get("amount", 0)) for item in deposit_items if str(item.get("type", "bank_deposit")).lower() == "cash_deposit"),
+        2,
+    )
+    deposits_collection_total = round(bank_deposits_total + cash_deposits_total, 2)
+    cash_available = round(max(base_cash_available - cash_expenses_total - uploaded_invoice_total - deposits_collection_total, 0.0), 2)
 
     return CashLedgerSummary(
         total_collected=total_collected,
@@ -61,6 +71,8 @@ def calculate_cash_ledger(
         cash_expenses_total=cash_expenses_total,
         uploaded_invoice_total=uploaded_invoice_total,
         bank_deposits_total=bank_deposits_total,
+        cash_deposits_total=cash_deposits_total,
+        deposits_collection_total=deposits_collection_total,
     )
 
 
@@ -96,6 +108,8 @@ def build_aggregate_snapshot(
         "manual_expense_cash_total": cash.cash_expenses_total,
         "uploaded_invoice_total": cash.uploaded_invoice_total,
         "bank_deposits_total": cash.bank_deposits_total,
+        "cash_deposits_total": cash.cash_deposits_total,
+        "deposits_collection_total": cash.deposits_collection_total,
         "cash_collected_total": cash.total_collected,
         "base_cash_available": cash.base_cash_available,
         "cash_available": cash.cash_available,

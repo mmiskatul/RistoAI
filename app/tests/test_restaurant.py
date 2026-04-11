@@ -558,6 +558,7 @@ def test_restaurant_cash_deposit_update_and_delete_endpoints(client, app):
         json={
             "deposit_date": today.isoformat(),
             "amount": 100.0,
+            "type": "bank_deposit",
             "bank_account": "Main Bank",
             "notes": "Initial deposit",
         },
@@ -571,12 +572,14 @@ def test_restaurant_cash_deposit_update_and_delete_endpoints(client, app):
         json={
             "deposit_date": tomorrow.isoformat(),
             "amount": 150.0,
+            "type": "cash_deposit",
             "bank_account": "Secondary Bank",
             "notes": "Updated deposit",
         },
     )
     assert update_response.status_code == 200
     assert update_response.json()["amount"] == 150.0
+    assert update_response.json()["type"] == "cash_deposit"
     assert update_response.json()["bank_account"] == "Secondary Bank"
     assert update_response.json()["notes"] == "Updated deposit"
     assert update_response.json()["deposit_date"][:10] == tomorrow.isoformat()
@@ -660,35 +663,48 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     deposit_response = client.post(
         "/api/v1/restaurant/cash/deposits",
         headers=headers,
-        json={"deposit_date": today_iso, "amount": 125.0, "bank_account": "Chase Bank - Main", "notes": "Daily bank drop"},
+        json={"deposit_date": today_iso, "amount": 125.0, "type": "bank_deposit", "bank_account": "Chase Bank - Main", "notes": "Daily bank drop"},
     )
     assert deposit_response.status_code == 201
+    assert deposit_response.json()["type"] == "bank_deposit"
+
+    cash_deposit_response = client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={"deposit_date": today_iso, "amount": 25.0, "type": "cash_deposit", "bank_account": "Chase Bank - Main", "notes": "Daily cash deposit"},
+    )
+    assert cash_deposit_response.status_code == 201
+    assert cash_deposit_response.json()["type"] == "cash_deposit"
 
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
     assert cash_overview_response.status_code == 200
     cash_overview_payload = cash_overview_response.json()
     assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 300.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits_total"] == 125.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 145.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 150.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 120.0
 
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
     weekly_cash_cards = {item["label"]: item["amount"] for item in home_response.json()["weekly"]["cash_management"]}
     assert weekly_cash_cards["Total Cash Collected"] == 300.0
-    assert weekly_cash_cards["Cash Deposited"] == 125.0
-    assert weekly_cash_cards["Cash Available"] == 145.0
+    assert weekly_cash_cards["Cash Deposited"] == 150.0
+    assert weekly_cash_cards["Cash Available"] == 120.0
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     daily_aggregate = asyncio.run(db["restaurant_daily_records"].find_one({"business_date": today_iso}))
     assert daily_aggregate is not None
     assert daily_aggregate["bank_deposits_total"] == 125.0
+    assert daily_aggregate["cash_deposits_total"] == 25.0
+    assert daily_aggregate["deposits_collection_total"] == 150.0
     assert daily_aggregate["cash_collected_total"] == 300.0
-    assert daily_aggregate["cash_available"] == 145.0
+    assert daily_aggregate["cash_available"] == 120.0
 
     month_aggregate = asyncio.run(db["restaurant_monthly_records"].find_one({"month_key": datetime.now(UTC).date().strftime("%Y-%m")}))
     assert month_aggregate is not None
     assert month_aggregate["bank_deposits_total"] == 125.0
-    assert month_aggregate["cash_available"] == 145.0
+    assert month_aggregate["cash_deposits_total"] == 25.0
+    assert month_aggregate["deposits_collection_total"] == 150.0
+    assert month_aggregate["cash_available"] == 120.0
 
 
 def test_restaurant_cash_api_contracts_remain_stable(client, app):
@@ -734,6 +750,7 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
         json={
             "deposit_date": today_iso,
             "amount": 10.0,
+            "type": "bank_deposit",
             "bank_account": "Primary Bank",
             "notes": "Drop",
         },
@@ -743,6 +760,7 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
         "id",
         "deposit_date",
         "amount",
+        "type",
         "bank_account",
         "notes",
         "created_at",
@@ -762,7 +780,7 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
     assert set(payload.keys()) == {"active_period", "periods"}
     assert set(payload["periods"].keys()) == {"today", "this_week", "this_month"}
     assert set(payload["periods"]["today"].keys()) == {"summary", "status", "recent_deposits"}
-    assert set(payload["periods"]["today"]["summary"].keys()) == {"total_collected", "cash_available", "withdrawals_total", "bank_deposits_total"}
+    assert set(payload["periods"]["today"]["summary"].keys()) == {"total_collected", "cash_available", "withdrawals_total", "bank_deposits"}
 
 
 def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
@@ -844,12 +862,14 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
         json={
             "deposit_date": previous_day_iso,
             "amount": 450.0,
+            "type": "bank_deposit",
             "bank_account": "Chase Bank - Main",
             "notes": "Chase Bank - Main",
         },
     )
     assert cash_deposit_response.status_code == 201
     assert cash_deposit_response.json()["amount_formatted"] == "$450.00"
+    assert cash_deposit_response.json()["type"] == "bank_deposit"
     assert cash_deposit_response.json()["deposit_date_formatted"] == previous_day.strftime("%b %d, %Y")
     assert cash_deposit_response.json()["display_title"] == "Chase Bank - Main"
 
@@ -858,7 +878,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     cash_overview_payload = cash_overview_response.json()
     assert cash_overview_payload["active_period"] == "today"
     assert set(cash_overview_payload["periods"].keys()) == {"today", "this_week", "this_month"}
-    assert cash_overview_payload["periods"]["this_month"]["summary"]["bank_deposits_total"] >= 450.0
+    assert cash_overview_payload["periods"]["this_month"]["summary"]["bank_deposits"] >= 450.0
     assert cash_overview_payload["periods"]["today"]["status"]["cash_available"] == "IN_SAFE"
     assert cash_overview_payload["periods"]["this_month"]["recent_deposits"][0]["display_title"] == "Chase Bank - Main"
 

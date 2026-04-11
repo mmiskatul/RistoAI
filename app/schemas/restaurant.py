@@ -296,6 +296,7 @@ class BankAccountListResponse(BaseSchema):
 class CashDepositCreateRequest(BaseSchema):
     deposit_date: date
     amount: float = Field(ge=0)
+    type: Literal["bank_deposit", "cash_deposit"] = Field(default="bank_deposit", validation_alias=AliasChoices("type", "deposit_type"))
     bank_account: str = Field(
         min_length=2,
         max_length=80,
@@ -307,6 +308,7 @@ class CashDepositCreateRequest(BaseSchema):
 class CashDepositUpdateRequest(BaseSchema):
     deposit_date: date
     amount: float = Field(ge=0)
+    type: Literal["bank_deposit", "cash_deposit"] = Field(default="bank_deposit", validation_alias=AliasChoices("type", "deposit_type"))
     bank_account: str = Field(
         min_length=2,
         max_length=80,
@@ -319,6 +321,7 @@ class CashDepositResponse(BaseSchema):
     id: str
     deposit_date: str
     amount: float
+    type: Literal["bank_deposit", "cash_deposit"] = "bank_deposit"
     bank_account: str
     notes: str | None = None
     created_at: str
@@ -351,7 +354,7 @@ class CashPeriodSummaryResponse(BaseSchema):
     total_collected: float
     cash_available: float
     withdrawals_total: float
-    bank_deposits_total: float
+    bank_deposits: float
 
 
 class CashPeriodStatusResponse(BaseSchema):
@@ -359,6 +362,8 @@ class CashPeriodStatusResponse(BaseSchema):
     cash_available: str
     withdrawals: str
     bank_deposits: str
+    cash_deposits: str
+    deposits_collection: str
 
 
 class CashPeriodOverviewResponse(BaseSchema):
