@@ -408,12 +408,121 @@ def test_restaurant_bank_account_endpoints_create_list_and_scope(client, app):
     user_one_payload = user_one_list_response.json()
     assert user_one_payload["total_accounts"] == 2
     assert [item["bank_account"] for item in user_one_payload["items"]] == ["Chase Bank - Main", "Citi Bank - Payroll"]
+    assert [item["deposited_amount"] for item in user_one_payload["items"]] == [0.0, 0.0]
 
     user_two_list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers_user_two)
     assert user_two_list_response.status_code == 200
     user_two_payload = user_two_list_response.json()
     assert user_two_payload["total_accounts"] == 1
     assert [item["bank_account"] for item in user_two_payload["items"]] == ["City Bank - Branch"]
+    assert [item["deposited_amount"] for item in user_two_payload["items"]] == [0.0]
+
+
+def test_restaurant_bank_account_update_and_delete_endpoints(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Bank Account Editor",
+            "email": "bankeditor@example.com",
+            "password": "BankEditor123",
+            "phone": "+15550008888",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    first_create_response = client.post(
+        "/api/v1/restaurant/cash/bank-accounts",
+        headers=headers,
+        json={"bank_account": "Main Bank"},
+    )
+    second_create_response = client.post(
+        "/api/v1/restaurant/cash/bank-accounts",
+        headers=headers,
+        json={"bank_account": "Payroll Bank"},
+    )
+    assert first_create_response.status_code == 201
+    assert second_create_response.status_code == 201
+
+    account_id = first_create_response.json()["id"]
+    duplicate_update_response = client.patch(
+        f"/api/v1/restaurant/cash/bank-accounts/{account_id}",
+        headers=headers,
+        json={"bank_account": "Payroll Bank"},
+    )
+    assert duplicate_update_response.status_code == 409
+
+    update_response = client.patch(
+        f"/api/v1/restaurant/cash/bank-accounts/{account_id}",
+        headers=headers,
+        json={"bank_account": "Main Bank Updated"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["bank_account"] == "Main Bank Updated"
+    assert update_response.json()["deposited_amount"] == 0.0
+
+    delete_response = client.delete(
+        f"/api/v1/restaurant/cash/bank-accounts/{second_create_response.json()['id']}",
+        headers=headers,
+    )
+    assert delete_response.status_code == 204
+
+    list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    assert payload["total_accounts"] == 1
+    assert [item["bank_account"] for item in payload["items"]] == ["Main Bank Updated"]
+
+
+def test_restaurant_bank_account_list_includes_deposited_amount_by_bank_name(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Bank Totals User",
+            "email": "banktotals@example.com",
+            "password": "BankTotals123",
+            "phone": "+15550007777",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    create_main_response = client.post(
+        "/api/v1/restaurant/cash/bank-accounts",
+        headers=headers,
+        json={"bank_account": "Chase Bank - Main"},
+    )
+    create_payroll_response = client.post(
+        "/api/v1/restaurant/cash/bank-accounts",
+        headers=headers,
+        json={"bank_account": "Citi Bank - Payroll"},
+    )
+    assert create_main_response.status_code == 201
+    assert create_payroll_response.status_code == 201
+
+    today_iso = datetime.now(UTC).date().isoformat()
+    assert client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={"deposit_date": today_iso, "amount": 125.0, "bank_account": "Chase Bank - Main", "notes": "Main deposit"},
+    ).status_code == 201
+    assert client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={"deposit_date": today_iso, "amount": 75.0, "bank_account": "Chase Bank - Main", "notes": "Second deposit"},
+    ).status_code == 201
+    assert client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={"deposit_date": today_iso, "amount": 40.0, "bank_account": "Citi Bank - Payroll", "notes": "Payroll deposit"},
+    ).status_code == 201
+
+    list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    amounts_by_name = {item["bank_account"]: item["deposited_amount"] for item in payload["items"]}
+    assert amounts_by_name["Chase Bank - Main"] == 200.0
+    assert amounts_by_name["Citi Bank - Payroll"] == 40.0
 
 
 def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(client, app):
@@ -545,7 +654,7 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
         json={"bank_account": "Primary Bank"},
     )
     assert bank_account_response.status_code == 201
-    assert set(bank_account_response.json().keys()) == {"id", "bank_account", "created_at"}
+    assert set(bank_account_response.json().keys()) == {"id", "bank_account", "deposited_amount", "created_at"}
 
     deposit_response = client.post(
         "/api/v1/restaurant/cash/deposits",
@@ -573,6 +682,7 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
     bank_account_list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
     assert bank_account_list_response.status_code == 200
     assert set(bank_account_list_response.json().keys()) == {"total_accounts", "items"}
+    assert set(bank_account_list_response.json()["items"][0].keys()) == {"id", "bank_account", "deposited_amount", "created_at"}
 
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
     assert cash_overview_response.status_code == 200

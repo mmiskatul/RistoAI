@@ -13,6 +13,7 @@ from app.schemas.restaurant import (
     BankAccountCreateRequest,
     BankAccountListResponse,
     BankAccountResponse,
+    BankAccountUpdateRequest,
     CashDepositCreateRequest,
     CashDepositResponse,
     CashManagementSummaryResponse,
@@ -200,6 +201,16 @@ async def create_bank_account(payload: BankAccountCreateRequest, current_user: d
 @router.get('/cash/bank-accounts', response_model=BankAccountListResponse, tags=['Restaurant Cash Management'], summary='List Bank Accounts', description='Returns saved bank accounts and the total account count for dropdowns.')
 async def list_bank_accounts(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> BankAccountListResponse:
     return await service.list_bank_accounts(current_user)
+
+
+@router.patch('/cash/bank-accounts/{account_id}', response_model=BankAccountResponse, tags=['Restaurant Cash Management'], summary='Update Bank Account', description='Updates a saved bank account option for the cash deposit dropdown.')
+async def update_bank_account(account_id: str, payload: BankAccountUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> BankAccountResponse:
+    return await service.update_bank_account(current_user, account_id, payload)
+
+
+@router.delete('/cash/bank-accounts/{account_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Cash Management'], summary='Delete Bank Account', description='Deletes a saved bank account option from the cash deposit dropdown.')
+async def delete_bank_account(account_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> None:
+    await service.delete_bank_account(current_user, account_id)
 
 
 @router.get('/cash/overview', response_model=CashManagementSummaryResponse, tags=['Restaurant Cash Management'], summary='Cash Overview', description='Returns cash management summary cards and recent deposits.')

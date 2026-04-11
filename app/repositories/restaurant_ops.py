@@ -103,6 +103,12 @@ class RestaurantBankAccountRepository(ScopedRepository):
     async def find_by_normalized_name(self, *, scope_id: str, normalized_name: str) -> dict[str, Any] | None:
         return await self.get_one(self.scope_filters(scope_id, {"normalized_name": normalized_name}))
 
+    async def find_by_normalized_name_excluding_id(self, *, scope_id: str, normalized_name: str, exclude_id: str) -> dict[str, Any] | None:
+        existing = await self.get_one(self.scope_filters(scope_id, {"normalized_name": normalized_name}))
+        if existing and str(existing.get("_id")) != exclude_id:
+            return existing
+        return None
+
 
 class RestaurantDailyRecordRepository(ScopedRepository):
     collection_name = RestaurantCollections.MANUAL_ENTRIES

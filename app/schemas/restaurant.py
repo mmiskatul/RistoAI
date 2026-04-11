@@ -273,9 +273,18 @@ class BankAccountCreateRequest(BaseSchema):
     )
 
 
+class BankAccountUpdateRequest(BaseSchema):
+    bank_account: str = Field(
+        min_length=2,
+        max_length=80,
+        validation_alias=AliasChoices("bank_account", "bank account", "bank account "),
+    )
+
+
 class BankAccountResponse(BaseSchema):
     id: str
     bank_account: str
+    deposited_amount: float = 0.0
     created_at: str
 
 

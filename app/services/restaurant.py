@@ -34,6 +34,7 @@ from app.schemas.restaurant import (
     BankAccountCreateRequest,
     BankAccountListResponse,
     BankAccountResponse,
+    BankAccountUpdateRequest,
     CashDepositCreateRequest,
     CashDepositResponse,
     CashManagementItemResponse,
@@ -572,14 +573,66 @@ class RestaurantOperationsService(BaseService):
                 "created_by_user_id": str(current_user["_id"]),
             }
         )
-        return self._to_bank_account_response(document)
+        return self._to_bank_account_response(document, deposited_amount=0.0)
+
+    async def update_bank_account(self, current_user: dict, account_id: str, payload: BankAccountUpdateRequest) -> BankAccountResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        account = await self.bank_account_repository.get_scoped_by_id(account_id, scope_id)
+        normalized_name = self._normalize_bank_account_name(payload.bank_account)
+        existing = await self.bank_account_repository.find_by_normalized_name_excluding_id(
+            scope_id=scope_id,
+            normalized_name=normalized_name,
+            exclude_id=account_id,
+        )
+        if existing is not None:
+            raise ConflictException("Bank account already exists", details={"bank_account": payload.bank_account})
+
+        updated = await self.bank_account_repository.update(
+            account["_id"],
+            {
+                "bank_account": payload.bank_account,
+                "normalized_name": normalized_name,
+            },
+        )
+        deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        deposited_amount = 0.0
+        old_normalized_name = self._normalize_bank_account_name(str(account.get("bank_account", "")))
+        for item in self.serialize_list(deposits):
+            deposit_normalized_name = self._normalize_bank_account_name(str(item.get("bank_account") or item.get("deposit_type") or ""))
+            if deposit_normalized_name == old_normalized_name:
+                deposited_amount = round(deposited_amount + float(item.get("amount", 0.0)), 2)
+        return self._to_bank_account_response(updated, deposited_amount=deposited_amount)
+
+    async def delete_bank_account(self, current_user: dict, account_id: str) -> None:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        account = await self.bank_account_repository.get_scoped_by_id(account_id, scope_id)
+        await self.bank_account_repository.delete(account["_id"])
 
     async def list_bank_accounts(self, current_user: dict) -> BankAccountListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         accounts, total = await self.bank_account_repository.list_by_scope(scope_id=scope_id, page=1, page_size=100)
+        deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        deposit_totals_by_account: dict[str, float] = {}
+        for item in self.serialize_list(deposits):
+            normalized_name = self._normalize_bank_account_name(str(item.get("bank_account") or item.get("deposit_type") or ""))
+            if not normalized_name:
+                continue
+            deposit_totals_by_account[normalized_name] = round(
+                deposit_totals_by_account.get(normalized_name, 0.0) + float(item.get("amount", 0.0)),
+                2,
+            )
         return BankAccountListResponse(
             total_accounts=total,
-            items=[self._to_bank_account_response(item) for item in accounts],
+            items=[
+                self._to_bank_account_response(
+                    item,
+                    deposited_amount=deposit_totals_by_account.get(
+                        str(item.get("normalized_name") or self._normalize_bank_account_name(str(item.get("bank_account", "")))),
+                        0.0,
+                    ),
+                )
+                for item in accounts
+            ],
         )
 
     async def get_cash_management(self, current_user: dict) -> CashManagementSummaryResponse:
@@ -2458,11 +2511,12 @@ class RestaurantOperationsService(BaseService):
             created_at=serialized["created_at"],
         )
 
-    def _to_bank_account_response(self, account: dict) -> BankAccountResponse:
+    def _to_bank_account_response(self, account: dict, *, deposited_amount: float = 0.0) -> BankAccountResponse:
         serialized = self.serialize(account)
         return BankAccountResponse(
             id=serialized["id"],
             bank_account=serialized["bank_account"],
+            deposited_amount=round(float(deposited_amount), 2),
             created_at=serialized["created_at"],
         )
 
