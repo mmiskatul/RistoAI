@@ -493,6 +493,7 @@ class RestaurantOperationsService(BaseService):
                 "category": payload.category,
                 "amount": payload.amount,
                 "expense_date": datetime.combine(payload.expense_date, datetime.min.time(), tzinfo=UTC),
+                "section": payload.section,
                 "notes": payload.notes,
                 "created_by_user_id": str(current_user["_id"]),
             }
@@ -1416,18 +1417,23 @@ class RestaurantOperationsService(BaseService):
             2,
         )
         manual_expenses_total = round(sum(float(item.get("amount", 0)) for item in expenses), 2)
+        cash_expenses_total = round(
+            sum(float(item.get("amount", 0)) for item in expenses if str(item.get("section", "cash")).lower() == "cash"),
+            2,
+        )
         uploaded_invoice_total = round(
             sum(float(item.get("total_amount", 0)) for item in documents if item.get("status") == "processed" and item.get("invoice_date")),
             2,
         )
         bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposits), 2)
-        cash_available = round(max(base_cash_available - manual_expenses_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
+        cash_available = round(max(base_cash_available - cash_expenses_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
         return {
             "total_collected": total_collected,
             "cash_available": cash_available,
             "withdrawals_total": withdrawals_total,
             "bank_deposits_total": bank_deposits_total,
             "manual_expenses_total": manual_expenses_total,
+            "cash_expenses_total": cash_expenses_total,
             "uploaded_invoice_total": uploaded_invoice_total,
         }
 
@@ -1488,6 +1494,10 @@ class RestaurantOperationsService(BaseService):
             manual_entry_expenses = float(manual_record.get("total_expenses", 0)) if manual_record else 0.0
             uploaded_invoice_total = round(sum(float(item.get("total_amount", 0)) for item in uploaded_invoices), 2)
             manual_expense_total = round(sum(float(item.get("amount", 0)) for item in manual_expenses), 2)
+            manual_expense_cash_total = round(
+                sum(float(item.get("amount", 0)) for item in manual_expenses if str(item.get("section", "cash")).lower() == "cash"),
+                2,
+            )
             bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in deposits), 2)
             lunch_covers = int(manual_record.get("lunch_covers", 0)) if manual_record else 0
             dinner_covers = int(manual_record.get("dinner_covers", 0)) if manual_record else 0
@@ -1495,7 +1505,7 @@ class RestaurantOperationsService(BaseService):
             total_expenses = round(manual_entry_expenses + uploaded_invoice_total + manual_expense_total, 2)
             total_revenue = round(manual_revenue, 2)
             base_cash_available = float(manual_record.get("cash_available", 0)) if manual_record else 0.0
-            net_cash_available = round(max(base_cash_available - manual_expense_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
+            net_cash_available = round(max(base_cash_available - manual_expense_cash_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
 
             await self.record_repository.upsert_by_business_date(
                 scope_id=scope_id,
@@ -1509,6 +1519,7 @@ class RestaurantOperationsService(BaseService):
                     "uploaded_invoice_count": len(uploaded_invoices),
                     "uploaded_invoice_document_ids": [item["id"] for item in uploaded_invoices],
                     "manual_expense_total": manual_expense_total,
+                    "manual_expense_cash_total": manual_expense_cash_total,
                     "manual_expense_count": len(manual_expenses),
                     "manual_expense_ids": [item["id"] for item in manual_expenses],
                     "bank_deposits_total": bank_deposits_total,
@@ -1593,13 +1604,17 @@ class RestaurantOperationsService(BaseService):
         total_revenue = round(sum(float(item.get("total_revenue", 0)) for item in weekly_manual_records), 2)
         manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in weekly_manual_records), 2)
         manual_expense_total = round(sum(float(item.get("amount", 0)) for item in weekly_expenses), 2)
+        manual_expense_cash_total = round(
+            sum(float(item.get("amount", 0)) for item in weekly_expenses if str(item.get("section", "cash")).lower() == "cash"),
+            2,
+        )
         uploaded_invoice_total = round(sum(float(item.get("total_amount", 0)) for item in weekly_invoices), 2)
         bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in weekly_deposits), 2)
         total_expenses = round(manual_entry_expenses + manual_expense_total + uploaded_invoice_total, 2)
         total_covers = int(sum(int(item.get("lunch_covers", 0)) + int(item.get("dinner_covers", 0)) for item in weekly_manual_records))
         cash_collected_total = round(sum(float(item.get("cash_collected_total", 0)) for item in weekly_manual_records), 2)
         base_cash_available = round(sum(float(item.get("cash_available", 0)) for item in weekly_manual_records), 2)
-        net_cash_available = round(max(base_cash_available - manual_expense_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
+        net_cash_available = round(max(base_cash_available - manual_expense_cash_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
         await self.weekly_record_repository.upsert_by_week_start_date(
             scope_id=scope_id,
             week_start_date=week_start,
@@ -1615,6 +1630,7 @@ class RestaurantOperationsService(BaseService):
                 "total_revenue": total_revenue,
                 "manual_entry_expenses": manual_entry_expenses,
                 "manual_expense_total": manual_expense_total,
+                "manual_expense_cash_total": manual_expense_cash_total,
                 "uploaded_invoice_total": uploaded_invoice_total,
                 "bank_deposits_total": bank_deposits_total,
                 "total_expenses": total_expenses,
@@ -1671,13 +1687,17 @@ class RestaurantOperationsService(BaseService):
         total_revenue = round(sum(float(item.get("total_revenue", 0)) for item in monthly_manual_records), 2)
         manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in monthly_manual_records), 2)
         manual_expense_total = round(sum(float(item.get("amount", 0)) for item in monthly_expenses), 2)
+        manual_expense_cash_total = round(
+            sum(float(item.get("amount", 0)) for item in monthly_expenses if str(item.get("section", "cash")).lower() == "cash"),
+            2,
+        )
         uploaded_invoice_total = round(sum(float(item.get("total_amount", 0)) for item in monthly_invoices), 2)
         bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in monthly_deposits), 2)
         total_expenses = round(manual_entry_expenses + manual_expense_total + uploaded_invoice_total, 2)
         total_covers = int(sum(int(item.get("lunch_covers", 0)) + int(item.get("dinner_covers", 0)) for item in monthly_manual_records))
         cash_collected_total = round(sum(float(item.get("cash_collected_total", 0)) for item in monthly_manual_records), 2)
         base_cash_available = round(sum(float(item.get("cash_available", 0)) for item in monthly_manual_records), 2)
-        net_cash_available = round(max(base_cash_available - manual_expense_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
+        net_cash_available = round(max(base_cash_available - manual_expense_cash_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
         await self.monthly_record_repository.upsert_by_month_key(
             scope_id=scope_id,
             month_key=month_key,
@@ -1694,6 +1714,7 @@ class RestaurantOperationsService(BaseService):
                 "total_revenue": total_revenue,
                 "manual_entry_expenses": manual_entry_expenses,
                 "manual_expense_total": manual_expense_total,
+                "manual_expense_cash_total": manual_expense_cash_total,
                 "uploaded_invoice_total": uploaded_invoice_total,
                 "bank_deposits_total": bank_deposits_total,
                 "total_expenses": total_expenses,
