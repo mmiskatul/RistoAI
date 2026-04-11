@@ -1628,20 +1628,12 @@ class RestaurantOperationsService(BaseService):
             if existing:
                 await self.monthly_record_repository.delete(existing["_id"])
             return
-        total_revenue = round(sum(float(item.get("total_revenue", 0)) for item in monthly_manual_records), 2)
-        manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in monthly_manual_records), 2)
-        manual_expense_total = round(sum(float(item.get("amount", 0)) for item in monthly_expenses), 2)
-        manual_expense_cash_total = round(
-            sum(float(item.get("amount", 0)) for item in monthly_expenses if str(item.get("section", "cash")).lower() == "cash"),
-            2,
+        snapshot = build_aggregate_snapshot(
+            manual_records=monthly_manual_records,
+            manual_expenses=monthly_expenses,
+            uploaded_invoices=monthly_invoices,
+            deposits=monthly_deposits,
         )
-        uploaded_invoice_total = round(sum(float(item.get("total_amount", 0)) for item in monthly_invoices), 2)
-        bank_deposits_total = round(sum(float(item.get("amount", 0)) for item in monthly_deposits), 2)
-        total_expenses = round(manual_entry_expenses + manual_expense_total + uploaded_invoice_total, 2)
-        total_covers = int(sum(int(item.get("lunch_covers", 0)) + int(item.get("dinner_covers", 0)) for item in monthly_manual_records))
-        cash_collected_total = round(sum(float(item.get("cash_collected_total", 0)) for item in monthly_manual_records), 2)
-        base_cash_available = round(sum(float(item.get("cash_available", 0)) for item in monthly_manual_records), 2)
-        net_cash_available = round(max(base_cash_available - manual_expense_cash_total - uploaded_invoice_total - bank_deposits_total, 0.0), 2)
         await self.monthly_record_repository.upsert_by_month_key(
             scope_id=scope_id,
             month_key=month_key,
@@ -1652,19 +1644,20 @@ class RestaurantOperationsService(BaseService):
                 "manual_expense_ids": [item["id"] for item in monthly_expenses],
                 "uploaded_invoice_document_ids": [item["id"] for item in monthly_invoices],
                 "bank_deposit_ids": [item["id"] for item in monthly_deposits],
-                "cash_collected_total": cash_collected_total,
-                "base_cash_available": base_cash_available,
-                "cash_available": net_cash_available,
-                "total_revenue": total_revenue,
-                "manual_entry_expenses": manual_entry_expenses,
-                "manual_expense_total": manual_expense_total,
-                "manual_expense_cash_total": manual_expense_cash_total,
-                "uploaded_invoice_total": uploaded_invoice_total,
-                "bank_deposits_total": bank_deposits_total,
-                "total_expenses": total_expenses,
-                "profit": round(total_revenue - total_expenses, 2),
-                "total_covers": total_covers,
-                "avg_revenue_per_cover": round(total_revenue / max(total_covers, 1), 2) if total_revenue else 0.0,
+                "cash_collected_total": snapshot["cash_collected_total"],
+                "base_cash_available": snapshot["base_cash_available"],
+                "cash_available": snapshot["cash_available"],
+                "withdrawals_total": snapshot["withdrawals_total"],
+                "total_revenue": snapshot["total_revenue"],
+                "manual_entry_expenses": snapshot["manual_entry_expenses"],
+                "manual_expense_total": snapshot["manual_expense_total"],
+                "manual_expense_cash_total": snapshot["manual_expense_cash_total"],
+                "uploaded_invoice_total": snapshot["uploaded_invoice_total"],
+                "bank_deposits_total": snapshot["bank_deposits_total"],
+                "total_expenses": snapshot["total_expenses"],
+                "profit": snapshot["profit"],
+                "total_covers": snapshot["total_covers"],
+                "avg_revenue_per_cover": snapshot["avg_revenue_per_cover"],
                 "invoice_count": len(monthly_invoices),
                 "manual_entry_count": len(monthly_manual_records),
                 "manual_expense_count": len(monthly_expenses),

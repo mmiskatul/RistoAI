@@ -521,6 +521,79 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     assert month_aggregate["cash_available"] == 145.0
 
 
+def test_restaurant_cash_api_contracts_remain_stable(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Contract Owner",
+            "email": "contract-owner@example.com",
+            "password": "ContractOwner123",
+            "phone": "+1555000301",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+
+    expense_response = client.post(
+        "/api/v1/restaurant/expenses",
+        headers=headers,
+        json={
+            "category": "Utilities",
+            "amount": 40.0,
+            "expense_date": today_iso,
+            "section": "bank",
+            "notes": "Electricity",
+        },
+    )
+    assert expense_response.status_code == 201
+    assert set(expense_response.json().keys()) == {"id", "category", "amount", "expense_date", "section", "notes", "created_at"}
+
+    bank_account_response = client.post(
+        "/api/v1/restaurant/cash/bank-accounts",
+        headers=headers,
+        json={"bank_account": "Primary Bank"},
+    )
+    assert bank_account_response.status_code == 201
+    assert set(bank_account_response.json().keys()) == {"id", "bank_account", "created_at"}
+
+    deposit_response = client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={
+            "deposit_date": today_iso,
+            "amount": 10.0,
+            "bank_account": "Primary Bank",
+            "notes": "Drop",
+        },
+    )
+    assert deposit_response.status_code == 201
+    assert set(deposit_response.json().keys()) == {
+        "id",
+        "deposit_date",
+        "amount",
+        "bank_account",
+        "notes",
+        "created_at",
+        "amount_formatted",
+        "deposit_date_formatted",
+        "display_title",
+    }
+
+    bank_account_list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
+    assert bank_account_list_response.status_code == 200
+    assert set(bank_account_list_response.json().keys()) == {"total_accounts", "items"}
+
+    cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
+    assert cash_overview_response.status_code == 200
+    payload = cash_overview_response.json()
+    assert set(payload.keys()) == {"active_period", "periods"}
+    assert set(payload["periods"].keys()) == {"today", "this_week", "this_month"}
+    assert set(payload["periods"]["today"].keys()) == {"summary", "status", "recent_deposits"}
+    assert set(payload["periods"]["today"]["summary"].keys()) == {"total_collected", "cash_available", "withdrawals_total", "bank_deposits_total"}
+
+
 def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(
