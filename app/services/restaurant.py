@@ -867,7 +867,7 @@ class RestaurantOperationsService(BaseService):
             "created_at": datetime.now(UTC).isoformat(),
             "data_sources": [],
         }
-        return self._to_daily_data_detail(bucket, invoices=filtered_documents, anchor_date=business_date, active_view="date", reference_date=business_date, period_start=business_date, period_end=business_date)
+        return self._to_daily_data_detail(bucket, invoices=filtered_documents, anchor_date=business_date, reference_date=business_date, period_start=business_date, period_end=business_date)
 
     async def get_daily_data_by_week_detail(self, current_user: dict, *, reference_date: date | None = None) -> DailyDataDetailResponse | DailyDataCollectionResponse:
         if reference_date is None:
@@ -893,14 +893,13 @@ class RestaurantOperationsService(BaseService):
                 bucket,
                 invoices=[item for item in serialized_documents if item.get("status") == "processed" and item.get("invoice_date") == bucket["business_date"]],
                 anchor_date=datetime.fromisoformat(bucket["business_date"]).date(),
-                active_view="date",
                 reference_date=datetime.fromisoformat(bucket["business_date"]).date(),
                 period_start=datetime.fromisoformat(bucket["business_date"]).date(),
                 period_end=datetime.fromisoformat(bucket["business_date"]).date(),
             )
             for bucket in buckets
         ]
-        return DailyDataCollectionResponse(active_view="date", total=len(items), items=items)
+        return DailyDataCollectionResponse(total=len(items), items=items)
 
     async def get_all_daily_data_by_period(self, current_user: dict, *, view: str) -> DailyDataCollectionResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -929,7 +928,7 @@ class RestaurantOperationsService(BaseService):
         items: list[DailyDataDetailResponse] = []
         for anchor_date in sorted(anchors.values(), reverse=True):
             items.append(await self._get_daily_data_period_detail(current_user, view=view, reference_date=anchor_date))
-        return DailyDataCollectionResponse(active_view=view, total=len(items), items=items)
+        return DailyDataCollectionResponse(total=len(items), items=items)
 
     async def _get_daily_data_period_detail(self, current_user: dict, *, view: str, reference_date: date) -> DailyDataDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -978,7 +977,6 @@ class RestaurantOperationsService(BaseService):
             aggregate_bucket,
             invoices=filtered_documents,
             anchor_date=reference_date,
-            active_view=view,
             reference_date=reference_date,
             period_start=start_date,
             period_end=end_date,
@@ -2529,7 +2527,6 @@ class RestaurantOperationsService(BaseService):
         *,
         invoices: list[dict[str, Any]],
         anchor_date: date | None = None,
-        active_view: str = "date",
         reference_date: date | None = None,
         period_start: date | None = None,
         period_end: date | None = None,

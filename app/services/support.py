@@ -79,24 +79,6 @@ class SupportService(BaseService):
         end = min(query.page * query.page_size, total) if total else 0
         active_filter = str(query.status) if query.status else 'open'
         return SupportTicketManagementResponse(
-            filter_chips=[
-                SupportManagementFilterChipResponse(key='open', label='Open', is_active=active_filter == 'open'),
-                SupportManagementFilterChipResponse(key='resolved', label='Resolved', is_active=active_filter == 'resolved'),
-                SupportManagementFilterChipResponse(key='all', label='All Tickets', is_active=active_filter == 'all'),
-            ],
-            summary_cards=[
-                SupportManagementSummaryCardResponse(key='active_tickets', label='Active Tickets', value=summary.open_tickets, value_formatted=str(summary.open_tickets), subtitle='Active tickets', icon_key='support_open'),
-                SupportManagementSummaryCardResponse(key='tickets_resolved', label='Tickets Resolved', value=summary.resolved_tickets, value_formatted=str(summary.resolved_tickets), subtitle='Tickets resolved', icon_key='support_resolved'),
-            ],
-            table_columns=[
-                SupportManagementTableColumnResponse(key='user_name', label='User Name'),
-                SupportManagementTableColumnResponse(key='restaurant', label='Restaurant'),
-                SupportManagementTableColumnResponse(key='issue_subject', label='Issue/Subject'),
-                SupportManagementTableColumnResponse(key='status', label='Status'),
-                SupportManagementTableColumnResponse(key='date', label='Date'),
-                SupportManagementTableColumnResponse(key='actions', label='Actions'),
-            ],
-            pagination_label=f"Showing {start}-{end} of {total} tickets" if total else 'Showing 0-0 of 0 tickets',
             summary=summary,
             items=[self._to_ticket_list_item(ticket) for ticket in tickets],
             **pagination,
@@ -157,15 +139,6 @@ class SupportService(BaseService):
             status=serialized['status'],
             priority=serialized['priority'],
             date=serialized['created_at'],
-            user_restaurant_label=serialized['user_name'],
-            issue_subject_label=serialized['subject'],
-            status_label=str(serialized['status']).capitalize(),
-            status_variant=self._status_variant(serialized['status']),
-            priority_label=str(serialized['priority']).capitalize(),
-            date_formatted=self._format_date(serialized['created_at']),
-            view_endpoint=f"/api/v1/support/tickets/{serialized['id']}",
-            action_button_label='View Ticket',
-            actions_menu=self._build_row_actions(serialized['id'], serialized['status']),
         )
 
     def _to_ticket_detail(self, ticket: dict) -> SupportTicketDetailResponse:
@@ -190,10 +163,6 @@ class SupportService(BaseService):
             priority=serialized['priority'],
             submitted_at=serialized['created_at'],
             resolved_at=serialized.get('resolved_at'),
-            breadcrumb_label='Tickets',
-            breadcrumb_current=f"Ticket {serialized['ticket_number']}",
-            submitted_label='Submitted',
-            submitted_meta=f"{self._relative_time(serialized['created_at'])} by {serialized['user_name']}",
             badges=[
                 SupportTicketDetailBadgeResponse(label=f"{str(serialized['priority']).capitalize()} Priority", variant=self._priority_variant(serialized['priority'])),
                 SupportTicketDetailBadgeResponse(label=str(serialized['status']).capitalize(), variant=self._status_variant(serialized['status'])),
@@ -204,26 +173,9 @@ class SupportService(BaseService):
                 phone=serialized.get('phone'),
                 location=serialized.get('location'),
                 restaurant_name=serialized.get('restaurant_name'),
-                subtitle='Customer since Jan 2023',
             ),
             messages=messages,
-            composer=SupportTicketReplyComposerResponse(
-                placeholder=f"Type your response to {serialized['user_name']}...",
-                reply_endpoint=f"/api/v1/support/tickets/{serialized['id']}/reply",
-                resolve_endpoint=f"/api/v1/support/tickets/{serialized['id']}/resolve",
-            ),
         )
-
-    @staticmethod
-    def _format_date(value: str) -> str:
-        return datetime.fromisoformat(value.replace('Z', '+00:00')).strftime('%b %d, %Y')
-
-    @staticmethod
-    def _build_row_actions(ticket_id: str, status: str) -> list[SupportManagementRowActionResponse]:
-        actions = [SupportManagementRowActionResponse(key='view', label='View Ticket', method='GET', endpoint=f'/api/v1/support/tickets/{ticket_id}', variant='outline')]
-        if status != SupportTicketStatus.RESOLVED:
-            actions.append(SupportManagementRowActionResponse(key='resolve', label='Resolve Ticket', method='POST', endpoint=f'/api/v1/support/tickets/{ticket_id}/resolve', variant='ghost'))
-        return actions
 
     @staticmethod
     def _status_variant(status: str) -> str:

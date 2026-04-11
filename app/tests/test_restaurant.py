@@ -155,23 +155,23 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
 
     month_business_date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-month-business-date?business_date={today_iso}", headers=headers)
     assert month_business_date_detail_response.status_code == 200
-    assert month_business_date_detail_response.json()["active_view"] == "month"
+    assert month_business_date_detail_response.json()["business_date"] == today_iso
     assert month_business_date_detail_response.json()["invoice_count"] == 1
 
     all_dates_response = client.get("/api/v1/restaurant/daily-data/by-date", headers=headers)
     assert all_dates_response.status_code == 200
-    assert all_dates_response.json()["active_view"] == "date"
     assert all_dates_response.json()["total"] >= 1
+    assert all_dates_response.json()["items"][0]["business_date"]
 
     all_weeks_response = client.get("/api/v1/restaurant/daily-data/by-week", headers=headers)
     assert all_weeks_response.status_code == 200
-    assert all_weeks_response.json()["active_view"] == "week"
     assert all_weeks_response.json()["total"] >= 1
+    assert all_weeks_response.json()["items"][0]["business_date"]
 
     all_months_response = client.get("/api/v1/restaurant/daily-data/by-month", headers=headers)
     assert all_months_response.status_code == 200
-    assert all_months_response.json()["active_view"] == "month"
     assert all_months_response.json()["total"] >= 1
+    assert all_months_response.json()["items"][0]["business_date"]
 
     manual_entry_response = client.post(
         "/api/v1/restaurant/manual-entry",
@@ -202,8 +202,9 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
 
     month_data_response = client.get(f"/api/v1/restaurant/daily-data?view=month&reference_date={today_iso}", headers=headers)
     assert month_data_response.status_code == 200
-    assert month_data_response.json()["summary_cards"][1]["label"] == "This Month Expenses"
-    assert month_data_response.json()["summary_cards"][1]["value"] == 425.0
+    month_data_payload = month_data_response.json()
+    assert month_data_payload["total"] >= 1
+    assert month_data_payload["items"][0]["total_expenses"] == 425.0
 
     analytics_response = client.get("/api/v1/restaurant/analytics/overview?period=weekly", headers=headers)
     assert analytics_response.status_code == 200

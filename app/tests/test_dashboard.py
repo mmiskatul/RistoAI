@@ -202,45 +202,6 @@ def test_dashboard_overview_returns_all_aggregated_data_for_admin():
         {'role': 'manager', 'label': 'Managers', 'value': 1},
         {'role': 'staff', 'label': 'Staff', 'value': 1},
     ]
-    assert payload['page_title'] == 'Admin Dashboard'
-    assert payload['page_subtitle'] == 'Platform Overview'
-    assert payload['brand_name'] == 'Risto AI'
-    assert payload['header']['title'] == 'Admin Dashboard'
-    assert payload['header']['subtitle'] == 'Platform Overview'
-    assert payload['header']['notification_count'] == 1
-    assert payload['header']['profile']['full_name'] == 'Admin User'
-    assert payload['sidebar_items'][0] == {
-        'key': 'dashboard',
-        'label': 'Dashboard',
-        'icon_key': 'dashboard',
-        'endpoint': '/api/v1/dashboard/overview',
-        'active': True,
-    }
-    assert payload['sidebar_footer_action'] == {
-        'label': 'Logout',
-        'icon_key': 'logout',
-        'endpoint': '/api/v1/auth/admin/login',
-    }
-    assert payload['top_cards'][0]['label'] == 'Total Users'
-    assert payload['top_cards'][0]['value_formatted'] == '4'
-    assert payload['top_cards'][1]['label'] == 'Active Subscriptions'
-    assert payload['top_cards'][1]['value'] == 1
-    assert payload['top_cards'][2]['label'] == 'Monthly Revenue'
-    assert payload['top_cards'][2]['value_formatted'] == '$29.00'
-    assert payload['top_cards'][3]['label'] == 'Trial Users'
-    assert payload['top_cards'][3]['value'] == 1
-    assert payload['revenue_growth']['title'] == 'Revenue Growth'
-    assert payload['revenue_growth']['selected_year'] == 2026
-    assert payload['revenue_growth']['y_axis_label'] == 'Revenue'
-    assert payload['revenue_growth']['points'][0] == {'month': 1, 'label': 'JAN', 'value': 29.0}
-    assert payload['user_growth']['title'] == 'User Growth'
-    assert payload['user_growth']['center_value_label'] == 'TOTAL'
-    assert payload['user_growth']['total_value'] == 2
-    assert payload['user_growth']['total_value_formatted'] == '2'
-    assert payload['user_growth']['slices'][0]['label'] == 'Active Subscriptions'
-    assert payload['user_growth']['slices'][0]['percentage'] == 50.0
-    assert payload['user_growth']['slices'][1]['label'] == 'Trial Users'
-    assert payload['user_growth']['slices'][1]['percentage'] == 50.0
 
 
 

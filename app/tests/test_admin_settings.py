@@ -61,11 +61,8 @@ def test_admin_settings_overview_and_legal_editor_are_connected():
 
     assert overview_response.status_code == 200
     overview = overview_response.json()
-    assert overview['page_title'] == 'Settings'
-    assert overview['page_subtitle'] == 'Manage platform configuration and legal information.'
     assert overview['platform_name'] == 'Risto AI'
     assert overview['support_email'] == 'support@risto-ai.com'
-    assert overview['legal_pages_title'] == 'Legal Pages'
     assert overview['legal_pages'][0]['title'] == 'Terms & Conditions'
     assert overview['legal_pages'][0]['edit_endpoint'] == '/api/v1/settings/legal-content?tab=terms'
     assert overview['legal_pages'][1]['title'] == 'Privacy Policy'
@@ -73,7 +70,6 @@ def test_admin_settings_overview_and_legal_editor_are_connected():
 
     assert editor_response.status_code == 200
     editor = editor_response.json()
-    assert editor['page_title'] == 'Legal Content Editor'
     assert editor['active_tab'] == 'terms'
     assert editor['tabs'][0] == {'key': 'terms', 'label': 'Terms of Service', 'active': True}
     assert editor['tabs'][1] == {'key': 'privacy', 'label': 'Privacy Policy', 'active': False}

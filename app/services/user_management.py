@@ -53,51 +53,7 @@ class UserManagementService(BaseService):
         )
 
         return UserManagementListResponse(
-            filter_chips=[
-                UserManagementFilterChipResponse(key="search", label="Search"),
-                UserManagementFilterChipResponse(key="status", label="Status"),
-                UserManagementFilterChipResponse(key="plan", label="Plan"),
-            ],
-            summary_cards=[
-                UserManagementSummaryCardResponse(
-                    key="total_users",
-                    label="Total Users",
-                    value=summary.total_users,
-                    value_formatted=f"{summary.total_users:,}",
-                    change_percent=12.0,
-                    change_label="~12%",
-                    trend="up",
-                ),
-                UserManagementSummaryCardResponse(
-                    key="active_users",
-                    label="Active Users",
-                    value=summary.active_users,
-                    value_formatted=f"{summary.active_users:,}",
-                    change_percent=8.4,
-                    change_label="~8.4%",
-                    trend="up",
-                ),
-                UserManagementSummaryCardResponse(
-                    key="suspended_users",
-                    label="Suspended Users",
-                    value=summary.suspended_users,
-                    value_formatted=f"{summary.suspended_users:,}",
-                    change_percent=-2.0,
-                    change_label="~2%",
-                    trend="down",
-                ),
-            ],
-            table_columns=[
-                UserManagementTableColumnResponse(key="user_name", label="User Name"),
-                UserManagementTableColumnResponse(key="restaurant", label="Restaurant"),
-                UserManagementTableColumnResponse(key="location", label="Location"),
-                UserManagementTableColumnResponse(key="plan", label="Plan"),
-                UserManagementTableColumnResponse(key="status", label="Status"),
-                UserManagementTableColumnResponse(key="join_date", label="Join Date"),
-                UserManagementTableColumnResponse(key="actions", label="Actions"),
-            ],
             summary=summary,
-            pagination_label=f"Showing 1 to {len(items)} of {total:,} users" if total else "No users found",
             items=items,
             **pagination,
         )
@@ -165,7 +121,6 @@ class UserManagementService(BaseService):
         serialized_user = self.serialize(user)
         status = self._resolve_status(serialized_user)
         subscription_plan = serialized_user.get("subscription_plan")
-        plan_label = self._plan_label(subscription_plan)
         return UserManagementListItemResponse(
             id=serialized_user["id"],
             full_name=serialized_user["full_name"],
@@ -185,15 +140,6 @@ class UserManagementService(BaseService):
             join_date=serialized_user["created_at"][:10],
             created_at=serialized_user["created_at"],
             updated_at=serialized_user["updated_at"],
-            user_name=serialized_user["full_name"],
-            restaurant=serialized_user.get("restaurant_name"),
-            status_label=status.upper(),
-            status_color=self._status_color(status),
-            plan_label=plan_label,
-            join_date_formatted=self._format_join_date(serialized_user["created_at"]),
-            view_endpoint=f"/api/v1/users/{serialized_user['id']}",
-            edit_endpoint=f"/api/v1/users/{serialized_user['id']}",
-            actions_menu=self._build_actions_menu(serialized_user["id"], status=status),
         )
 
     @staticmethod
@@ -205,38 +151,6 @@ class UserManagementService(BaseService):
         if user.get("email_verified", False):
             return "active"
         return "pending"
-
-    @staticmethod
-    def _status_color(status: str) -> str:
-        return {
-            "active": "green",
-            "trial": "orange",
-            "suspended": "red",
-            "expired": "gray",
-            "pending": "blue",
-        }.get(status, "gray")
-
-    @staticmethod
-    def _plan_label(plan: str | None) -> str | None:
-        if plan == SubscriptionPlan.ONE_YEAR:
-            return "1 YEAR"
-        if plan == SubscriptionPlan.ONE_MONTH:
-            return "1 MONTH"
-        return None
-
-    @staticmethod
-    def _format_join_date(created_at: str) -> str:
-        return datetime.fromisoformat(created_at.replace("Z", "+00:00")).strftime("%b %d, %Y")
-
-    @staticmethod
-    def _build_actions_menu(user_id: str, *, status: str) -> list[UserManagementRowActionResponse]:
-        actions = [
-            UserManagementRowActionResponse(key="suspend", label="Suspend Account", method="POST", endpoint=f"/api/v1/users/{user_id}/suspend"),
-            UserManagementRowActionResponse(key="delete", label="Delete User", method="DELETE", endpoint=f"/api/v1/users/{user_id}"),
-        ]
-        if status == "suspended":
-            actions.insert(0, UserManagementRowActionResponse(key="activate", label="Activate Account", method="POST", endpoint=f"/api/v1/users/{user_id}/activate"))
-        return actions
 
     @staticmethod
     def _prevent_self_deactivation(*, actor_user: dict, target_user: dict) -> None:

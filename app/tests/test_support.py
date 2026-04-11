@@ -150,66 +150,24 @@ def test_restaurant_can_create_support_ticket_and_admin_can_manage_it():
 
     assert management_response.status_code == 200
     management_payload = management_response.json()
-    assert management_payload['page_title'] == 'Support'
-    assert management_payload['page_subtitle'] == 'Manage support requests from users.'
-    assert management_payload['search_placeholder'] == 'Search support requests...'
-    assert management_payload['filter_button_label'] == 'Filters'
-    assert management_payload['filter_chips'][0] == {'key': 'open', 'label': 'Open', 'is_active': True}
-    assert management_payload['filter_chips'][1] == {'key': 'resolved', 'label': 'Resolved', 'is_active': False}
-    assert management_payload['filter_chips'][2] == {'key': 'all', 'label': 'All Tickets', 'is_active': False}
     assert management_payload['summary']['open_tickets'] == 1
     assert management_payload['summary']['resolved_tickets'] == 0
-    assert management_payload['summary_cards'][0] == {
-        'key': 'active_tickets',
-        'label': 'Active Tickets',
-        'value': 1,
-        'value_formatted': '1',
-        'subtitle': 'Active tickets',
-        'icon_key': 'support_open',
-    }
-    assert management_payload['summary_cards'][1] == {
-        'key': 'tickets_resolved',
-        'label': 'Tickets Resolved',
-        'value': 0,
-        'value_formatted': '0',
-        'subtitle': 'Tickets resolved',
-        'icon_key': 'support_resolved',
-    }
-    assert management_payload['table_columns'][0] == {'key': 'user_name', 'label': 'User Name'}
-    assert management_payload['table_columns'][1] == {'key': 'restaurant', 'label': 'Restaurant'}
-    assert management_payload['table_columns'][2] == {'key': 'issue_subject', 'label': 'Issue/Subject'}
-    assert management_payload['pagination_label'] == 'Showing 1-1 of 1 tickets'
     assert management_payload['items'][0]['user_name'] == 'Alex Rivera'
-    assert management_payload['items'][0]['user_restaurant_label'] == 'Alex Rivera'
+    assert management_payload['items'][0]['restaurant_name'] is None
     assert management_payload['items'][0]['issue_subject'] == 'Order not received'
-    assert management_payload['items'][0]['issue_subject_label'] == 'Order not received'
-    assert management_payload['items'][0]['status_label'] == 'Open'
-    assert management_payload['items'][0]['status_variant'] == 'warning'
-    assert management_payload['items'][0]['priority_label'] == 'High'
-    assert management_payload['items'][0]['date_formatted'] == datetime.now(UTC).strftime('%b %d, %Y')
-    assert management_payload['items'][0]['view_endpoint'].endswith(ticket_id)
-    assert management_payload['items'][0]['action_button_label'] == 'View Ticket'
-    assert management_payload['items'][0]['actions_menu'][0]['label'] == 'View Ticket'
-    assert management_payload['items'][0]['actions_menu'][1]['label'] == 'Resolve Ticket'
+    assert management_payload['items'][0]['status'] == 'open'
+    assert management_payload['items'][0]['priority'] == 'high'
+    assert management_payload['items'][0]['ticket_number'].startswith('TKT-')
 
     assert detail_response.status_code == 200
     detail_payload = detail_response.json()
-    assert detail_payload['page_title'] == 'Support Ticket Detail'
-    assert detail_payload['breadcrumb_label'] == 'Tickets'
-    assert detail_payload['breadcrumb_current'].startswith('Ticket TKT-')
-    assert detail_payload['submitted_label'] == 'Submitted'
-    assert detail_payload['submitted_meta'].endswith('by Alex Rivera')
+    assert detail_payload['ticket_number'].startswith('TKT-')
+    assert detail_payload['subject'] == 'Order not received'
     assert detail_payload['badges'][0]['label'] == 'High Priority'
     assert detail_payload['badges'][0]['variant'] == 'warning'
     assert detail_payload['badges'][1] == {'label': 'Open', 'variant': 'warning'}
-    assert detail_payload['customer']['card_title'] == 'Customer Details'
     assert detail_payload['customer']['user_name'] == 'Alex Rivera'
-    assert detail_payload['customer']['subtitle'] == 'Customer since Jan 2023'
     assert detail_payload['messages'][0]['attachment_name'] == 'screenshot_order_status.png'
-    assert detail_payload['composer']['title'] == 'Send a Reply'
-    assert detail_payload['composer']['placeholder'] == 'Type your response to Alex Rivera...'
-    assert detail_payload['composer']['reply_endpoint'].endswith(f'/{ticket_id}/reply')
-    assert detail_payload['composer']['resolve_endpoint'].endswith(f'/{ticket_id}/resolve')
 
     assert reply_response.status_code == 200
     assert len(reply_response.json()['ticket']['messages']) == 2

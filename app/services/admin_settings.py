@@ -8,9 +8,7 @@ from app.schemas.admin_settings import (
     AdminLegalContentEditorResponse,
     AdminLegalContentUpdateRequest,
     AdminLegalTabResponse,
-    AdminLegalToolbarActionResponse,
     AdminSettingsActionResponse,
-    AdminSettingsLanguageOptionResponse,
     AdminSettingsLegalPageItemResponse,
     AdminSettingsOverviewResponse,
     AdminSettingsUpdateRequest,
@@ -30,7 +28,6 @@ class AdminSettingsService(BaseService):
             platform_name=document['platform_name'],
             support_email=document['support_email'],
             default_language=document['default_language'],
-            default_language_options=self._language_options(document['default_language']),
             legal_pages=[
                 self._legal_page_item('terms_of_service', 'Terms & Conditions', 'terms', legal_documents.get('terms_of_service', {}), 'terms'),
                 self._legal_page_item('privacy_policy', 'Privacy Policy', 'privacy', legal_documents.get('privacy_policy', {}), 'privacy'),
@@ -54,16 +51,6 @@ class AdminSettingsService(BaseService):
                 AdminLegalTabResponse(key='terms', label='Terms of Service', active=tab == 'terms'),
                 AdminLegalTabResponse(key='privacy', label='Privacy Policy', active=tab == 'privacy'),
             ],
-            toolbar_actions=[
-                AdminLegalToolbarActionResponse(key='bold', label='B'),
-                AdminLegalToolbarActionResponse(key='italic', label='I'),
-                AdminLegalToolbarActionResponse(key='underline', label='U'),
-                AdminLegalToolbarActionResponse(key='h1', label='H1'),
-                AdminLegalToolbarActionResponse(key='h2', label='H2'),
-                AdminLegalToolbarActionResponse(key='h3', label='H3'),
-                AdminLegalToolbarActionResponse(key='bullet_list', label='List'),
-                AdminLegalToolbarActionResponse(key='numbered_list', label='Numbered List'),
-            ],
             content=legal_document.get('content', ''),
             save_endpoint=f'/api/v1/settings/legal-content/{document_key}',
         )
@@ -85,13 +72,6 @@ class AdminSettingsService(BaseService):
         if tab == 'privacy':
             return 'privacy_policy'
         raise ValidationException('Unsupported legal editor tab')
-
-    @staticmethod
-    def _language_options(selected: str) -> list[AdminSettingsLanguageOptionResponse]:
-        return [
-            AdminSettingsLanguageOptionResponse(key='en-US', label='English (United States)', active=selected == 'English (United States)'),
-            AdminSettingsLanguageOptionResponse(key='it-IT', label='Italian', active=selected == 'Italian'),
-        ]
 
     @staticmethod
     def _format_legal_updated(value: str | None) -> str:
