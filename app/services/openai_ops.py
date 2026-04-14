@@ -371,15 +371,26 @@ class OpenAIOperationsService:
         file_bytes: bytes,
     ) -> dict[str, Any]:
         system_prompt = (
-            "Extract the supplier invoice into JSON with keys: supplier_name, invoice_number, "
-            "invoice_date, total_amount, currency, ai_summary, and line_items. "
+            "Classify the uploaded restaurant finance document and extract it into JSON. "
+            "Return only valid JSON with keys: "
+            "document_type, document_label, counterparty_name, supplier_name, invoice_number, "
+            "invoice_date, total_amount, currency, expense_amount, cash_amount, revenue_amount, "
+            "profit_amount, ai_summary, and line_items. "
+            "document_type must be one of expense, cash, revenue, profit, unknown. "
+            "Use expense for supplier invoices, bills, and purchase receipts. "
+            "Use cash for bank deposits, till counts, cash movement, or cash reconciliation documents. "
+            "Use revenue for sales reports, receipts, POS summaries, or turnover documents. "
+            "Use profit for P&L, income statement, margin report, or documents explicitly showing profit. "
             "Each line item must include product_name, quantity, unit_price, total_price. "
-            "Return only valid JSON."
+            "Use 0 for missing numeric fields and [] for missing line_items."
         )
         user_content: list[dict[str, Any]] = [
             {
                 "type": "input_text",
-                "text": f"Filename: {file_name}. Content type: {content_type}. Extract invoice data.",
+                "text": (
+                    f"Filename: {file_name}. Content type: {content_type}. "
+                    "Extract the document classification and any expense, cash, revenue, or profit values."
+                ),
             }
         ]
 
@@ -453,11 +464,18 @@ class OpenAIOperationsService:
     def _fallback_invoice(*, file_name: str) -> dict[str, Any]:
         stem = file_name.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").title()
         return {
+            "document_type": "expense",
+            "document_label": "Expense",
+            "counterparty_name": "Fresh Food Supplier Ltd",
             "supplier_name": "Fresh Food Supplier Ltd",
             "invoice_number": "INV-2045",
             "invoice_date": datetime(2026, 3, 10, tzinfo=UTC).date().isoformat(),
             "total_amount": 165.0,
             "currency": "EUR",
+            "expense_amount": 165.0,
+            "cash_amount": 0.0,
+            "revenue_amount": 0.0,
+            "profit_amount": 0.0,
             "ai_summary": f"Fallback extraction generated for {stem}.",
             "line_items": [
                 {"product_name": "Tomato Sauce", "quantity": 10, "unit_price": 5.0, "total_price": 50.0},

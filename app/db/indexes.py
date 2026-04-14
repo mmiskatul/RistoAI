@@ -98,13 +98,20 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         ],
     )
     await _create_indexes_safely(
-        db[RestaurantCollections.INVOICES],
+        db[CoreCollections.MIGRATIONS],
         [
-            IndexModel([("tenant_id", ASCENDING), ("invoice_date", DESCENDING)], name="idx_restaurant_invoices_tenant_invoice_date"),
-            IndexModel([("tenant_id", ASCENDING), ("created_at", DESCENDING)], name="idx_restaurant_invoices_tenant_created"),
-            IndexModel([("tenant_id", ASCENDING), ("status", ASCENDING)], name="idx_restaurant_invoices_tenant_status"),
-            IndexModel([("tenant_id", ASCENDING), ("supplier_name", ASCENDING)], name="idx_restaurant_invoices_tenant_supplier"),
-            IndexModel([("tenant_id", ASCENDING), ("invoice_number", ASCENDING)], name="idx_restaurant_invoices_tenant_number"),
+            IndexModel([("key", ASCENDING)], unique=True, name="uq_app_migrations_key"),
+            IndexModel([("completed_at", DESCENDING)], name="idx_app_migrations_completed"),
+        ],
+    )
+    await _create_indexes_safely(
+        db[RestaurantCollections.DOCUMENTS],
+        [
+            IndexModel([("tenant_id", ASCENDING), ("invoice_date", DESCENDING)], name="idx_restaurant_documents_tenant_invoice_date"),
+            IndexModel([("tenant_id", ASCENDING), ("created_at", DESCENDING)], name="idx_restaurant_documents_tenant_created"),
+            IndexModel([("tenant_id", ASCENDING), ("status", ASCENDING)], name="idx_restaurant_documents_tenant_status"),
+            IndexModel([("tenant_id", ASCENDING), ("supplier_name", ASCENDING)], name="idx_restaurant_documents_tenant_supplier"),
+            IndexModel([("tenant_id", ASCENDING), ("invoice_number", ASCENDING)], name="idx_restaurant_documents_tenant_number"),
         ],
     )
     await _create_indexes_safely(
@@ -135,24 +142,20 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         ],
     )
     await _create_indexes_safely(
-        db[RestaurantCollections.DAILY_RECORDS],
+        db[RestaurantCollections.FINANCE_SNAPSHOTS],
         [
-            IndexModel([("tenant_id", ASCENDING), ("business_date", ASCENDING)], unique=True, name="uq_restaurant_daily_records_tenant_date"),
-            IndexModel([("tenant_id", ASCENDING), ("updated_at", DESCENDING)], name="idx_restaurant_daily_records_tenant_updated"),
+            IndexModel([("tenant_id", ASCENDING), ("period_type", ASCENDING), ("period_key", ASCENDING)], unique=True, name="uq_restaurant_finance_snapshots_tenant_period"),
+            IndexModel([("tenant_id", ASCENDING), ("period_type", ASCENDING), ("period_start_date", DESCENDING)], name="idx_restaurant_finance_snapshots_tenant_period_start"),
+            IndexModel([("tenant_id", ASCENDING), ("period_type", ASCENDING), ("updated_at", DESCENDING)], name="idx_restaurant_finance_snapshots_tenant_period_updated"),
         ],
     )
     await _create_indexes_safely(
-        db[RestaurantCollections.WEEKLY_RECORDS],
+        db[RestaurantCollections.FINANCE_TRANSACTIONS],
         [
-            IndexModel([("tenant_id", ASCENDING), ("week_start_date", ASCENDING)], unique=True, name="uq_restaurant_weekly_records_tenant_week"),
-            IndexModel([("tenant_id", ASCENDING), ("updated_at", DESCENDING)], name="idx_restaurant_weekly_records_tenant_updated"),
-        ],
-    )
-    await _create_indexes_safely(
-        db[RestaurantCollections.MONTHLY_RECORDS],
-        [
-            IndexModel([("tenant_id", ASCENDING), ("month_key", ASCENDING)], unique=True, name="uq_restaurant_monthly_records_tenant_month"),
-            IndexModel([("tenant_id", ASCENDING), ("updated_at", DESCENDING)], name="idx_restaurant_monthly_records_tenant_updated"),
+            IndexModel([("tenant_id", ASCENDING), ("business_date", DESCENDING)], name="idx_restaurant_finance_transactions_tenant_date"),
+            IndexModel([("tenant_id", ASCENDING), ("transaction_type", ASCENDING), ("business_date", DESCENDING)], name="idx_restaurant_finance_transactions_tenant_type_date"),
+            IndexModel([("tenant_id", ASCENDING), ("source_kind", ASCENDING), ("source_id", ASCENDING)], name="idx_restaurant_finance_transactions_tenant_source"),
+            IndexModel([("tenant_id", ASCENDING), ("payment_channel", ASCENDING), ("business_date", DESCENDING)], name="idx_restaurant_finance_transactions_tenant_channel_date"),
         ],
     )
     await _create_indexes_safely(

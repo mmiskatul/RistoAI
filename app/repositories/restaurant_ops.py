@@ -142,7 +142,7 @@ class RestaurantDailyRecordRepository(ScopedRepository):
 
 
 class RestaurantRecordRepository(ScopedRepository):
-    collection_name = RestaurantCollections.DAILY_RECORDS
+    collection_name = RestaurantCollections.FINANCE_SNAPSHOTS
 
     async def list_by_scope(
         self,
@@ -153,50 +153,81 @@ class RestaurantRecordRepository(ScopedRepository):
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        filters = self.scope_filters(scope_id)
+        filters = self.scope_filters(scope_id, {"period_type": "day"})
         if start_date or end_date:
             date_filters: dict[str, Any] = {}
             if start_date:
                 date_filters["$gte"] = start_date.isoformat()
             if end_date:
                 date_filters["$lte"] = end_date.isoformat()
-            filters["business_date"] = date_filters
-        return await self.get_multi(filters=filters, page=page, page_size=page_size, sort=[("business_date", DESCENDING), ("updated_at", DESCENDING)])
+            filters["period_start_date"] = date_filters
+        return await self.get_multi(filters=filters, page=page, page_size=page_size, sort=[("period_start_date", DESCENDING), ("updated_at", DESCENDING)])
 
     async def find_by_business_date(self, *, scope_id: str, business_date: date) -> dict[str, Any] | None:
-        return await self.get_one(self.scope_filters(scope_id, {"business_date": business_date.isoformat()}))
+        return await self.get_one(self.scope_filters(scope_id, {"period_type": "day", "period_key": business_date.isoformat()}))
 
     async def upsert_by_business_date(self, *, scope_id: str, business_date: date, payload: dict[str, Any]) -> dict[str, Any]:
         existing = await self.find_by_business_date(scope_id=scope_id, business_date=business_date)
         if existing:
             return await self.update(existing["_id"], payload)
-        return await self.create({**payload, "tenant_id": scope_id, "business_date": business_date.isoformat()})
+        return await self.create(
+            {
+                **payload,
+                "tenant_id": scope_id,
+                "period_type": "day",
+                "period_key": business_date.isoformat(),
+                "period_start_date": business_date.isoformat(),
+                "period_end_date": business_date.isoformat(),
+                "business_date": business_date.isoformat(),
+            }
+        )
 
 
 class RestaurantWeeklyRecordRepository(ScopedRepository):
-    collection_name = RestaurantCollections.WEEKLY_RECORDS
+    collection_name = RestaurantCollections.FINANCE_SNAPSHOTS
 
     async def find_by_week_start_date(self, *, scope_id: str, week_start_date: date) -> dict[str, Any] | None:
-        return await self.get_one(self.scope_filters(scope_id, {"week_start_date": week_start_date.isoformat()}))
+        return await self.get_one(self.scope_filters(scope_id, {"period_type": "week", "period_key": week_start_date.isoformat()}))
 
     async def upsert_by_week_start_date(self, *, scope_id: str, week_start_date: date, payload: dict[str, Any]) -> dict[str, Any]:
         existing = await self.find_by_week_start_date(scope_id=scope_id, week_start_date=week_start_date)
         if existing:
             return await self.update(existing["_id"], payload)
-        return await self.create({**payload, "tenant_id": scope_id, "week_start_date": week_start_date.isoformat()})
+        week_end_date = payload.get("week_end_date", week_start_date.isoformat())
+        return await self.create(
+            {
+                **payload,
+                "tenant_id": scope_id,
+                "period_type": "week",
+                "period_key": week_start_date.isoformat(),
+                "period_start_date": week_start_date.isoformat(),
+                "period_end_date": week_end_date,
+                "week_start_date": week_start_date.isoformat(),
+            }
+        )
 
 
 class RestaurantMonthlyRecordRepository(ScopedRepository):
-    collection_name = RestaurantCollections.MONTHLY_RECORDS
+    collection_name = RestaurantCollections.FINANCE_SNAPSHOTS
 
     async def find_by_month_key(self, *, scope_id: str, month_key: str) -> dict[str, Any] | None:
-        return await self.get_one(self.scope_filters(scope_id, {"month_key": month_key}))
+        return await self.get_one(self.scope_filters(scope_id, {"period_type": "month", "period_key": month_key}))
 
     async def upsert_by_month_key(self, *, scope_id: str, month_key: str, payload: dict[str, Any]) -> dict[str, Any]:
         existing = await self.find_by_month_key(scope_id=scope_id, month_key=month_key)
         if existing:
             return await self.update(existing["_id"], payload)
-        return await self.create({**payload, "tenant_id": scope_id, "month_key": month_key})
+        return await self.create(
+            {
+                **payload,
+                "tenant_id": scope_id,
+                "period_type": "month",
+                "period_key": month_key,
+                "period_start_date": str(payload.get("month_start_date") or month_key),
+                "period_end_date": str(payload.get("month_end_date") or month_key),
+                "month_key": month_key,
+            }
+        )
 
 
 class RestaurantInventoryRepository(ScopedRepository):
@@ -247,3 +278,44 @@ class RestaurantInsightRepository(ScopedRepository):
         if not document or document.get("tenant_id") != scope_id:
             raise NotFoundException("Insight not found")
         return document
+
+
+class RestaurantFinanceTransactionRepository(ScopedRepository):
+    collection_name = RestaurantCollections.FINANCE_TRANSACTIONS
+
+    async def list_by_scope(
+        self,
+        *,
+        scope_id: str,
+        page: int = 1,
+        page_size: int = 100,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        transaction_type: str | None = None,
+        source_kind: str | None = None,
+        source_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        filters = self.scope_filters(scope_id)
+        if start_date or end_date:
+            date_filters: dict[str, Any] = {}
+            if start_date:
+                date_filters["$gte"] = start_date.isoformat()
+            if end_date:
+                date_filters["$lte"] = end_date.isoformat()
+            filters["business_date"] = date_filters
+        if transaction_type:
+            filters["transaction_type"] = transaction_type
+        if source_kind:
+            filters["source_kind"] = source_kind
+        if source_id:
+            filters["source_id"] = source_id
+        return await self.get_multi(filters=filters, page=page, page_size=page_size, sort=[("business_date", DESCENDING), ("created_at", DESCENDING)])
+
+    async def replace_for_source(self, *, scope_id: str, source_kind: str, source_id: str, transactions: list[dict[str, Any]]) -> None:
+        await self.collection.delete_many(self.scope_filters(scope_id, {"source_kind": source_kind, "source_id": source_id}))
+        if not transactions:
+            return
+        await self.collection.insert_many(transactions)
+
+    async def delete_for_source(self, *, scope_id: str, source_kind: str, source_id: str) -> None:
+        await self.collection.delete_many(self.scope_filters(scope_id, {"source_kind": source_kind, "source_id": source_id}))

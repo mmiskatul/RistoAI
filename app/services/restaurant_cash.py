@@ -10,9 +10,14 @@ class CashLedgerSummary:
     base_cash_available: float
     cash_available: float
     withdrawals_total: float
+    direct_bank_collection_total: float
+    manual_bank_deposits_total: float
     manual_expenses_total: float
     cash_expenses_total: float
-    uploaded_invoice_total: float
+    document_expense_total: float
+    document_cash_total: float
+    document_revenue_total: float
+    document_profit_total: float
     bank_deposits_total: float
     cash_deposits_total: float
     deposits_collection_total: float
@@ -21,14 +26,10 @@ class CashLedgerSummary:
 def calculate_cash_ledger(
     *,
     daily_records: Iterable[dict[str, Any]],
-    expenses: Iterable[dict[str, Any]],
-    documents: Iterable[dict[str, Any]],
-    deposits: Iterable[dict[str, Any]],
+    finance_transactions: Iterable[dict[str, Any]],
 ) -> CashLedgerSummary:
     daily_items = list(daily_records)
-    expense_items = list(expenses)
-    document_items = list(documents)
-    deposit_items = list(deposits)
+    transaction_items = list(finance_transactions)
 
     total_collected = round(
         sum(float(item.get("cash_collected_total", item.get("cash_payments", 0) + item.get("cash_in", 0))) for item in daily_items),
@@ -42,34 +43,88 @@ def calculate_cash_ledger(
         sum(float(item.get("cash_withdrawals", 0) + item.get("cash_out", 0)) for item in daily_items),
         2,
     )
-    manual_expenses_total = round(sum(float(item.get("amount", 0)) for item in expense_items), 2)
+    direct_bank_collection_total = round(
+        sum(float(item.get("pos_payments", 0)) + float(item.get("bank_transfer_payments", 0)) for item in daily_items),
+        2,
+    )
+    manual_expenses_total = round(
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("transaction_type", "")).lower() == "expense" and str(item.get("source_kind", "")).lower() == "expense"
+        ),
+        2,
+    )
     cash_expenses_total = round(
-        sum(float(item.get("amount", 0)) for item in expense_items if str(item.get("section", "cash")).lower() == "cash"),
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("transaction_type", "")).lower() == "expense"
+            and str(item.get("source_kind", "")).lower() == "expense"
+            and str(item.get("payment_channel", "cash")).lower() == "cash"
+        ),
         2,
     )
-    uploaded_invoice_total = round(
-        sum(float(item.get("total_amount", 0)) for item in document_items if item.get("status") == "processed" and item.get("invoice_date")),
+    document_expense_total = round(
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("transaction_type", "")).lower() == "expense" and str(item.get("source_kind", "")).lower() == "document"
+        ),
         2,
     )
-    bank_deposits_total = round(
-        sum(float(item.get("amount", 0)) for item in deposit_items if str(item.get("type", "bank_deposit")).lower() == "bank_deposit"),
+    document_cash_total = round(
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("transaction_type", "")).lower() == "cash_collection" and str(item.get("source_kind", "")).lower() == "document"
+        ),
+        2,
+    )
+    document_revenue_total = round(
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("transaction_type", "")).lower() == "bank_collection" and str(item.get("source_kind", "")).lower() == "document"
+        ),
+        2,
+    )
+    document_profit_total = round(
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("transaction_type", "")).lower() == "profit_adjustment"
+        ),
+        2,
+    )
+    manual_bank_deposits_total = round(
+        sum(float(item.get("amount", 0)) for item in transaction_items if str(item.get("transaction_type", "")).lower() == "bank_deposit"),
         2,
     )
     cash_deposits_total = round(
-        sum(float(item.get("amount", 0)) for item in deposit_items if str(item.get("type", "bank_deposit")).lower() == "cash_deposit"),
+        sum(float(item.get("amount", 0)) for item in transaction_items if str(item.get("transaction_type", "")).lower() == "cash_deposit"),
         2,
     )
+    bank_deposits_total = round(manual_bank_deposits_total + direct_bank_collection_total, 2)
     deposits_collection_total = round(bank_deposits_total + cash_deposits_total, 2)
-    cash_available = round(max(base_cash_available - cash_expenses_total - uploaded_invoice_total - deposits_collection_total, 0.0), 2)
+    cash_available = round(
+        max(base_cash_available + document_cash_total - cash_expenses_total - document_expense_total - manual_bank_deposits_total - cash_deposits_total, 0.0),
+        2,
+    )
 
     return CashLedgerSummary(
-        total_collected=total_collected,
+        total_collected=round(total_collected + direct_bank_collection_total + document_cash_total, 2),
         base_cash_available=base_cash_available,
         cash_available=cash_available,
         withdrawals_total=withdrawals_total,
+        direct_bank_collection_total=direct_bank_collection_total,
+        manual_bank_deposits_total=manual_bank_deposits_total,
         manual_expenses_total=manual_expenses_total,
         cash_expenses_total=cash_expenses_total,
-        uploaded_invoice_total=uploaded_invoice_total,
+        document_expense_total=document_expense_total,
+        document_cash_total=document_cash_total,
+        document_revenue_total=document_revenue_total,
+        document_profit_total=document_profit_total,
         bank_deposits_total=bank_deposits_total,
         cash_deposits_total=cash_deposits_total,
         deposits_collection_total=deposits_collection_total,
@@ -79,34 +134,35 @@ def calculate_cash_ledger(
 def build_aggregate_snapshot(
     *,
     manual_records: Iterable[dict[str, Any]],
-    manual_expenses: Iterable[dict[str, Any]],
-    uploaded_invoices: Iterable[dict[str, Any]],
-    deposits: Iterable[dict[str, Any]],
+    finance_transactions: Iterable[dict[str, Any]],
 ) -> dict[str, Any]:
     manual_record_items = list(manual_records)
-    manual_expense_items = list(manual_expenses)
-    uploaded_invoice_items = list(uploaded_invoices)
-    deposit_items = list(deposits)
+    transaction_items = list(finance_transactions)
 
     cash = calculate_cash_ledger(
         daily_records=manual_record_items,
-        expenses=manual_expense_items,
-        documents=uploaded_invoice_items,
-        deposits=deposit_items,
+        finance_transactions=transaction_items,
     )
-    total_revenue = round(sum(float(item.get("total_revenue", 0)) for item in manual_record_items), 2)
+    total_revenue = round(sum(float(item.get("total_revenue", 0)) for item in manual_record_items) + cash.document_revenue_total, 2)
     manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in manual_record_items), 2)
     lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in manual_record_items))
     dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in manual_record_items))
     total_covers = lunch_covers + dinner_covers
-    total_expenses = round(manual_entry_expenses + cash.manual_expenses_total + cash.uploaded_invoice_total, 2)
+    total_expenses = round(manual_entry_expenses + cash.manual_expenses_total + cash.document_expense_total, 2)
+    calculated_profit = round(total_revenue - total_expenses, 2)
 
     snapshot = {
         "total_revenue": total_revenue,
         "manual_entry_expenses": manual_entry_expenses,
         "manual_expense_total": cash.manual_expenses_total,
         "manual_expense_cash_total": cash.cash_expenses_total,
-        "uploaded_invoice_total": cash.uploaded_invoice_total,
+        "uploaded_document_total": cash.document_expense_total,
+        "direct_bank_collection_total": cash.direct_bank_collection_total,
+        "manual_bank_deposits_total": cash.manual_bank_deposits_total,
+        "document_expense_total": cash.document_expense_total,
+        "document_cash_total": cash.document_cash_total,
+        "document_revenue_total": cash.document_revenue_total,
+        "document_profit_total": cash.document_profit_total,
         "bank_deposits_total": cash.bank_deposits_total,
         "cash_deposits_total": cash.cash_deposits_total,
         "deposits_collection_total": cash.deposits_collection_total,
@@ -115,7 +171,7 @@ def build_aggregate_snapshot(
         "cash_available": cash.cash_available,
         "withdrawals_total": cash.withdrawals_total,
         "total_expenses": total_expenses,
-        "profit": round(total_revenue - total_expenses, 2),
+        "profit": round(calculated_profit + cash.document_profit_total, 2),
         "lunch_covers": lunch_covers,
         "dinner_covers": dinner_covers,
         "total_covers": total_covers,

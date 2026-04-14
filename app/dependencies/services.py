@@ -17,6 +17,7 @@ from app.repositories.restaurant_ops import (
     RestaurantMonthlyRecordRepository,
     RestaurantDocumentRepository,
     RestaurantExpenseRepository,
+    RestaurantFinanceTransactionRepository,
     RestaurantInsightRepository,
     RestaurantInventoryRepository,
 )
@@ -80,6 +81,7 @@ def build_restaurant_operations_service(db) -> RestaurantOperationsService:
         RestaurantRecordRepository(db),
         RestaurantWeeklyRecordRepository(db),
         RestaurantMonthlyRecordRepository(db),
+        RestaurantFinanceTransactionRepository(db),
         RestaurantInventoryRepository(db),
         RestaurantChatRepository(db),
         RestaurantInsightRepository(db),

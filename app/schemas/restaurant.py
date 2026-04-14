@@ -128,10 +128,17 @@ class DocumentUploadExtractRequest(BaseSchema):
 
 
 class DocumentExtractionResponse(BaseSchema):
-    supplier_name: str
-    invoice_number: str | None = None
-    invoice_date: str | None = None
+    document_type: Literal["expense", "cash", "revenue", "profit", "unknown"] = "unknown"
+    document_label: str
+    counterparty_name: str | None = None
+    document_number: str | None = None
+    document_date: str | None = None
     total_amount: float
+    currency: str = "EUR"
+    expense_amount: float = 0
+    cash_amount: float = 0
+    revenue_amount: float = 0
+    profit_amount: float = 0
     line_items: list[DocumentLineItemSchema]
     source_file_name: str
     ai_provider: str
@@ -140,10 +147,17 @@ class DocumentExtractionResponse(BaseSchema):
 
 class DocumentConfirmSaveResponse(BaseSchema):
     id: str
-    supplier_name: str
-    invoice_number: str | None = None
-    invoice_date: str | None = None
+    document_type: Literal["expense", "cash", "revenue", "profit", "unknown"] = "unknown"
+    document_label: str
+    counterparty_name: str | None = None
+    document_number: str | None = None
+    document_date: str | None = None
     total_amount: float
+    currency: str = "EUR"
+    expense_amount: float = 0
+    cash_amount: float = 0
+    revenue_amount: float = 0
+    profit_amount: float = 0
     line_items: list[DocumentLineItemSchema]
     source_file_name: str
     ai_provider: str
@@ -170,10 +184,18 @@ class DocumentConfirmRequest(BaseSchema):
 
 
 class DocumentSaveRequest(BaseSchema):
+    document_type: Literal["expense", "cash", "revenue", "profit", "unknown"] = "unknown"
+    document_label: str | None = Field(default=None, min_length=2, max_length=80)
+    counterparty_name: str | None = Field(default=None, min_length=2, max_length=120)
     supplier_name: str = Field(min_length=2, max_length=120)
     invoice_number: str | None = Field(default=None, min_length=2, max_length=80)
     invoice_date: date | None = None
     total_amount: float = Field(ge=0)
+    currency: str = Field(default="EUR", min_length=3, max_length=10)
+    expense_amount: float = Field(default=0, ge=0)
+    cash_amount: float = Field(default=0, ge=0)
+    revenue_amount: float = Field(default=0, ge=0)
+    profit_amount: float = 0
     line_items: list[DocumentLineItemSchema] = Field(default_factory=list)
     source_file_name: str = Field(min_length=1, max_length=255)
     ai_provider: str = Field(min_length=2, max_length=50)
@@ -187,9 +209,11 @@ class DocumentSaveRequest(BaseSchema):
 
 class DocumentListItemResponse(BaseSchema):
     id: str
-    supplier_name: str
-    invoice_number: str | None = None
-    invoice_date: str | None = None
+    document_type: Literal["expense", "cash", "revenue", "profit", "unknown"] = "unknown"
+    document_label: str | None = None
+    counterparty_name: str | None = None
+    document_number: str | None = None
+    document_date: str | None = None
     upload_date: str
     total_amount: float
     status: str
@@ -201,11 +225,18 @@ class DocumentListItemResponse(BaseSchema):
 
 class DocumentDetailResponse(BaseSchema):
     id: str
-    supplier_name: str
-    invoice_number: str | None = None
-    invoice_date: str | None = None
+    document_type: Literal["expense", "cash", "revenue", "profit", "unknown"] = "unknown"
+    document_label: str | None = None
+    counterparty_name: str | None = None
+    document_number: str | None = None
+    document_date: str | None = None
     upload_date: str
     total_amount: float
+    currency: str = "EUR"
+    expense_amount: float = 0
+    cash_amount: float = 0
+    revenue_amount: float = 0
+    profit_amount: float = 0
     status: str
     ai_provider: str
     ai_summary: str
@@ -478,7 +509,7 @@ class DailyDataListItemActionResponse(BaseSchema):
 
 
 class DailyDataEntrySourceResponse(BaseSchema):
-    kind: Literal["daily_record", "uploaded_invoice", "manual_expense"]
+    kind: Literal["daily_record", "uploaded_document", "manual_expense"]
     label: str
     count: int = 0
     total_amount: float | None = None
@@ -506,9 +537,9 @@ class DailyDataListResponse(BaseSchema):
 
 class DailyDataDocumentItemResponse(BaseSchema):
     id: str
-    supplier_name: str
-    invoice_number: str | None = None
-    invoice_date: str | None = None
+    counterparty_name: str | None = None
+    document_number: str | None = None
+    document_date: str | None = None
     total_amount: float
     status: str
     source_file_name: str
@@ -522,8 +553,8 @@ class DailyDataDetailResponse(BaseSchema):
     total_expenses: float
     total_covers: int
     avg_revenue_per_cover: float
-    invoices: list[DailyDataDocumentItemResponse] = Field(default_factory=list)
-    invoice_count: int = 0
+    documents: list[DailyDataDocumentItemResponse] = Field(default_factory=list)
+    document_count: int = 0
 
 
 class DailyDataCollectionResponse(BaseSchema):

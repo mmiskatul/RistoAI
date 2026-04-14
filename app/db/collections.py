@@ -10,14 +10,18 @@ class CoreCollections:
     SUPPORT_TICKETS = "support_tickets"
     COUPONS = "coupons"
     ADMIN_SETTINGS = "admin_settings"
+    MIGRATIONS = "app_migrations"
 
 
 class RestaurantCollections:
-    INVOICES = "restaurant_invoices"
+    DOCUMENTS = "restaurant_documents"
+    INVOICES = DOCUMENTS
     MANUAL_ENTRIES = "restaurant_manual_entries"
-    DAILY_RECORDS = "restaurant_daily_records"
-    WEEKLY_RECORDS = "restaurant_weekly_records"
-    MONTHLY_RECORDS = "restaurant_monthly_records"
+    FINANCE_SNAPSHOTS = "restaurant_finance_snapshots"
+    FINANCE_TRANSACTIONS = "restaurant_finance_transactions"
+    DAILY_RECORDS = FINANCE_SNAPSHOTS
+    WEEKLY_RECORDS = FINANCE_SNAPSHOTS
+    MONTHLY_RECORDS = FINANCE_SNAPSHOTS
     EXPENSES = "restaurant_expenses"
     CASH_DEPOSITS = "restaurant_cash_deposits"
     BANK_ACCOUNTS = "restaurant_bank_accounts"
@@ -35,11 +39,13 @@ ALL_COLLECTIONS = {
     CoreCollections.SUPPORT_TICKETS,
     CoreCollections.COUPONS,
     CoreCollections.ADMIN_SETTINGS,
+    CoreCollections.MIGRATIONS,
     RestaurantCollections.INVOICES,
     RestaurantCollections.MANUAL_ENTRIES,
     RestaurantCollections.DAILY_RECORDS,
     RestaurantCollections.WEEKLY_RECORDS,
     RestaurantCollections.MONTHLY_RECORDS,
+    RestaurantCollections.FINANCE_TRANSACTIONS,
     RestaurantCollections.EXPENSES,
     RestaurantCollections.CASH_DEPOSITS,
     RestaurantCollections.BANK_ACCOUNTS,

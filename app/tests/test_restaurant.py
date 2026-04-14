@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+from bson import ObjectId
+
+from app.db.migrations import MIGRATION_KEY, run_data_migrations
 from app.db.mongodb import get_database
 from app.tests.helpers import register_and_login, seed_subscription_plan, select_subscription_plan
 
@@ -28,19 +31,33 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert upload_response.status_code == 200
     upload_payload = upload_response.json()
     assert set(upload_payload.keys()) == {
-        "supplier_name",
-        "invoice_number",
-        "invoice_date",
+        "document_type",
+        "document_label",
+        "counterparty_name",
+        "document_number",
+        "document_date",
         "total_amount",
+        "currency",
+        "expense_amount",
+        "cash_amount",
+        "revenue_amount",
+        "profit_amount",
         "line_items",
         "source_file_name",
         "ai_provider",
         "ai_summary",
     }
-    assert upload_payload["supplier_name"] == "Fresh Food Supplier Ltd"
+    assert upload_payload["document_type"] == "expense"
+    assert upload_payload["document_label"] == "Expense"
+    assert upload_payload["counterparty_name"] == "Fresh Food Supplier Ltd"
     assert upload_payload["ai_provider"] == "fallback"
-    assert upload_payload["invoice_date"] is None
+    assert upload_payload["document_date"] == "2026-03-10"
     assert upload_payload["total_amount"] == 165.0
+    assert upload_payload["currency"] == "EUR"
+    assert upload_payload["expense_amount"] == 165.0
+    assert upload_payload["cash_amount"] == 0.0
+    assert upload_payload["revenue_amount"] == 0.0
+    assert upload_payload["profit_amount"] == 0.0
     assert len(upload_payload["line_items"]) == 3
     assert "id" not in upload_payload
 
@@ -48,9 +65,17 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
         "/api/v1/restaurant/documents/confirm-save",
         headers=headers,
         json={
+            "document_type": upload_payload["document_type"],
+            "document_label": upload_payload["document_label"],
+            "counterparty_name": upload_payload["counterparty_name"],
             "supplier_name": "Bakery Goods Co",
-            "invoice_number": upload_payload["invoice_number"],
+            "invoice_number": upload_payload["document_number"],
             "total_amount": 425.0,
+            "currency": upload_payload["currency"],
+            "expense_amount": 425.0,
+            "cash_amount": 0.0,
+            "revenue_amount": 0.0,
+            "profit_amount": 0.0,
             "line_items": [
                 {"product_name": "Sourdough Loaf", "quantity": 20, "unit_price": 5.0, "total_price": 100.0},
                 {"product_name": "Pastry Flour (25kg)", "quantity": 5, "unit_price": 45.0, "total_price": 225.0},
@@ -63,10 +88,17 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     )
     assert confirm_response.status_code == 201
     assert confirm_response.json()["status"] == "processed"
-    assert confirm_response.json()["supplier_name"] == "Bakery Goods Co"
+    assert confirm_response.json()["document_type"] == "expense"
+    assert confirm_response.json()["document_label"] == "Expense"
+    assert confirm_response.json()["counterparty_name"] == "Fresh Food Supplier Ltd"
+    assert confirm_response.json()["currency"] == "EUR"
+    assert confirm_response.json()["expense_amount"] == 425.0
+    assert confirm_response.json()["cash_amount"] == 0.0
+    assert confirm_response.json()["revenue_amount"] == 0.0
+    assert confirm_response.json()["profit_amount"] == 0.0
     assert confirm_response.json()["confirmed_by_user_id"]
     assert confirm_response.json()["confirmed_at"]
-    assert confirm_response.json()["invoice_date"] == datetime.now(UTC).date().isoformat()
+    assert confirm_response.json()["document_date"] == datetime.now(UTC).date().isoformat()
     assert "page_title" not in confirm_response.json()
     assert confirm_response.json()["status"] == "processed"
     assert confirm_response.json()["line_items"][0]["product_name"] == "Sourdough Loaf"
@@ -79,7 +111,8 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert documents_response.status_code == 200
     documents_payload = documents_response.json()
     assert set(documents_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
-    assert documents_payload["items"][0]["supplier_name"] == "Bakery Goods Co"
+    assert documents_payload["items"][0]["document_type"] == "expense"
+    assert documents_payload["items"][0]["counterparty_name"] == "Fresh Food Supplier Ltd"
     assert documents_payload["items"][0]["status"] == "processed"
     assert documents_payload["items"][0]["line_item_count"] == 3
 
@@ -87,9 +120,12 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     document_detail_response = client.get(f"/api/v1/restaurant/documents/{confirm_response.json()['id']}", headers=headers)
     assert document_detail_response.status_code == 200
     document_detail_payload = document_detail_response.json()
-    assert document_detail_payload["supplier_name"] == "Bakery Goods Co"
-    assert document_detail_payload["invoice_date"] == today_iso
+    assert document_detail_payload["document_type"] == "expense"
+    assert document_detail_payload["document_label"] == "Expense"
+    assert document_detail_payload["counterparty_name"] == "Fresh Food Supplier Ltd"
+    assert document_detail_payload["document_date"] == today_iso
     assert document_detail_payload["upload_date"]
+    assert document_detail_payload["expense_amount"] == 425.0
     assert "page_title" not in document_detail_payload
     assert "source_file_name" not in document_detail_payload
 
@@ -124,25 +160,25 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert invoice_detail_payload["total_revenue"] == 0.0
     assert invoice_detail_payload["total_expenses"] == 425.0
     assert invoice_detail_payload["total_covers"] == 0
-    assert invoice_detail_payload["invoice_count"] == 1
-    assert invoice_detail_payload["invoices"][0]["supplier_name"] == "Bakery Goods Co"
-    assert invoice_detail_payload["invoices"][0]["total_amount"] == 425.0
+    assert invoice_detail_payload["document_count"] == 1
+    assert invoice_detail_payload["documents"][0]["counterparty_name"] == "Fresh Food Supplier Ltd"
+    assert invoice_detail_payload["documents"][0]["total_amount"] == 425.0
 
     week_invoice_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-week?reference_date={today_iso}", headers=headers)
     assert week_invoice_detail_response.status_code == 200
     week_invoice_detail_payload = week_invoice_detail_response.json()
     assert week_invoice_detail_payload["business_date"] == today_iso
     assert week_invoice_detail_payload["total_expenses"] == 425.0
-    assert week_invoice_detail_payload["invoice_count"] == 1
-    assert week_invoice_detail_payload["invoices"][0]["supplier_name"] == "Bakery Goods Co"
+    assert week_invoice_detail_payload["document_count"] == 1
+    assert week_invoice_detail_payload["documents"][0]["counterparty_name"] == "Fresh Food Supplier Ltd"
 
     month_invoice_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-month?reference_date={today_iso}", headers=headers)
     assert month_invoice_detail_response.status_code == 200
     month_invoice_detail_payload = month_invoice_detail_response.json()
     assert month_invoice_detail_payload["business_date"] == today_iso
     assert month_invoice_detail_payload["total_expenses"] == 425.0
-    assert month_invoice_detail_payload["invoice_count"] == 1
-    assert month_invoice_detail_payload["invoices"][0]["supplier_name"] == "Bakery Goods Co"
+    assert month_invoice_detail_payload["document_count"] == 1
+    assert month_invoice_detail_payload["documents"][0]["counterparty_name"] == "Fresh Food Supplier Ltd"
 
     date_reference_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-date-reference?reference_date={today_iso}", headers=headers)
     assert date_reference_detail_response.status_code == 200
@@ -151,12 +187,12 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     week_business_date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-week-business-date?business_date={today_iso}", headers=headers)
     assert week_business_date_detail_response.status_code == 200
     assert week_business_date_detail_response.json()["business_date"] == today_iso
-    assert week_business_date_detail_response.json()["invoice_count"] == 1
+    assert week_business_date_detail_response.json()["document_count"] == 1
 
     month_business_date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-month-business-date?business_date={today_iso}", headers=headers)
     assert month_business_date_detail_response.status_code == 200
     assert month_business_date_detail_response.json()["business_date"] == today_iso
-    assert month_business_date_detail_response.json()["invoice_count"] == 1
+    assert month_business_date_detail_response.json()["document_count"] == 1
 
     all_dates_response = client.get("/api/v1/restaurant/daily-data/by-date", headers=headers)
     assert all_dates_response.status_code == 200
@@ -172,7 +208,6 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert all_months_response.status_code == 200
     assert all_months_response.json()["total"] >= 1
     assert all_months_response.json()["items"][0]["business_date"]
-
     manual_entry_response = client.post(
         "/api/v1/restaurant/manual-entry",
         headers=headers,
@@ -193,12 +228,29 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert manual_entry_response.status_code == 201
 
     db = asyncio.run(app.dependency_overrides[get_database]())
-    restaurant_record = asyncio.run(db["restaurant_daily_records"].find_one({"business_date": datetime.now(UTC).date().isoformat(), "uploaded_invoice_document_ids": {"$in": [confirm_response.json()["id"]]}}))
+    restaurant_record = asyncio.run(
+        db["restaurant_finance_snapshots"].find_one(
+            {
+                "period_type": "day",
+                "business_date": datetime.now(UTC).date().isoformat(),
+                "uploaded_document_ids": {"$in": [confirm_response.json()["id"]]},
+            }
+        )
+    )
     assert restaurant_record is not None
-    assert restaurant_record["uploaded_invoice_count"] == 1
+    assert restaurant_record["uploaded_document_count"] == 1
     assert restaurant_record["manual_entry_id"] is not None
     assert restaurant_record["total_revenue"] == 1100.0
     assert restaurant_record["total_expenses"] == 425.0
+    manual_entry_transactions = asyncio.run(
+        db["restaurant_finance_transactions"].find({"source_kind": "manual_entry", "source_id": restaurant_record["manual_entry_id"]}).to_list(length=None)
+    )
+    assert {item["transaction_type"] for item in manual_entry_transactions} == {"bank_collection", "cash_collection"}
+    assert sorted((item["payment_channel"], item["amount"]) for item in manual_entry_transactions) == [
+        ("bank_transfer", 100.0),
+        ("cash", 200.0),
+        ("pos", 800.0),
+    ]
 
     month_data_response = client.get(f"/api/v1/restaurant/daily-data?view=month&reference_date={today_iso}", headers=headers)
     assert month_data_response.status_code == 200
@@ -212,6 +264,214 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert "estimated_profit" not in analytics_payload
     assert len(analytics_payload["supplier_price_alerts"]) >= 1
     assert "Bakery Goods Co" in analytics_payload["supplier_price_alerts"][0]["title"] or analytics_payload["supplier_price_alerts"][0]["title"]
+
+
+def test_restaurant_data_migration_unifies_legacy_finance_collections(app):
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    tenant_id = "tenant-migration"
+    now = datetime.now(UTC)
+    daily_id = ObjectId()
+    weekly_id = ObjectId()
+    monthly_id = ObjectId()
+    document_id = ObjectId()
+
+    asyncio.run(
+        db["restaurant_invoices"].insert_one(
+            {
+                "_id": document_id,
+                "tenant_id": tenant_id,
+                "supplier_name": "Legacy Supplier",
+                "invoice_number": "INV-001",
+                "invoice_date": "2026-04-10",
+                "status": "processed",
+                "total_amount": 150.0,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    )
+    asyncio.run(
+        db["restaurant_daily_records"].insert_one(
+            {
+                "_id": daily_id,
+                "tenant_id": tenant_id,
+                "business_date": "2026-04-10",
+                "total_revenue": 500.0,
+                "total_expenses": 200.0,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    )
+    asyncio.run(
+        db["restaurant_weekly_records"].insert_one(
+            {
+                "_id": weekly_id,
+                "tenant_id": tenant_id,
+                "week_start_date": "2026-04-06",
+                "week_end_date": "2026-04-12",
+                "total_revenue": 2500.0,
+                "total_expenses": 1200.0,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    )
+    asyncio.run(
+        db["restaurant_monthly_records"].insert_one(
+            {
+                "_id": monthly_id,
+                "tenant_id": tenant_id,
+                "month_key": "2026-04",
+                "month_start_date": "2026-04-01",
+                "month_end_date": "2026-04-30",
+                "total_revenue": 9000.0,
+                "total_expenses": 4200.0,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    )
+
+    asyncio.run(run_data_migrations(db))
+    asyncio.run(run_data_migrations(db))
+
+    migrated_document = asyncio.run(db["restaurant_documents"].find_one({"_id": document_id}))
+    assert migrated_document is not None
+    assert migrated_document["counterparty_name"] == "Legacy Supplier"
+    assert migrated_document["migrated_from_collection"] == "restaurant_invoices"
+
+    daily_snapshot = asyncio.run(
+        db["restaurant_finance_snapshots"].find_one({"tenant_id": tenant_id, "period_type": "day", "period_key": "2026-04-10"})
+    )
+    assert daily_snapshot is not None
+    assert daily_snapshot["_id"] == daily_id
+    assert daily_snapshot["business_date"] == "2026-04-10"
+
+    weekly_snapshot = asyncio.run(
+        db["restaurant_finance_snapshots"].find_one({"tenant_id": tenant_id, "period_type": "week", "period_key": "2026-04-06"})
+    )
+    assert weekly_snapshot is not None
+    assert weekly_snapshot["_id"] == weekly_id
+    assert weekly_snapshot["week_end_date"] == "2026-04-12"
+
+    monthly_snapshot = asyncio.run(
+        db["restaurant_finance_snapshots"].find_one({"tenant_id": tenant_id, "period_type": "month", "period_key": "2026-04"})
+    )
+    assert monthly_snapshot is not None
+    assert monthly_snapshot["_id"] == monthly_id
+    assert monthly_snapshot["month_end_date"] == "2026-04-30"
+
+    migration_record = asyncio.run(db["app_migrations"].find_one({"key": MIGRATION_KEY}))
+    assert migration_record is not None
+    assert migration_record["summary"]["documents_migrated"] == 1
+    assert migration_record["summary"]["daily_snapshots_migrated"] == 1
+
+
+def test_manual_entry_method_one_creates_finance_transactions(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Method One Owner",
+            "email": "method-one@example.com",
+            "password": "MethodOne123",
+            "phone": "+1555000199",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+    response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_1",
+            "method_one": {
+                "business_date": today_iso,
+                "pos_payments": 300,
+                "cash_withdrawals": 40,
+                "cash_in": 250,
+                "cash_out": 20,
+                "expenses_in_cash": 35,
+                "notes": "Method 1 ledger test",
+            },
+        },
+    )
+    assert response.status_code == 201
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    record_id = response.json()["id"]
+    transactions = asyncio.run(
+        db["restaurant_finance_transactions"].find({"source_kind": "manual_entry", "source_id": record_id}).sort("transaction_type").to_list(length=None)
+    )
+    assert len(transactions) == 5
+    assert sorted((item["transaction_type"], item["payment_channel"], item["amount"]) for item in transactions) == [
+        ("bank_collection", "pos", 300.0),
+        ("cash_collection", "cash", 250.0),
+        ("expense", "cash", 35.0),
+        ("withdrawal", "cash", 20.0),
+        ("withdrawal", "cash", 40.0),
+    ]
+
+
+def test_restaurant_document_confirm_save_supports_revenue_classification(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Revenue Owner",
+            "email": "revenue@example.com",
+            "password": "RevenuePass123",
+            "phone": "+3900000002",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    business_date = datetime.now(UTC).date().isoformat()
+    confirm_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
+        headers=headers,
+        json={
+            "document_type": "revenue",
+            "document_label": "Revenue",
+            "counterparty_name": "Dining Room Sales",
+            "supplier_name": "Dining Room Sales",
+            "invoice_number": "REV-001",
+            "invoice_date": business_date,
+            "total_amount": 920.0,
+            "currency": "EUR",
+            "expense_amount": 0.0,
+            "cash_amount": 0.0,
+            "revenue_amount": 920.0,
+            "profit_amount": 0.0,
+            "line_items": [],
+            "source_file_name": "revenue-summary.pdf",
+            "ai_provider": "fallback",
+            "ai_summary": "Revenue summary uploaded.",
+        },
+    )
+    assert confirm_response.status_code == 201
+    confirm_payload = confirm_response.json()
+    assert confirm_payload["document_type"] == "revenue"
+    assert confirm_payload["revenue_amount"] == 920.0
+    assert confirm_payload["expense_amount"] == 0.0
+
+    date_data_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={business_date}", headers=headers)
+    assert date_data_response.status_code == 200
+    date_payload = date_data_response.json()
+    assert date_payload["items"][0]["business_date"] == business_date
+    assert date_payload["items"][0]["total_revenue"] == 920.0
+    assert date_payload["items"][0]["total_expenses"] == 0.0
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    restaurant_record = asyncio.run(
+        db["restaurant_finance_snapshots"].find_one({"period_type": "day", "business_date": business_date})
+    )
+    assert restaurant_record is not None
+    assert restaurant_record["total_revenue"] == 920.0
+    assert restaurant_record["total_expenses"] == 0.0
+    assert restaurant_record["profit"] == 920.0
 
 
 def test_restaurant_endpoints_are_scoped_per_user(client, app):
@@ -679,32 +939,39 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
     assert cash_overview_response.status_code == 200
     cash_overview_payload = cash_overview_response.json()
-    assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 300.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 125.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 120.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 1000.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 825.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 200.0
+    assert {item["display_title"] for item in cash_overview_payload["periods"]["today"]["recent_deposits"]} >= {"Chase Bank - Main", "POS Settlement"}
 
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
     weekly_cash_cards = {item["label"]: item["amount"] for item in home_response.json()["weekly"]["cash_management"]}
-    assert weekly_cash_cards["Total Cash Collected"] == 300.0
-    assert weekly_cash_cards["Cash Deposited"] == 150.0
-    assert weekly_cash_cards["Cash Available"] == 120.0
+    assert weekly_cash_cards["Total Cash Collected"] == 1000.0
+    assert weekly_cash_cards["Cash Deposited"] == 850.0
+    assert weekly_cash_cards["Cash Available"] == 200.0
 
     db = asyncio.run(app.dependency_overrides[get_database]())
-    daily_aggregate = asyncio.run(db["restaurant_daily_records"].find_one({"business_date": today_iso}))
+    daily_aggregate = asyncio.run(
+        db["restaurant_finance_snapshots"].find_one({"period_type": "day", "business_date": today_iso})
+    )
     assert daily_aggregate is not None
-    assert daily_aggregate["bank_deposits_total"] == 125.0
+    assert daily_aggregate["bank_deposits_total"] == 825.0
     assert daily_aggregate["cash_deposits_total"] == 25.0
-    assert daily_aggregate["deposits_collection_total"] == 150.0
-    assert daily_aggregate["cash_collected_total"] == 300.0
-    assert daily_aggregate["cash_available"] == 120.0
+    assert daily_aggregate["deposits_collection_total"] == 850.0
+    assert daily_aggregate["cash_collected_total"] == 1000.0
+    assert daily_aggregate["cash_available"] == 200.0
 
-    month_aggregate = asyncio.run(db["restaurant_monthly_records"].find_one({"month_key": datetime.now(UTC).date().strftime("%Y-%m")}))
+    month_aggregate = asyncio.run(
+        db["restaurant_finance_snapshots"].find_one(
+            {"period_type": "month", "month_key": datetime.now(UTC).date().strftime("%Y-%m")}
+        )
+    )
     assert month_aggregate is not None
-    assert month_aggregate["bank_deposits_total"] == 125.0
+    assert month_aggregate["bank_deposits_total"] == 825.0
     assert month_aggregate["cash_deposits_total"] == 25.0
-    assert month_aggregate["deposits_collection_total"] == 150.0
-    assert month_aggregate["cash_available"] == 120.0
+    assert month_aggregate["deposits_collection_total"] == 850.0
+    assert month_aggregate["cash_available"] == 200.0
 
 
 def test_restaurant_cash_api_contracts_remain_stable(client, app):
@@ -938,7 +1205,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert date_detail_payload["business_date"] == today_iso
     assert date_detail_payload["total_revenue"] == 920
     assert date_detail_payload["total_covers"] == 38
-    assert date_detail_payload["invoice_count"] == 0
+    assert date_detail_payload["document_count"] == 0
 
     week_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-week?reference_date={today_iso}", headers=headers)
     assert week_detail_response.status_code == 200
@@ -946,7 +1213,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert week_detail_payload["business_date"] == today_iso
     assert week_detail_payload["total_revenue"] == 2220
     assert week_detail_payload["total_covers"] == 143
-    assert week_detail_payload["invoice_count"] == 0
+    assert week_detail_payload["document_count"] == 0
 
     date_reference_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-date-reference?reference_date={today_iso}", headers=headers)
     assert date_reference_detail_response.status_code == 200
