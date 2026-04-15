@@ -172,6 +172,15 @@ def create_fastapi_app(*, testing: bool = False) -> FastAPI:
         logger.exception('Unhandled server error', exc_info=exc)
         return _error_response(500, 'internal_server_error', 'Unexpected server error')
 
+    @app.get('/', include_in_schema=False)
+    async def root() -> dict:
+        return {
+            'success': True,
+            'message': f'{settings.app_name} is running',
+            'version': settings.app_version,
+            'docs': '/docs',
+        }
+
     @app.get('/health', tags=['Health'])
     async def healthcheck() -> dict[str, str]:
         return {'status': 'ok', 'service': settings.app_name}
