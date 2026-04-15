@@ -135,6 +135,8 @@ async def _upsert_finance_snapshot(
     payload["period_end_date"] = period_end_date
     payload.setdefault("migrated_from_collection", legacy_collection)
     payload.setdefault("migrated_at", datetime.now(UTC))
+    if period_type != "day":
+        payload.pop("business_date", None)
 
     source_id = payload.pop("_id", None)
     update_doc = {

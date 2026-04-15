@@ -3075,7 +3075,7 @@ class RestaurantOperationsService(BaseService):
             file=file,
             prefix=f"restaurant/profile/{current_user['_id']}",
         )
-        return uploaded.key
+        return uploaded.url
 
     def _resolve_profile_image_url(self, value: str | None) -> str | None:
         if not self.image_storage_service:

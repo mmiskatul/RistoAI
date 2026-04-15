@@ -1360,6 +1360,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     updated_user = asyncio.run(db["users"].find_one({"email": "alex@example.com"}))
-    assert updated_user["profile_image_url"].startswith("restaurant/profile/")
+    assert updated_user["profile_image_url"].startswith("https://")
+    assert "/restaurant/profile/" in updated_user["profile_image_url"]
 
 

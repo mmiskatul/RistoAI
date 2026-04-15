@@ -41,8 +41,10 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     stored_profile = asyncio.run(db['onboarding_profiles'].find_one({'user_id': body['user_id']}))
-    assert stored_profile['interior_photo_url'].startswith('onboarding/')
-    assert stored_profile['exterior_photo_url'].startswith('onboarding/')
+    assert stored_profile['interior_photo_url'].startswith('https://')
+    assert '/onboarding/' in stored_profile['interior_photo_url']
+    assert stored_profile['exterior_photo_url'].startswith('https://')
+    assert '/onboarding/' in stored_profile['exterior_photo_url']
 
     get_response = client.get('/api/v1/onboarding/profile', headers=headers)
     assert get_response.status_code == 200

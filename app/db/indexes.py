@@ -8,36 +8,59 @@ from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from app.db.collections import CoreCollections, RestaurantCollections
 
 
+_INDEX_OPTION_KEYS = (
+    "unique",
+    "expireAfterSeconds",
+    "sparse",
+    "partialFilterExpression",
+    "collation",
+)
+
+
+def _index_specs_match(existing: dict, requested: dict) -> bool:
+    if list(existing.get("key", {}).items()) != list(requested.get("key", {}).items()):
+        return False
+    return all(existing.get(option_key) == requested.get(option_key) for option_key in _INDEX_OPTION_KEYS)
+
+
 async def _create_indexes_safely(collection: AsyncIOMotorCollection, indexes: list[IndexModel]) -> None:
     try:
         await collection.create_indexes(indexes)
         return
     except OperationFailure as exc:
-        if exc.code != 86:
+        if exc.code not in {85, 86}:
             raise
 
     existing_indexes = {index["name"]: index for index in await collection.list_indexes().to_list(length=None)}
-    dropped_any = False
+    indexes_to_create: list[IndexModel] = []
     for index in indexes:
-        index_name = index.document["name"]
+        requested_index = index.document
+        index_name = requested_index["name"]
         existing = existing_indexes.get(index_name)
-        if existing is None:
-            continue
-        existing_key = list(existing.get("key", {}).items())
-        requested_key = list(index.document.get("key", {}).items())
-        existing_unique = bool(existing.get("unique", False))
-        requested_unique = bool(index.document.get("unique", False))
-        existing_ttl = existing.get("expireAfterSeconds")
-        requested_ttl = index.document.get("expireAfterSeconds")
-        if existing_key != requested_key or existing_unique != requested_unique or existing_ttl != requested_ttl:
-            await collection.drop_index(index_name)
-            dropped_any = True
 
-    if dropped_any:
-        await collection.create_indexes(indexes)
+        if existing is not None:
+            if _index_specs_match(existing, requested_index):
+                continue
+            await collection.drop_index(index_name)
+            existing_indexes.pop(index_name, None)
+
+        if any(_index_specs_match(existing_index, requested_index) for existing_index in existing_indexes.values()):
+            continue
+
+        indexes_to_create.append(index)
+
+    if indexes_to_create:
+        await collection.create_indexes(indexes_to_create)
         return
 
-    raise
+    return
+
+
+async def _drop_indexes_by_name(collection: AsyncIOMotorCollection, index_names: list[str]) -> None:
+    existing_indexes = {index["name"] for index in await collection.list_indexes().to_list(length=None)}
+    for index_name in index_names:
+        if index_name in existing_indexes:
+            await collection.drop_index(index_name)
 
 
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
@@ -139,6 +162,13 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         [
             IndexModel([("tenant_id", ASCENDING), ("business_date", ASCENDING)], unique=True, name="uq_restaurant_manual_entries_tenant_date"),
             IndexModel([("tenant_id", ASCENDING), ("updated_at", DESCENDING)], name="idx_restaurant_manual_entries_tenant_updated"),
+        ],
+    )
+    await _drop_indexes_by_name(
+        db[RestaurantCollections.FINANCE_SNAPSHOTS],
+        [
+            "uq_restaurant_daily_records_tenant_date",
+            "idx_restaurant_daily_records_tenant_business_date",
         ],
     )
     await _create_indexes_safely(
