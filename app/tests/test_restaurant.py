@@ -508,29 +508,6 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     assert expense_response.status_code == 201
     assert expense_response.json()["section"] == "bank"
 
-    bank_account_one_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers_user_one,
-        json={"bank_account": "Chase Bank - Main"},
-    )
-    assert bank_account_one_response.status_code == 201
-    assert bank_account_one_response.json()["bank_account"] == "Chase Bank - Main"
-
-    bank_account_duplicate_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers_user_one,
-        json={"bank_account": "  chase bank - main  "},
-    )
-    assert bank_account_duplicate_response.status_code == 409
-    assert bank_account_duplicate_response.json()["error"]["code"] == "conflict"
-
-    bank_account_two_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers_user_two,
-        json={"bank_account": "City Bank - Payroll"},
-    )
-    assert bank_account_two_response.status_code == 201
-
     inventory_response = client.post(
         "/api/v1/restaurant/inventory",
         headers=headers_user_one,
@@ -558,16 +535,6 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     assert expenses_user_one.status_code == 200
     assert expenses_user_one.json()["this_month"]["top_category"] == "Staff Costs"
     assert expenses_user_one.json()["this_month"]["distribution"][0]["label"] == "Staff Costs"
-
-    bank_accounts_user_one = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers_user_one)
-    assert bank_accounts_user_one.status_code == 200
-    assert bank_accounts_user_one.json()["total_accounts"] == 1
-    assert [item["bank_account"] for item in bank_accounts_user_one.json()["items"]] == ["Chase Bank - Main"]
-
-    bank_accounts_user_two = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers_user_two)
-    assert bank_accounts_user_two.status_code == 200
-    assert bank_accounts_user_two.json()["total_accounts"] == 1
-    assert [item["bank_account"] for item in bank_accounts_user_two.json()["items"]] == ["City Bank - Payroll"]
 
     inventory_user_two = client.get("/api/v1/restaurant/inventory", headers=headers_user_two)
     assert inventory_user_two.status_code == 200
@@ -609,182 +576,6 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     assert inventory_delete_response.status_code == 204
 
 
-def test_restaurant_bank_account_endpoints_create_list_and_scope(client, app):
-    seed_subscription_plan(app)
-    headers_user_one = register_and_login(
-        client,
-        {
-            "full_name": "Bank Owner One",
-            "email": "bank-owner1@example.com",
-            "password": "BankOwnerOne123",
-            "phone": "+1555000101",
-        },
-    )
-    select_subscription_plan(client, headers_user_one)
-
-    headers_user_two = register_and_login(
-        client,
-        {
-            "full_name": "Bank Owner Two",
-            "email": "bank-owner2@example.com",
-            "password": "BankOwnerTwo123",
-            "phone": "+1555000102",
-        },
-    )
-    select_subscription_plan(client, headers_user_two)
-
-    create_first_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers_user_one,
-        json={"bank_account": "Chase Bank - Main"},
-    )
-    assert create_first_response.status_code == 201
-    assert create_first_response.json()["bank_account"] == "Chase Bank - Main"
-
-    create_second_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers_user_one,
-        json={"bank_account": "Citi Bank - Payroll"},
-    )
-    assert create_second_response.status_code == 201
-
-    duplicate_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers_user_one,
-        json={"bank_account": "  chase bank - main  "},
-    )
-    assert duplicate_response.status_code == 409
-    assert duplicate_response.json()["error"]["code"] == "conflict"
-
-    other_user_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers_user_two,
-        json={"bank_account": "City Bank - Branch"},
-    )
-    assert other_user_response.status_code == 201
-
-    user_one_list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers_user_one)
-    assert user_one_list_response.status_code == 200
-    user_one_payload = user_one_list_response.json()
-    assert user_one_payload["total_accounts"] == 2
-    assert [item["bank_account"] for item in user_one_payload["items"]] == ["Chase Bank - Main", "Citi Bank - Payroll"]
-    assert [item["deposited_amount"] for item in user_one_payload["items"]] == [0.0, 0.0]
-
-    user_two_list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers_user_two)
-    assert user_two_list_response.status_code == 200
-    user_two_payload = user_two_list_response.json()
-    assert user_two_payload["total_accounts"] == 1
-    assert [item["bank_account"] for item in user_two_payload["items"]] == ["City Bank - Branch"]
-    assert [item["deposited_amount"] for item in user_two_payload["items"]] == [0.0]
-
-
-def test_restaurant_bank_account_update_and_delete_endpoints(client, app):
-    seed_subscription_plan(app)
-    headers = register_and_login(
-        client,
-        {
-            "full_name": "Bank Account Editor",
-            "email": "bankeditor@example.com",
-            "password": "BankEditor123",
-            "phone": "+15550008888",
-        },
-    )
-    select_subscription_plan(client, headers)
-
-    first_create_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers,
-        json={"bank_account": "Main Bank"},
-    )
-    second_create_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers,
-        json={"bank_account": "Payroll Bank"},
-    )
-    assert first_create_response.status_code == 201
-    assert second_create_response.status_code == 201
-
-    account_id = first_create_response.json()["id"]
-    duplicate_update_response = client.patch(
-        f"/api/v1/restaurant/cash/bank-accounts/{account_id}",
-        headers=headers,
-        json={"bank_account": "Payroll Bank"},
-    )
-    assert duplicate_update_response.status_code == 409
-
-    update_response = client.patch(
-        f"/api/v1/restaurant/cash/bank-accounts/{account_id}",
-        headers=headers,
-        json={"bank_account": "Main Bank Updated"},
-    )
-    assert update_response.status_code == 200
-    assert update_response.json()["bank_account"] == "Main Bank Updated"
-    assert update_response.json()["deposited_amount"] == 0.0
-
-    delete_response = client.delete(
-        f"/api/v1/restaurant/cash/bank-accounts/{second_create_response.json()['id']}",
-        headers=headers,
-    )
-    assert delete_response.status_code == 204
-
-    list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
-    assert list_response.status_code == 200
-    payload = list_response.json()
-    assert payload["total_accounts"] == 1
-    assert [item["bank_account"] for item in payload["items"]] == ["Main Bank Updated"]
-
-
-def test_restaurant_bank_account_list_includes_deposited_amount_by_bank_name(client, app):
-    seed_subscription_plan(app)
-    headers = register_and_login(
-        client,
-        {
-            "full_name": "Bank Totals User",
-            "email": "banktotals@example.com",
-            "password": "BankTotals123",
-            "phone": "+15550007777",
-        },
-    )
-    select_subscription_plan(client, headers)
-
-    create_main_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers,
-        json={"bank_account": "Chase Bank - Main"},
-    )
-    create_payroll_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers,
-        json={"bank_account": "Citi Bank - Payroll"},
-    )
-    assert create_main_response.status_code == 201
-    assert create_payroll_response.status_code == 201
-
-    today_iso = datetime.now(UTC).date().isoformat()
-    assert client.post(
-        "/api/v1/restaurant/cash/deposits",
-        headers=headers,
-        json={"deposit_date": today_iso, "amount": 125.0, "bank_account": "Chase Bank - Main", "notes": "Main deposit"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/restaurant/cash/deposits",
-        headers=headers,
-        json={"deposit_date": today_iso, "amount": 75.0, "bank_account": "Chase Bank - Main", "notes": "Second deposit"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/restaurant/cash/deposits",
-        headers=headers,
-        json={"deposit_date": today_iso, "amount": 40.0, "bank_account": "Citi Bank - Payroll", "notes": "Payroll deposit"},
-    ).status_code == 201
-
-    list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
-    assert list_response.status_code == 200
-    payload = list_response.json()
-    amounts_by_name = {item["bank_account"]: item["deposited_amount"] for item in payload["items"]}
-    assert amounts_by_name["Chase Bank - Main"] == 200.0
-    assert amounts_by_name["Citi Bank - Payroll"] == 40.0
-
-
 def test_restaurant_cash_deposit_update_and_delete_endpoints(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(
@@ -797,17 +588,6 @@ def test_restaurant_cash_deposit_update_and_delete_endpoints(client, app):
         },
     )
     select_subscription_plan(client, headers)
-
-    assert client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers,
-        json={"bank_account": "Main Bank"},
-    ).status_code == 201
-    assert client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers,
-        json={"bank_account": "Secondary Bank"},
-    ).status_code == 201
 
     today = datetime.now(UTC).date()
     tomorrow = today + timedelta(days=1)
@@ -844,20 +624,8 @@ def test_restaurant_cash_deposit_update_and_delete_endpoints(client, app):
     assert update_response.json()["notes"] == "Updated deposit"
     assert update_response.json()["deposit_date"][:10] == tomorrow.isoformat()
 
-    bank_account_list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
-    assert bank_account_list_response.status_code == 200
-    amounts_by_name = {item["bank_account"]: item["deposited_amount"] for item in bank_account_list_response.json()["items"]}
-    assert amounts_by_name["Main Bank"] == 0.0
-    assert amounts_by_name["Secondary Bank"] == 150.0
-
     delete_response = client.delete(f"/api/v1/restaurant/cash/deposits/{deposit_id}", headers=headers)
     assert delete_response.status_code == 204
-
-    bank_account_list_after_delete_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
-    assert bank_account_list_after_delete_response.status_code == 200
-    amounts_after_delete = {item["bank_account"]: item["deposited_amount"] for item in bank_account_list_after_delete_response.json()["items"]}
-    assert amounts_after_delete["Main Bank"] == 0.0
-    assert amounts_after_delete["Secondary Bank"] == 0.0
 
 
 def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(client, app):
@@ -1003,14 +771,6 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
     assert expense_response.status_code == 201
     assert set(expense_response.json().keys()) == {"id", "category", "amount", "expense_date", "section", "notes", "created_at"}
 
-    bank_account_response = client.post(
-        "/api/v1/restaurant/cash/bank-accounts",
-        headers=headers,
-        json={"bank_account": "Primary Bank"},
-    )
-    assert bank_account_response.status_code == 201
-    assert set(bank_account_response.json().keys()) == {"id", "bank_account", "deposited_amount", "created_at"}
-
     deposit_response = client.post(
         "/api/v1/restaurant/cash/deposits",
         headers=headers,
@@ -1035,11 +795,6 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
         "deposit_date_formatted",
         "display_title",
     }
-
-    bank_account_list_response = client.get("/api/v1/restaurant/cash/bank-accounts", headers=headers)
-    assert bank_account_list_response.status_code == 200
-    assert set(bank_account_list_response.json().keys()) == {"total_accounts", "items"}
-    assert set(bank_account_list_response.json()["items"][0].keys()) == {"id", "bank_account", "deposited_amount", "created_at"}
 
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
     assert cash_overview_response.status_code == 200
