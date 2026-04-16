@@ -862,21 +862,12 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert home_monthly_response.status_code == 200
     assert "monthly" in home_monthly_response.json()
 
-    home_export_pdf_response = client.get("/api/v1/restaurant/home/export?period=weekly&format=pdf", headers=headers)
-    assert home_export_pdf_response.status_code == 200
-    assert home_export_pdf_response.headers["content-type"].startswith("application/pdf")
-
-    home_export_excel_response = client.get("/api/v1/restaurant/home/export?period=monthly&format=excel", headers=headers)
-    assert home_export_excel_response.status_code == 200
-    assert "text/csv" in home_export_excel_response.headers["content-type"]
+    home_export_response = client.get("/api/v1/restaurant/home/export?period=weekly&format=pdf", headers=headers)
+    assert home_export_response.status_code == 404
 
     home_custom_range_response = client.get(f"/api/v1/restaurant/home?period=weekly&from_date={previous_day_iso}&to_date={today_iso}", headers=headers)
     assert home_custom_range_response.status_code == 200
     assert "weekly" in home_custom_range_response.json()
-
-    home_export_custom_range_response = client.get(f"/api/v1/restaurant/home/export?period=weekly&format=excel&from_date={previous_day_iso}&to_date={today_iso}", headers=headers)
-    assert home_export_custom_range_response.status_code == 200
-    assert "text/csv" in home_export_custom_range_response.headers["content-type"]
 
     cash_deposit_response = client.post(
         "/api/v1/restaurant/cash/deposits",
@@ -1035,13 +1026,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     analytics_monthly_payload = analytics_monthly_response.json()
     assert analytics_monthly_payload["revenue_comparison"][0]["label"] == "This Month Revenue"
 
-    analytics_export_pdf_response = client.get("/api/v1/restaurant/analytics/export?period=weekly&format=pdf", headers=headers)
-    assert analytics_export_pdf_response.status_code == 200
-    assert analytics_export_pdf_response.headers["content-type"].startswith("application/pdf")
-
-    analytics_export_excel_response = client.get(f"/api/v1/restaurant/analytics/export?period=monthly&format=excel&from_date={previous_day_iso}&to_date={today_iso}", headers=headers)
-    assert analytics_export_excel_response.status_code == 200
-    assert "text/csv" in analytics_export_excel_response.headers["content-type"]
+    analytics_export_response = client.get("/api/v1/restaurant/analytics/export?period=weekly&format=pdf", headers=headers)
+    assert analytics_export_response.status_code == 404
 
     chat_list_response = client.get("/api/v1/restaurant/chat/messages", headers=headers)
     assert chat_list_response.status_code == 200

@@ -344,50 +344,6 @@ class RestaurantOperationsService(BaseService):
             recent_activity=recent_activity,
         )
 
-    async def export_home_report(
-        self,
-        current_user: dict,
-        *,
-        period: str = "weekly",
-        export_format: str = "pdf",
-        from_date: date | None = None,
-        to_date: date | None = None,
-    ) -> tuple[str, str, bytes]:
-        home = await self.get_home(current_user, period=period, from_date=from_date, to_date=to_date)
-        section = home.monthly if period == 'monthly' else home.weekly
-        period_label = period.capitalize()
-        if export_format == 'excel':
-            lines = [
-                'Section,Label,Value,ChangePercent,Currency',
-            ]
-            for metric in section.metrics:
-                lines.append(f'Metric,{metric.label},{metric.value},{metric.change_percent},{metric.currency}')
-            for item in section.cash_management:
-                lines.append(f'CashManagement,{item.label},{item.amount},,EUR')
-            for point in section.revenue:
-                lines.append(f'Trend,{point.label},{point.value},,EUR')
-            content = ('\n'.join(lines) + '\n').encode('utf-8')
-            return (f'home_{period}_report.csv', 'text/csv; charset=utf-8', content)
-
-        pdf_text = [
-            f'Risto AI - Home Report ({period_label})',
-            f'Greeting: {home.greeting_name}',
-            f'Restaurant: {home.restaurant_name or "-"}',
-            f'VAT Balance: {section.vat_balance:.2f}',
-            'Metrics:',
-        ]
-        for metric in section.metrics:
-            pdf_text.append(f'- {metric.label}: {metric.value:.2f} ({metric.change_percent:+.1f}%)')
-        pdf_text.append('Cash Management:')
-        for item in section.cash_management:
-            pdf_text.append(f'- {item.label}: {item.amount:.2f}')
-        pdf_text.append('Trend:')
-        for point in section.revenue:
-            pdf_text.append(f'- {point.label}: {point.value:.2f}')
-
-        content = self._build_simple_pdf('\n'.join(pdf_text))
-        return (f'home_{period}_report.pdf', 'application/pdf', content)
-
     async def _build_home_period_snapshot(
         self,
         *,
@@ -1431,54 +1387,6 @@ class RestaurantOperationsService(BaseService):
             ],
             supplier_price_alerts=supplier_alerts,
         )
-
-    async def export_analytics_report(
-        self,
-        current_user: dict,
-        *,
-        period: str = "weekly",
-        export_format: str = "pdf",
-        from_date: date | None = None,
-        to_date: date | None = None,
-    ) -> tuple[str, str, bytes]:
-        analytics = await self.get_analytics(current_user, period=period, from_date=from_date, to_date=to_date)
-        period_label = self._analytics_filter_label(period)
-
-        if export_format == 'excel':
-            estimated_profit = next((float(item.value) for item in analytics.metric_tiles if item.label == 'Estimated Profit'), 0.0)
-            lines = [
-                'Section,Label,Value',
-                f'Header,Period,{period_label}',
-                f'Metric,Estimated Profit,{estimated_profit}',
-                f'Metric,Revenue Total,{analytics.revenue_total}',
-                f'Metric,Avg Rev Per Cover,{analytics.avg_revenue_per_cover}',
-            ]
-            for item in analytics.weekly_revenue:
-                lines.append(f'Revenue Trend,{item.label},{item.value}')
-            for item in analytics.revenue_comparison:
-                lines.append(f'Revenue Comparison,{item.label},{item.value}')
-            for item in analytics.supplier_price_alerts:
-                lines.append(f'Supplier Alert,{item.title},{item.subtitle}')
-            content = ('\n'.join(lines) + '\n').encode('utf-8')
-            return (f'analytics_{period}_report.csv', 'text/csv; charset=utf-8', content)
-
-        pdf_text = [
-            f'Risto AI - Analytics Report ({period_label})',
-            f"Estimated Profit: {self._format_currency(float(next((item.value for item in analytics.metric_tiles if item.label == 'Estimated Profit'), 0.0)))}",
-            f'Revenue Total: {self._format_currency(float(analytics.revenue_total))}',
-            f"Peak Hour: {next((str(item.value) for item in analytics.metric_tiles if item.label == 'Peak Hour'), '7:00 PM')}",
-            'Revenue Trend:',
-        ]
-        for item in analytics.weekly_revenue:
-            pdf_text.append(f'- {item.label}: {item.value:.2f}')
-        pdf_text.append('Revenue Comparison:')
-        for item in analytics.revenue_comparison:
-            pdf_text.append(f'- {item.label}: {item.value}')
-        pdf_text.append('Supplier Alerts:')
-        for item in analytics.supplier_price_alerts:
-            pdf_text.append(f'- {item.title}: {item.subtitle}')
-        content = self._build_simple_pdf('\n'.join(pdf_text))
-        return (f'analytics_{period}_report.pdf', 'application/pdf', content)
 
     async def get_analytics_business_insight(self, current_user: dict) -> AnalyticsInsightBannerResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
