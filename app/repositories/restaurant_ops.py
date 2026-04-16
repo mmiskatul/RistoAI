@@ -265,6 +265,12 @@ class RestaurantChatRepository(ScopedRepository):
         cursor = self.collection.find(self.scope_filters(scope_id)).sort([("created_at", ASCENDING)]).limit(limit)
         return await cursor.to_list(length=limit)
 
+    async def get_by_scope_and_id(self, *, scope_id: str, message_id: str) -> dict[str, Any]:
+        document = await self.get_optional_by_id(message_id)
+        if not document or document.get("tenant_id") != scope_id:
+            raise NotFoundException("Chat message not found")
+        return document
+
 
 class RestaurantInsightRepository(ScopedRepository):
     collection_name = RestaurantCollections.AI_INSIGHTS

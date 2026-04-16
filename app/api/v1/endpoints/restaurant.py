@@ -16,6 +16,7 @@ from app.schemas.restaurant import (
     CashManagementSummaryResponse,
     ChatConversationResponse,
     ChatMessageCreateRequest,
+    ChatMessageUpdateRequest,
     DailyDataCollectionResponse,
     DailyDataCreateRequest,
     DailyDataDetailResponse,
@@ -336,6 +337,11 @@ async def list_chat_messages(current_user: dict = Depends(get_current_user), ser
 @router.post('/chat/messages', response_model=ChatConversationResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Chat'], summary='Create Chat Message', description='Sends a user message and returns the updated AI chat conversation.')
 async def create_chat_message(payload: ChatMessageCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ChatConversationResponse:
     return await service.create_chat_message(current_user, payload)
+
+
+@router.patch('/chat/messages/{message_id}', response_model=ChatConversationResponse, tags=['Restaurant Chat'], summary='Edit Chat Message', description='Updates a user message and stores a regenerated AI response linked to the edited message.')
+async def update_chat_message(message_id: str, payload: ChatMessageUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ChatConversationResponse:
+    return await service.update_chat_message(current_user, message_id, payload)
 
 
 @router.post('/chat/messages/attachments', response_model=ChatConversationResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Chat'], summary='Create Chat Message With Attachment', description='Sends a user message with a shared document and returns the updated personalized AI chat conversation.')

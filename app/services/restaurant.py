@@ -50,6 +50,7 @@ from app.schemas.restaurant import (
     ChatConversationResponse,
     ChatMessageCreateRequest,
     ChatMessageResponse,
+    ChatMessageUpdateRequest,
     ChatQuickPromptResponse,
     ChatRealtimeConfigResponse,
     DailyDataCollectionResponse,
@@ -1419,6 +1420,44 @@ class RestaurantOperationsService(BaseService):
     async def create_chat_message(self, current_user: dict, payload: ChatMessageCreateRequest) -> ChatConversationResponse:
         return await self._create_chat_conversation(current_user=current_user, payload=payload)
 
+    async def update_chat_message(self, current_user: dict, message_id: str, payload: ChatMessageUpdateRequest) -> ChatConversationResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        if not message_id:
+            raise ValidationException("message_id is required")
+        existing = await self.chat_repository.get_by_scope_and_id(scope_id=scope_id, message_id=message_id)
+        if existing.get("role") != "user":
+            raise ValidationException("Only user messages can be edited")
+
+        now = datetime.now(UTC)
+        updated_message = await self.chat_repository.update(
+            existing["_id"],
+            {
+                "message": payload.message,
+                "edited_at": now,
+                "last_edited_by_user_id": str(current_user["_id"]),
+            },
+        )
+        recent = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=12)
+        daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
+        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
+        metrics_context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
+        assistant_text = await self.openai_service.generate_chat_reply(
+            prompt=payload.message,
+            metrics_context=metrics_context,
+            recent_messages=[self.serialize(item) for item in recent],
+        )
+        await self.chat_repository.create(
+            {
+                "tenant_id": scope_id,
+                "role": "assistant",
+                "message": assistant_text,
+                "created_by_user_id": str(current_user["_id"]),
+                "reply_to_message_id": str(updated_message["_id"]),
+                "regenerated_from_message_id": str(updated_message["_id"]),
+            }
+        )
+        return await self.list_chat_messages(current_user)
+
     async def create_chat_message_with_attachment(
         self,
         current_user: dict,
@@ -1465,7 +1504,7 @@ class RestaurantOperationsService(BaseService):
             user_message_payload["attachment_name"] = attachment_name
             user_message_payload["attachment_source"] = attachment_source
             user_message_payload["attachment_summary"] = attachment_summary
-        await self.chat_repository.create(user_message_payload)
+        user_message = await self.chat_repository.create(user_message_payload)
         recent = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=12)
         daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
@@ -1477,8 +1516,24 @@ class RestaurantOperationsService(BaseService):
             attachment_context=attachment_context,
         )
         insight_message = self._build_chat_insight_message(metrics_context)
-        await self.chat_repository.create({"tenant_id": scope_id, "role": "insight", "message": insight_message, "created_by_user_id": str(current_user["_id"])})
-        await self.chat_repository.create({"tenant_id": scope_id, "role": "assistant", "message": assistant_text, "created_by_user_id": str(current_user["_id"])})
+        await self.chat_repository.create(
+            {
+                "tenant_id": scope_id,
+                "role": "insight",
+                "message": insight_message,
+                "created_by_user_id": str(current_user["_id"]),
+                "reply_to_message_id": str(user_message["_id"]),
+            }
+        )
+        await self.chat_repository.create(
+            {
+                "tenant_id": scope_id,
+                "role": "assistant",
+                "message": assistant_text,
+                "created_by_user_id": str(current_user["_id"]),
+                "reply_to_message_id": str(user_message["_id"]),
+            }
+        )
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
         return ChatConversationResponse(
             messages=[self._to_chat_message_response(item) for item in items],
@@ -3100,8 +3155,12 @@ class RestaurantOperationsService(BaseService):
             role=serialized["role"],
             message=serialized["message"],
             created_at=serialized["created_at"],
+            updated_at=serialized.get("updated_at"),
+            edited_at=serialized.get("edited_at"),
+            reply_to_message_id=serialized.get("reply_to_message_id"),
             attachment_name=serialized.get("attachment_name"),
             attachment_source=serialized.get("attachment_source"),
+            attachment_summary=serialized.get("attachment_summary"),
         )
 
     async def _upload_profile_image(self, current_user: dict, file: UploadFile) -> str:

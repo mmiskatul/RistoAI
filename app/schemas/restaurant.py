@@ -683,6 +683,10 @@ class ChatMessageCreateRequest(BaseSchema):
     attachment_source: str | None = Field(default=None, max_length=40)
 
 
+class ChatMessageUpdateRequest(BaseSchema):
+    message: str = Field(min_length=2, max_length=1000)
+
+
 class ChatAttachmentOptionResponse(BaseSchema):
     key: str
     label: str
@@ -696,7 +700,10 @@ class ChatMessageResponse(BaseSchema):
     id: str
     role: Literal["user", "assistant", "insight"]
     message: str
-    created_at: str
+    created_at: str | None = None
+    updated_at: str | None = None
+    edited_at: str | None = None
+    reply_to_message_id: str | None = None
     attachment_name: str | None = None
     attachment_source: str | None = None
     attachment_summary: str | None = None

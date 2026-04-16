@@ -1043,6 +1043,22 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert any(message["role"] == "insight" for message in messages)
     assert messages[-1]["role"] == "assistant"
     assert "revenue" in messages[-1]["message"].lower()
+    user_message = next(message for message in messages if message["role"] == "user" and message["message"] == "How can I improve profit?")
+    assert messages[-1]["reply_to_message_id"] == user_message["id"]
+
+    edited_chat_response = client.patch(
+        f"/api/v1/restaurant/chat/messages/{user_message['id']}",
+        headers=headers,
+        json={"message": "How can I improve profit using lower supplier spend?"},
+    )
+    assert edited_chat_response.status_code == 200
+    edited_messages = edited_chat_response.json()["messages"]
+    edited_user_message = next(message for message in edited_messages if message["id"] == user_message["id"])
+    assert edited_user_message["message"] == "How can I improve profit using lower supplier spend?"
+    assert edited_user_message["edited_at"]
+    linked_replies = [message for message in edited_messages if message.get("reply_to_message_id") == user_message["id"] and message["role"] == "assistant"]
+    assert len(linked_replies) >= 2
+    assert "revenue" in linked_replies[-1]["message"].lower()
 
     chat_attachment_response = client.post(
         "/api/v1/restaurant/chat/messages/attachments",

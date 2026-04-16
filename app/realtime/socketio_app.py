@@ -13,7 +13,7 @@ from app.db.mongodb import MongoDB
 from app.dependencies.services import build_restaurant_operations_service
 from app.repositories.restaurant_ops import ScopedRepository
 from app.repositories.user import UserRepository
-from app.schemas.restaurant import ChatConversationResponse, ChatMessageCreateRequest
+from app.schemas.restaurant import ChatConversationResponse, ChatMessageCreateRequest, ChatMessageUpdateRequest
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,15 @@ class RestaurantChatSocketGateway:
             session = await self._require_session(sid)
             payload = ChatMessageCreateRequest(message=str((data or {}).get("message") or "").strip(), attachment_source=(data or {}).get("attachment_source"))
             conversation = await self._service().create_chat_message(session["user"], payload)
+            return await self._broadcast_conversation(session["room"], conversation)
+
+        @self.sio.on("chat:message_edit", namespace=self.namespace)
+        async def chat_message_edit(sid: str, data: dict[str, Any] | None):
+            session = await self._require_session(sid)
+            resolved = data or {}
+            message_id = str(resolved.get("message_id") or "").strip()
+            payload = ChatMessageUpdateRequest(message=str(resolved.get("message") or "").strip())
+            conversation = await self._service().update_chat_message(session["user"], message_id, payload)
             return await self._broadcast_conversation(session["room"], conversation)
 
         @self.sio.on("chat:attachment", namespace=self.namespace)
