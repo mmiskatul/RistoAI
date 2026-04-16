@@ -454,7 +454,19 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
-        insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=daily_records, expenses=expenses)
+        documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
+        cash_deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=60)
+        inventory_items, _ = await self.inventory_repository.list_by_scope(scope_id=scope_id, page=1, page_size=100)
+        transactions, _ = await self.finance_transaction_repository.list_by_scope(scope_id=scope_id, page=1, page_size=250)
+        insights = await self._get_or_generate_insights(
+            scope_id=scope_id,
+            daily_records=daily_records,
+            expenses=expenses,
+            documents=documents,
+            cash_deposits=cash_deposits,
+            inventory_items=inventory_items,
+            transactions=transactions,
+        )
         return await self.get_insight_detail(current_user, insights[0].id)
 
     async def get_insight_detail(self, current_user: dict, insight_id: str) -> InsightDetailResponse:
@@ -1613,38 +1625,67 @@ class RestaurantOperationsService(BaseService):
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
         return await self.get_profile(user)
 
-    async def _get_or_generate_insights(self, *, scope_id: str, daily_records: list[dict], expenses: list[dict]) -> list[InsightSummaryResponse]:
+    async def _get_or_generate_insights(
+        self,
+        *,
+        scope_id: str,
+        daily_records: list[dict],
+        expenses: list[dict],
+        documents: list[dict] | None = None,
+        cash_deposits: list[dict] | None = None,
+        inventory_items: list[dict] | None = None,
+        transactions: list[dict] | None = None,
+    ) -> list[InsightSummaryResponse]:
         insights = await self.insight_repository.list_by_scope(scope_id=scope_id, limit=10)
-        if not insights:
-            context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
-            percent = abs(context["food_cost_change_percent"])
-            trend = self._build_weekly_revenue_chart(daily_records)
-            created = await self.insight_repository.create(
-                {
-                    "tenant_id": scope_id,
-                    "title": "Food Cost Increased" if context["food_cost_change_percent"] >= 0 else "Food Cost Improved",
-                    "summary": f"Food cost changed by {percent:.1f}% compared with the previous week. Review supplier pricing and prep waste.",
-                    "priority": "high" if percent >= 10 else "medium",
-                    "metric_value": f"{percent:.0f}%",
-                    "metric_caption": "change this week",
-                    "trend": [item.model_dump(mode="json") for item in trend],
-                    "root_causes": [
-                        "Supplier price increase on core items",
-                        "Higher ingredient usage in main courses",
-                        "Prep station waste increased",
-                    ],
-                    "recommended_actions": [
-                        {"title": "Review supplier prices", "description": "Compare top suppliers and renegotiate this week."},
-                        {"title": "Optimize portion sizes", "description": "Audit garnish and prep weights on the slowest dishes."},
-                        {"title": "Monitor ingredient waste", "description": "Run a daily waste checklist for the next 7 days."},
-                    ],
-                    "related_metrics": [
-                        {"label": "Profit", "value": context["profit_total"], "change_percent": context["profit_change_percent"], "currency": "EUR"},
-                        {"label": "Expenses", "value": context["expenses_total"], "change_percent": context["expense_change_percent"], "currency": "EUR"},
-                    ],
-                }
-            )
-            insights = [created]
+        context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
+        percent = abs(context["food_cost_change_percent"])
+        trend = self._build_weekly_revenue_chart(daily_records)
+        fallback_insight = {
+            "title": "Food Cost Increased" if context["food_cost_change_percent"] >= 0 else "Food Cost Improved",
+            "summary": f"Food cost changed by {percent:.1f}% compared with the previous week. Review supplier pricing and prep waste.",
+            "priority": "high" if percent >= 10 else "medium",
+            "metric_value": f"{percent:.0f}%",
+            "metric_caption": "change this week",
+            "root_causes": [
+                "Supplier price increase on core items",
+                "Higher ingredient usage in main courses",
+                "Prep station waste increased",
+            ],
+            "recommended_actions": [
+                {"title": "Review supplier prices", "description": "Compare top suppliers and renegotiate this week."},
+                {"title": "Optimize portion sizes", "description": "Audit garnish and prep weights on the slowest dishes."},
+                {"title": "Monitor ingredient waste", "description": "Run a daily waste checklist for the next 7 days."},
+            ],
+        }
+        insight_payload = await self.openai_service.generate_restaurant_insight(
+            metrics_context=self._build_realtime_insight_context(
+                metrics_context=context,
+                daily_records=daily_records,
+                expenses=expenses,
+                documents=documents or [],
+                cash_deposits=cash_deposits or [],
+                inventory_items=inventory_items or [],
+                transactions=transactions or [],
+                trend=trend,
+            ),
+            fallback_insight=fallback_insight,
+        )
+        insight_payload.update(
+            {
+                "tenant_id": scope_id,
+                "trend": [item.model_dump(mode="json") for item in trend],
+                "related_metrics": [
+                    {"label": "Profit", "value": context["profit_total"], "change_percent": context["profit_change_percent"], "currency": "EUR"},
+                    {"label": "Expenses", "value": context["expenses_total"], "change_percent": context["expense_change_percent"], "currency": "EUR"},
+                ],
+                "ai_provider": "openai" if self.openai_service.enabled else "fallback",
+                "generated_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        if insights:
+            insights = [await self.insight_repository.update(insights[0]["_id"], insight_payload)]
+        else:
+            insights = [await self.insight_repository.create(insight_payload)]
         serialized = self.serialize_list(insights)
         return [InsightSummaryResponse(id=item["id"], title=item["title"], summary=item["summary"], priority=item["priority"], metric_value=item["metric_value"], metric_caption=item["metric_caption"]) for item in serialized]
 
@@ -1684,6 +1725,93 @@ class RestaurantOperationsService(BaseService):
             "cash_collected_total": cash_collected_total,
             "cash_available": cash_available,
         }
+
+    def _build_realtime_insight_context(
+        self,
+        *,
+        metrics_context: dict[str, Any],
+        daily_records: list[dict],
+        expenses: list[dict],
+        documents: list[dict],
+        cash_deposits: list[dict],
+        inventory_items: list[dict],
+        transactions: list[dict],
+        trend: list[ChartPointResponse],
+    ) -> dict[str, Any]:
+        serialized_records = self.serialize_list(daily_records)
+        serialized_expenses = self.serialize_list(expenses)
+        serialized_documents = self.serialize_list(documents)
+        serialized_cash_deposits = self.serialize_list(cash_deposits)
+        serialized_inventory = self.serialize_list(inventory_items)
+        serialized_transactions = self.serialize_list(transactions)
+
+        expense_by_category: dict[str, float] = {}
+        for item in serialized_expenses:
+            category = str(item.get("category") or "Uncategorized").strip() or "Uncategorized"
+            expense_by_category[category] = round(expense_by_category.get(category, 0.0) + float(item.get("amount", 0)), 2)
+
+        document_spend_by_counterparty: dict[str, float] = {}
+        processed_document_count = 0
+        for item in serialized_documents:
+            if item.get("status") == "processed":
+                processed_document_count += 1
+            counterparty = str(item.get("counterparty_name") or item.get("supplier_name") or item.get("source_file_name") or "Unknown").strip() or "Unknown"
+            document_spend_by_counterparty[counterparty] = round(document_spend_by_counterparty.get(counterparty, 0.0) + float(item.get("total_amount", 0)), 2)
+
+        transaction_totals: dict[str, float] = {}
+        for item in serialized_transactions:
+            transaction_type = str(item.get("transaction_type") or "unknown").strip() or "unknown"
+            transaction_totals[transaction_type] = round(transaction_totals.get(transaction_type, 0.0) + float(item.get("amount", 0)), 2)
+
+        low_stock_items = [
+            {
+                "product_name": item.get("product_name"),
+                "category": item.get("category"),
+                "stock_quantity": float(item.get("stock_quantity", 0)),
+                "alert_threshold": float(item.get("alert_threshold", 0)),
+                "supplier_name": item.get("supplier_name"),
+            }
+            for item in serialized_inventory
+            if str(item.get("stock_status", "")).lower() in {"low_stock", "out_of_stock"}
+            or float(item.get("stock_quantity", 0)) <= float(item.get("alert_threshold", 0))
+        ][:5]
+
+        latest_business_date = max((str(item.get("business_date") or item.get("period_start_date") or "") for item in serialized_records), default="")
+        latest_invoice_date = max((str(item.get("invoice_date") or "") for item in serialized_documents), default="")
+        latest_cash_deposit_date = max((str(item.get("deposit_date") or "") for item in serialized_cash_deposits), default="")
+        cash_deposit_total = round(sum(float(item.get("amount", 0)) for item in serialized_cash_deposits), 2)
+
+        return {
+            **metrics_context,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "data_sources": {
+                "daily_records": len(serialized_records),
+                "expenses": len(serialized_expenses),
+                "documents": len(serialized_documents),
+                "processed_documents": processed_document_count,
+                "cash_deposits": len(serialized_cash_deposits),
+                "inventory_items": len(serialized_inventory),
+                "finance_transactions": len(serialized_transactions),
+            },
+            "latest_dates": {
+                "business_date": latest_business_date,
+                "invoice_date": latest_invoice_date,
+                "cash_deposit_date": latest_cash_deposit_date,
+            },
+            "weekly_revenue_trend": [item.model_dump(mode="json") for item in trend],
+            "top_expense_categories": self._top_totals(expense_by_category, limit=5, key_name="category"),
+            "top_document_counterparties": self._top_totals(document_spend_by_counterparty, limit=5, key_name="counterparty"),
+            "cash_deposit_total": cash_deposit_total,
+            "transaction_totals": transaction_totals,
+            "low_stock_items": low_stock_items,
+        }
+
+    @staticmethod
+    def _top_totals(values: dict[str, float], *, limit: int, key_name: str) -> list[dict[str, float | str]]:
+        return [
+            {key_name: key, "amount": amount}
+            for key, amount in sorted(values.items(), key=lambda item: item[1], reverse=True)[:limit]
+        ]
 
     def _filter_home_documents(self, documents: list[dict], *, period: str, from_date: date | None = None, to_date: date | None = None) -> list[dict]:
         start_date, end_date = self._resolve_home_date_range(period, from_date=from_date, to_date=to_date)

@@ -166,6 +166,15 @@ class OpenAIOperationsService:
             logger.exception("OpenAI supplier alert generation failed", exc_info=exc)
         return fallback_alerts
 
+    async def generate_restaurant_insight(
+        self,
+        *,
+        metrics_context: dict[str, Any],
+        fallback_insight: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self.enabled:
+            return fallback_insight
+
         payload = {
             "model": self.settings.openai_model,
             "input": [
@@ -175,10 +184,13 @@ class OpenAIOperationsService:
                         {
                             "type": "input_text",
                             "text": (
-                                "You generate one concise restaurant analytics banner from structured business metrics. "
-                                "Return only valid JSON with keys title and subtitle. "
-                                "The title must start with 'Optimization Tip:'. "
-                                "Be specific, numeric when possible, and grounded only in the supplied data."
+                                "You generate the primary real-time restaurant operations insight for a mobile app. "
+                                "Return only valid JSON with keys title, summary, priority, metric_value, metric_caption, "
+                                "root_causes, and recommended_actions. "
+                                "priority must be one of high, medium, low. "
+                                "root_causes must be exactly 3 short strings. "
+                                "recommended_actions must be exactly 3 objects with title and description. "
+                                "Be specific, practical, and grounded only in the supplied metrics."
                             ),
                         }
                     ],
@@ -189,10 +201,10 @@ class OpenAIOperationsService:
                         {
                             "type": "input_text",
                             "text": (
-                                f"Analytics context: {json.dumps(analytics_context)}\n"
-                                f"Fallback title: {fallback_title}\n"
-                                f"Fallback subtitle: {fallback_subtitle}\n"
-                                "Generate the strongest single optimization insight banner."
+                                f"Metrics context: {json.dumps(metrics_context)}\n"
+                                f"Fallback insight: {json.dumps(fallback_insight)}\n"
+                                "Generate the strongest current insight that matches what a restaurant owner expects "
+                                "to see in the frontend right now."
                             ),
                         }
                     ],
@@ -203,15 +215,56 @@ class OpenAIOperationsService:
             response_payload = await self._responses_create(payload)
             parsed = self._try_parse_json(response_payload.get("output_text", ""))
             if isinstance(parsed, dict):
-                title = str(parsed.get("title") or "").strip()
-                subtitle = str(parsed.get("subtitle") or "").strip()
-                if title and subtitle:
-                    if not title.startswith("Optimization Tip:"):
-                        title = f"Optimization Tip: {title}"
-                    return {"title": title, "subtitle": subtitle}
+                return self._normalize_restaurant_insight(parsed, fallback_insight)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("OpenAI business insight generation failed", exc_info=exc)
-        return {"title": fallback_title, "subtitle": fallback_subtitle}
+            logger.exception("OpenAI restaurant insight generation failed", exc_info=exc)
+        return fallback_insight
+
+    @staticmethod
+    def _normalize_restaurant_insight(parsed: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(fallback)
+        title = str(parsed.get("title") or "").strip()
+        summary = str(parsed.get("summary") or "").strip()
+        priority = str(parsed.get("priority") or "").strip().lower()
+        metric_value = str(parsed.get("metric_value") or "").strip()
+        metric_caption = str(parsed.get("metric_caption") or "").strip()
+
+        if title:
+            normalized["title"] = title[:120]
+        if summary:
+            normalized["summary"] = summary[:240]
+        if priority in {"high", "medium", "low"}:
+            normalized["priority"] = priority
+        if metric_value:
+            normalized["metric_value"] = metric_value[:32]
+        if metric_caption:
+            normalized["metric_caption"] = metric_caption[:80]
+
+        root_causes = parsed.get("root_causes")
+        if isinstance(root_causes, list):
+            causes = [str(item).strip()[:120] for item in root_causes if str(item).strip()]
+            if causes:
+                normalized["root_causes"] = (causes + fallback.get("root_causes", []))[:3]
+
+        recommended_actions = parsed.get("recommended_actions")
+        if isinstance(recommended_actions, list):
+            actions: list[dict[str, str]] = []
+            for item in recommended_actions:
+                if not isinstance(item, dict):
+                    continue
+                action_title = str(item.get("title") or "").strip()
+                action_description = str(item.get("description") or "").strip()
+                if action_title and action_description:
+                    actions.append(
+                        {
+                            "title": action_title[:80],
+                            "description": action_description[:160],
+                        }
+                    )
+            if actions:
+                normalized["recommended_actions"] = (actions + fallback.get("recommended_actions", []))[:3]
+
+        return normalized
 
     async def generate_chat_reply(
         self,
