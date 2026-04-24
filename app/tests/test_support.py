@@ -175,3 +175,59 @@ def test_restaurant_can_create_support_ticket_and_admin_can_manage_it():
 
     assert resolve_response.status_code == 200
     assert resolve_response.json()['ticket']['status'] == 'resolved'
+
+
+def test_restaurant_help_center_creates_ticket_in_support_management():
+    app, mock_db = _build_app_with_mock_db()
+    admin_id = _seed_admin(mock_db)
+
+    with TestClient(app) as client:
+        restaurant_headers = register_and_login(
+            client,
+            {
+                'full_name': 'Help Center User',
+                'email': 'help-center@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550101010',
+            },
+        )
+
+        overview_response = client.get('/api/v1/restaurant/help-center', headers=restaurant_headers)
+        create_response = client.post(
+            '/api/v1/restaurant/help-center/tickets',
+            headers=restaurant_headers,
+            json={
+                'subject': 'Need invoice upload help',
+                'message': 'The invoice upload screen is failing for my restaurant.',
+                'priority': 'high',
+            },
+        )
+
+        assert overview_response.status_code == 200
+        overview_payload = overview_response.json()
+        assert overview_payload['title'] == 'Help Center'
+        assert overview_payload['create_ticket_endpoint'] == '/api/v1/restaurant/help-center/tickets'
+        assert overview_payload['list_tickets_endpoint'] == '/api/v1/restaurant/help-center/tickets'
+        assert len(overview_payload['articles']) == 3
+
+        assert create_response.status_code == 200
+        ticket_id = create_response.json()['ticket']['id']
+
+        user_list_response = client.get('/api/v1/restaurant/help-center/tickets?page=1&page_size=10', headers=restaurant_headers)
+        user_detail_response = client.get(f'/api/v1/restaurant/help-center/tickets/{ticket_id}', headers=restaurant_headers)
+        admin_management_response = client.get('/api/v1/support/management?page=1&page_size=10', headers=_admin_headers(admin_id))
+        admin_detail_response = client.get(f'/api/v1/support/tickets/{ticket_id}', headers=_admin_headers(admin_id))
+
+    assert user_list_response.status_code == 200
+    assert user_list_response.json()['total'] == 1
+    assert user_list_response.json()['items'][0]['issue_subject'] == 'Need invoice upload help'
+
+    assert user_detail_response.status_code == 200
+    assert user_detail_response.json()['subject'] == 'Need invoice upload help'
+    assert user_detail_response.json()['messages'][0]['body'] == 'The invoice upload screen is failing for my restaurant.'
+
+    assert admin_management_response.status_code == 200
+    assert admin_management_response.json()['items'][0]['issue_subject'] == 'Need invoice upload help'
+
+    assert admin_detail_response.status_code == 200
+    assert admin_detail_response.json()['subject'] == 'Need invoice upload help'

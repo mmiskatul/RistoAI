@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 
 from app.core.enums import UserRole
 from app.dependencies.auth import require_roles
@@ -11,6 +11,7 @@ from app.schemas.admin_settings import (
     AdminSettingsActionResponse,
     AdminSettingsOverviewResponse,
     AdminSettingsUpdateRequest,
+    PublicLegalDocumentResponse,
 )
 from app.services.admin_settings import AdminSettingsService
 
@@ -27,11 +28,19 @@ async def get_settings_overview(
 
 @router.put('/overview', response_model=AdminSettingsActionResponse, tags=['Settings'], summary='Update Admin Settings', description='Updates the platform-level admin settings fields shown on the settings page.')
 async def update_settings_overview(
-    payload: AdminSettingsUpdateRequest,
+    platform_name: str = Form(..., min_length=2, max_length=120),
+    support_email: str = Form(...),
+    default_language: str = Form(..., min_length=2, max_length=80),
+    profile_image: UploadFile | None = File(default=None),
     current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
     service: AdminSettingsService = Depends(get_admin_settings_service),
 ) -> AdminSettingsActionResponse:
-    return await service.update_overview(current_user, payload)
+    payload = AdminSettingsUpdateRequest(
+        platform_name=platform_name,
+        support_email=support_email,
+        default_language=default_language,
+    )
+    return await service.update_overview(current_user, payload, profile_image=profile_image)
 
 
 @router.get('/legal-content', response_model=AdminLegalContentEditorResponse, tags=['Settings'], summary='Legal Content Editor', description='Returns the connected legal editor page for Terms of Service or Privacy Policy.')
@@ -51,3 +60,17 @@ async def update_legal_content(
     service: AdminSettingsService = Depends(get_admin_settings_service),
 ) -> AdminSettingsActionResponse:
     return await service.update_legal_editor(document_key, current_user, payload)
+
+
+@router.get('/terms-and-conditions', response_model=PublicLegalDocumentResponse, tags=['Settings'], summary='Public Terms And Conditions', description='Returns the Terms and Conditions content managed by the admin settings page.')
+async def get_terms_and_conditions(
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> PublicLegalDocumentResponse:
+    return await service.get_public_legal_document('terms_of_service')
+
+
+@router.get('/privacy-policy', response_model=PublicLegalDocumentResponse, tags=['Settings'], summary='Public Privacy Policy', description='Returns the Privacy Policy content managed by the admin settings page.')
+async def get_privacy_policy(
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> PublicLegalDocumentResponse:
+    return await service.get_public_legal_document('privacy_policy')

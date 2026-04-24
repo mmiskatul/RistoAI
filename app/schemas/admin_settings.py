@@ -58,6 +58,14 @@ class AdminLegalContentUpdateRequest(BaseSchema):
     content: str = Field(min_length=1)
 
 
+class PublicLegalDocumentResponse(BaseSchema):
+    key: str
+    title: str
+    content: str
+    updated_at: str | None = None
+    updated_by: str | None = None
+
+
 class AdminSettingsActionResponse(BaseSchema):
     message: str
     settings: AdminSettingsOverviewResponse | None = None

@@ -66,7 +66,12 @@ async def get_support_service(db=Depends(get_database)) -> SupportService:
 
 
 async def get_admin_settings_service(db=Depends(get_database)) -> AdminSettingsService:
-    return AdminSettingsService(AdminSettingsRepository(db))
+    settings = get_settings()
+    return AdminSettingsService(
+        AdminSettingsRepository(db),
+        UserRepository(db),
+        build_image_storage_service(settings),
+    )
 
 
 def build_restaurant_operations_service(db) -> RestaurantOperationsService:

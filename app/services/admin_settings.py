@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from fastapi import UploadFile
+
 from app.core.exceptions import ValidationException
 from app.repositories.admin_settings import AdminSettingsRepository
+from app.repositories.user import UserRepository
 from app.schemas.admin_settings import (
     AdminLegalContentEditorResponse,
     AdminLegalContentUpdateRequest,
@@ -12,19 +15,28 @@ from app.schemas.admin_settings import (
     AdminSettingsLegalPageItemResponse,
     AdminSettingsOverviewResponse,
     AdminSettingsUpdateRequest,
+    PublicLegalDocumentResponse,
 )
 from app.services.base import BaseService
+from app.services.image_storage import ImageStorageService, UploadedImage
 
 
 class AdminSettingsService(BaseService):
-    def __init__(self, admin_settings_repository: AdminSettingsRepository) -> None:
+    def __init__(
+        self,
+        admin_settings_repository: AdminSettingsRepository,
+        user_repository: UserRepository,
+        image_storage_service: ImageStorageService | None = None,
+    ) -> None:
         self.admin_settings_repository = admin_settings_repository
+        self.user_repository = user_repository
+        self.image_storage_service = image_storage_service
 
     async def get_overview(self, current_user: dict) -> AdminSettingsOverviewResponse:
         document = self.serialize(await self.admin_settings_repository.get_settings_document())
         legal_documents = document.get('legal_documents', {})
         return AdminSettingsOverviewResponse(
-            profile_image_url=current_user.get('avatar_url'),
+            profile_image_url=self._resolve_profile_image_url(current_user.get('avatar_url')),
             platform_name=document['platform_name'],
             support_email=document['support_email'],
             default_language=document['default_language'],
@@ -34,10 +46,19 @@ class AdminSettingsService(BaseService):
             ],
         )
 
-    async def update_overview(self, current_user: dict, payload: AdminSettingsUpdateRequest) -> AdminSettingsActionResponse:
-        del current_user
+    async def update_overview(
+        self,
+        current_user: dict,
+        payload: AdminSettingsUpdateRequest,
+        *,
+        profile_image: UploadFile | None = None,
+    ) -> AdminSettingsActionResponse:
         await self.admin_settings_repository.update_settings_fields(payload.model_dump(mode='json'))
-        settings = await self.get_overview({'avatar_url': None})
+        refreshed_user = current_user
+        if profile_image:
+            avatar_url = await self._upload_profile_image(current_user, profile_image)
+            refreshed_user = await self.user_repository.update(current_user['_id'], {'avatar_url': avatar_url})
+        settings = await self.get_overview(refreshed_user)
         return AdminSettingsActionResponse(message='Admin settings updated successfully', settings=settings)
 
     async def get_legal_editor(self, tab: str = 'terms') -> AdminLegalContentEditorResponse:
@@ -64,6 +85,19 @@ class AdminSettingsService(BaseService):
         editor = await self.get_legal_editor(tab)
         editor.last_updated_value = self._format_legal_updated(serialized['legal_documents'][document_key]['updated_at'])
         return AdminSettingsActionResponse(message='Legal content updated successfully', editor=editor)
+
+    async def get_public_legal_document(self, document_key: str) -> PublicLegalDocumentResponse:
+        if document_key not in {'terms_of_service', 'privacy_policy'}:
+            raise ValidationException('Unsupported legal document key')
+        document = self.serialize(await self.admin_settings_repository.get_settings_document())
+        legal_document = document.get('legal_documents', {}).get(document_key, {})
+        return PublicLegalDocumentResponse(
+            key=document_key,
+            title=legal_document.get('title', document_key.replace('_', ' ').title()),
+            content=legal_document.get('content', ''),
+            updated_at=legal_document.get('updated_at'),
+            updated_by=legal_document.get('updated_by'),
+        )
 
     @staticmethod
     def _resolve_tab(tab: str) -> str:
@@ -95,3 +129,17 @@ class AdminSettingsService(BaseService):
             return 'Jan 15, 2025'
         dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
         return dt.strftime('%b %d, %Y')
+
+    async def _upload_profile_image(self, current_user: dict, file: UploadFile) -> str:
+        if not self.image_storage_service:
+            raise ValidationException('Image upload service is not configured')
+        uploaded: UploadedImage = await self.image_storage_service.upload_file(
+            file=file,
+            prefix=f"admin-settings/{current_user['_id']}/profile-image",
+        )
+        return uploaded.url
+
+    def _resolve_profile_image_url(self, value: str | None) -> str | None:
+        if not self.image_storage_service:
+            return value
+        return self.image_storage_service.resolve_public_url(value)

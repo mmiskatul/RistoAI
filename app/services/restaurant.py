@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import UploadFile
 
+from app.core.security import password_manager
 from app.core.exceptions import ConflictException, ValidationException
 from app.repositories.restaurant_ops import (
     RestaurantBankAccountRepository,
@@ -94,15 +95,20 @@ from app.schemas.restaurant import (
     DailyDataCoversSummaryResponse,
     DailyDataRegisterSummaryResponse,
     MetricCardResponse,
+    RestaurantChangePasswordRequest,
     RestaurantHomePeriodResponse,
     RestaurantHomeResponse,
+    RestaurantNotificationSettingsResponse,
+    RestaurantNotificationSettingsUpdateRequest,
     RestaurantProfileResponse,
     RestaurantProfileUpdateRequest,
+    RestaurantSettingsSubscriptionResponse,
     SettingsActionItemResponse,
     SettingsLanguageOptionResponse,
     QuickActionResponse,
     VatOverviewResponse,
 )
+from app.schemas.common import MessageResponse
 from app.services.base import BaseService
 from app.services.image_storage import ImageStorageService, UploadedImage
 from app.services.openai_ops import OpenAIOperationsService
@@ -221,18 +227,23 @@ class RestaurantOperationsService(BaseService):
         expense_date = expense.get("expense_date")
         if not expense_date:
             return []
+        payment_channel = str(expense.get("section") or "cash").lower()
         business_date = str(expense_date).replace("Z", "+00:00")[:10]
         return [
             {
                 "business_date": business_date,
                 "transaction_type": "expense",
-                "payment_channel": str(expense.get("section") or "cash").lower(),
+                "payment_channel": payment_channel,
                 "amount": self._safe_float(expense.get("amount")),
                 "currency": "EUR",
                 "reference_label": str(expense.get("category") or "Expense"),
                 "metadata": {
                     "category": expense.get("category"),
                     "notes": expense.get("notes"),
+                    "ledger_group": "expense",
+                    "affects_revenue": False,
+                    "affects_cash": payment_channel == "cash",
+                    "affects_profit": True,
                 },
             }
         ]
@@ -252,6 +263,10 @@ class RestaurantOperationsService(BaseService):
                 "metadata": {
                     "bank_account": deposit.get("bank_account"),
                     "notes": deposit.get("notes"),
+                    "ledger_group": "cash_movement",
+                    "affects_revenue": False,
+                    "affects_cash": True,
+                    "affects_profit": False,
                 },
             }
         ]
@@ -266,6 +281,12 @@ class RestaurantOperationsService(BaseService):
             resolved_amount = round(float(amount), 2)
             if resolved_amount <= 0:
                 return
+            ledger_group = {
+                "bank_collection": "sale",
+                "cash_collection": "sale",
+                "withdrawal": "cash_movement",
+                "expense": "expense",
+            }.get(transaction_type, "other")
             transactions.append(
                 {
                     "business_date": business_date,
@@ -277,6 +298,10 @@ class RestaurantOperationsService(BaseService):
                     "metadata": {
                         "method": record.get("method"),
                         "manual_entry_id": record.get("id"),
+                        "ledger_group": ledger_group,
+                        "affects_revenue": transaction_type in {"bank_collection", "cash_collection"},
+                        "affects_cash": transaction_type in {"cash_collection", "withdrawal", "expense"},
+                        "affects_profit": transaction_type == "expense",
                     },
                 }
             )
@@ -364,6 +389,7 @@ class RestaurantOperationsService(BaseService):
 
         insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=filtered_daily_records, expenses=filtered_expenses)
         metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
+        home_revenue_total = round(sum(self._resolve_home_revenue_amount(item) for item in filtered_daily_records), 2)
         cash_collected_total = round(sum(float(item.get("cash_collected_total", 0)) for item in filtered_daily_records), 2)
         cash_available = round(sum(float(item.get("cash_available", 0)) for item in filtered_daily_records), 2)
         deposits_collection_total = round(sum(float(item.get("deposits_collection_total", 0)) for item in filtered_daily_records), 2)
@@ -371,10 +397,11 @@ class RestaurantOperationsService(BaseService):
         revenue_points = self._build_home_revenue_chart(filtered_daily_records, period=period)
         if period == 'monthly':
             revenue_points = [ChartPointResponse(label=point.label.replace('W', 'Week '), value=point.value) for point in revenue_points]
+        invoice_document_total = round(sum(float(item.get("total_amount", 0)) for item in filtered_documents if item.get("status") == "processed"), 2)
 
         return RestaurantHomePeriodResponse(
             metrics=[
-                MetricCardResponse(label="Revenue", value=metrics_context["revenue_total"], change_percent=metrics_context["revenue_change_percent"]),
+                MetricCardResponse(label="Revenue", value=home_revenue_total, change_percent=metrics_context["revenue_change_percent"]),
                 MetricCardResponse(label="Expenses", value=metrics_context["expenses_total"], change_percent=metrics_context["expense_change_percent"]),
                 MetricCardResponse(label="Food Cost", value=metrics_context["food_cost_total"], change_percent=metrics_context["food_cost_change_percent"]),
                 MetricCardResponse(label="Profit", value=metrics_context["profit_total"], change_percent=metrics_context["profit_change_percent"]),
@@ -384,8 +411,10 @@ class RestaurantOperationsService(BaseService):
                 CashManagementItemResponse(label="Cash Available", amount=cash_available, subtitle="After expenses and manual deposits"),
                 CashManagementItemResponse(label="Cash Deposited", amount=deposits_collection_total, subtitle="Manual deposits and direct bank collections"),
             ],
-            vat_balance=self._calculate_vat_balance(metrics_context["revenue_total"], metrics_context["expenses_total"]),
+            vat_balance=self._calculate_vat_balance(home_revenue_total, metrics_context["expenses_total"]),
             revenue=revenue_points,
+            operating_revenue_total=home_revenue_total,
+            invoice_document_total=invoice_document_total,
             featured_insight=insights[0] if insights else None,
         )
 
@@ -667,10 +696,65 @@ class RestaurantOperationsService(BaseService):
     async def list_expenses(self, current_user: dict, *, page: int, page_size: int) -> ExpenseListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         items, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=page, page_size=page_size)
+        daily_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
         serialized_items = self.serialize_list(items)
+        serialized_daily_records = self.serialize_list(daily_records)
+        serialized_documents = self.serialize_list(documents)
         today = datetime.now(UTC).date()
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
+
+        daily_entry_expenses: list[dict[str, Any]] = []
+        for record in serialized_daily_records:
+            amount = float(record.get("total_expenses", 0) or 0)
+            if amount <= 0:
+                continue
+            business_date = str(record.get("business_date") or "")
+            if not business_date:
+                continue
+            daily_entry_expenses.append(
+                {
+                    "id": f"daily-entry-expense:{record['id']}",
+                    "category": "Daily Data Expense",
+                    "amount": amount,
+                    "expense_date": f"{business_date}T00:00:00+00:00",
+                    "section": "cash",
+                    "notes": "Imported from daily data",
+                    "created_at": record.get("created_at", datetime.now(UTC).isoformat()),
+                }
+            )
+
+        uploaded_document_expenses: list[dict[str, Any]] = []
+        for document in serialized_documents:
+            if str(document.get("status", "")).lower() != "processed":
+                continue
+            amount = float(document.get("expense_amount", document.get("total_amount", 0)) or 0)
+            if amount <= 0:
+                continue
+            invoice_date = str(document.get("invoice_date") or "")
+            if not invoice_date:
+                continue
+            uploaded_document_expenses.append(
+                {
+                    "id": f"uploaded-document-expense:{document['id']}",
+                    "category": "Uploaded Document Expense",
+                    "amount": amount,
+                    "expense_date": f"{invoice_date}T00:00:00+00:00",
+                    "section": "cash",
+                    "notes": str(document.get("counterparty_name") or document.get("supplier_name") or "Imported document"),
+                    "created_at": document.get("created_at", datetime.now(UTC).isoformat()),
+                }
+            )
+
+        all_expense_items = sorted(
+            [*serialized_items, *daily_entry_expenses, *uploaded_document_expenses],
+            key=lambda item: (
+                str(item.get("expense_date") or ""),
+                str(item.get("created_at") or ""),
+            ),
+            reverse=True,
+        )
 
         def build_period(expenses: list[dict]) -> ExpensePeriodResponse:
             total = round(sum(float(item.get("amount", 0)) for item in expenses), 2)
@@ -694,9 +778,9 @@ class RestaurantOperationsService(BaseService):
                 items=[self._to_expense_response(item) for item in expenses],
             )
 
-        today_items = [item for item in serialized_items if item["expense_date"][:10] == today.isoformat()]
-        week_items = [item for item in serialized_items if week_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
-        month_items = [item for item in serialized_items if month_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
+        today_items = [item for item in all_expense_items if item["expense_date"][:10] == today.isoformat()]
+        week_items = [item for item in all_expense_items if week_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
+        month_items = [item for item in all_expense_items if month_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
 
         return ExpenseListResponse(
             today=build_period(today_items),
@@ -904,11 +988,11 @@ class RestaurantOperationsService(BaseService):
                     description="Cash tracking with POS, withdrawals, cash in/out, and cash expenses.",
                     fields=[
                         DailyDataFormFieldResponse(key="business_date", label="Business Date", value_type="date", required=True, section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="pos_payments", label="POS Payments (+)", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="cash_withdrawals", label="Cash Withdrawals (+)", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="cash_in", label="Cash In (-)", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="cash_out", label="Cash Out (+)", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash (+)", value_type="number", placeholder="0.00", section="cash_tracking"),
+                        DailyDataFormFieldResponse(key="pos_payments", label="POS Payments", value_type="number", placeholder="0.00", section="cash_tracking"),
+                        DailyDataFormFieldResponse(key="cash_in", label="Cash Sales", value_type="number", placeholder="0.00", section="cash_tracking"),
+                        DailyDataFormFieldResponse(key="cash_withdrawals", label="Cash Withdrawals", value_type="number", placeholder="0.00", section="cash_tracking"),
+                        DailyDataFormFieldResponse(key="cash_out", label="Cash Out / Transfers", value_type="number", placeholder="0.00", section="cash_tracking"),
+                        DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash", value_type="number", placeholder="0.00", section="cash_tracking"),
                         DailyDataFormFieldResponse(key="notes", label="Add Note", value_type="string", placeholder="Optional note", section="cash_tracking"),
                     ],
                 ),
@@ -938,7 +1022,7 @@ class RestaurantOperationsService(BaseService):
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
             total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
-            total_expenses = round(data["expenses_in_cash"] + data["cash_withdrawals"] + data["cash_out"], 2)
+            total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = 0
             dinner_covers = 0
             record_payload = {
@@ -960,7 +1044,7 @@ class RestaurantOperationsService(BaseService):
             record_payload = {
                 **data,
                 "cash_collected_total": data["cash_payments"],
-                "cash_available": data["closing_cash"],
+                "cash_available": round(data["closing_cash"] + data["cash_payments"], 2),
                 "cash_withdrawals": 0.0,
                 "cash_in": data["cash_payments"],
                 "cash_out": max(data["opening_cash"] - data["closing_cash"], 0),
@@ -1003,7 +1087,7 @@ class RestaurantOperationsService(BaseService):
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
             total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
-            total_expenses = round(data["expenses_in_cash"] + data["cash_withdrawals"] + data["cash_out"], 2)
+            total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = 0
             dinner_covers = 0
             record_payload = {
@@ -1025,7 +1109,7 @@ class RestaurantOperationsService(BaseService):
             record_payload = {
                 **data,
                 "cash_collected_total": data["cash_payments"],
-                "cash_available": data["closing_cash"],
+                "cash_available": round(data["closing_cash"] + data["cash_payments"], 2),
                 "cash_withdrawals": 0.0,
                 "cash_in": data["cash_payments"],
                 "cash_out": max(data["opening_cash"] - data["closing_cash"], 0),
@@ -1119,6 +1203,7 @@ class RestaurantOperationsService(BaseService):
             "business_date": target_iso,
             "total_revenue": 0.0,
             "total_expenses": 0.0,
+            "invoice_document_total": round(sum(float(item.get("total_amount", 0)) for item in filtered_documents), 2),
             "total_covers": 0,
             "avg_revenue_per_cover": 0.0,
             "record_id": None,
@@ -1214,8 +1299,12 @@ class RestaurantOperationsService(BaseService):
             "business_date": reference_date.isoformat(),
             "total_revenue": round(sum(float(item.get("total_revenue", 0)) for item in buckets), 2),
             "total_expenses": round(sum(float(item.get("total_expenses", 0)) for item in buckets), 2),
+            "invoice_document_total": round(sum(float(item.get("invoice_document_total", 0)) for item in buckets), 2),
             "total_covers": int(sum(int(item.get("total_covers", 0)) for item in buckets)),
             "avg_revenue_per_cover": 0.0,
+            "opening_cash": round(sum(float(item.get("opening_cash", 0)) for item in buckets), 2),
+            "closing_cash": round(sum(float(item.get("closing_cash", 0)) for item in buckets), 2),
+            "cash_payments": round(sum(float(item.get("cash_payments", 0)) for item in buckets), 2),
             "record_id": None,
             "created_at": datetime.now(UTC).isoformat(),
             "data_sources": [],
@@ -1361,6 +1450,8 @@ class RestaurantOperationsService(BaseService):
         return AnalyticsOverviewResponse(
             insight_banner=await self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
             revenue_total=context["revenue_total"],
+            operating_revenue_total=context["revenue_total"],
+            invoice_document_total=round(sum(float(item.get("total_amount", 0)) for item in filtered_documents), 2),
             revenue_change_percent=context["revenue_change_percent"],
             weekly_revenue=self._build_home_revenue_chart(filtered_daily_records, period=period),
             metric_tiles=[
@@ -1587,6 +1678,43 @@ class RestaurantOperationsService(BaseService):
             updates["profile_image_url"] = await self._upload_profile_image(current_user, profile_image)
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
         return await self.get_profile(user)
+
+    async def get_settings_subscription(self, current_user: dict) -> RestaurantSettingsSubscriptionResponse:
+        serialized = self.serialize(current_user)
+        return RestaurantSettingsSubscriptionResponse(
+            selection_required=not bool(serialized.get("subscription_plan_name")),
+            plan_name=serialized.get("subscription_plan_name"),
+            billing_cycle=serialized.get("subscription_plan"),
+            status=serialized.get("subscription_status"),
+            started_at=serialized.get("subscription_started_at"),
+            expires_at=serialized.get("subscription_expires_at"),
+        )
+
+    async def get_notification_settings(self, current_user: dict) -> RestaurantNotificationSettingsResponse:
+        serialized = self.serialize(current_user)
+        settings = serialized.get("notification_settings") or {}
+        return RestaurantNotificationSettingsResponse(**settings)
+
+    async def update_notification_settings(
+        self,
+        current_user: dict,
+        payload: RestaurantNotificationSettingsUpdateRequest,
+    ) -> RestaurantNotificationSettingsResponse:
+        existing = await self.get_notification_settings(current_user)
+        merged = existing.model_dump() | payload.model_dump(exclude_none=True)
+        await self.user_repository.update(current_user["_id"], {"notification_settings": merged})
+        return RestaurantNotificationSettingsResponse(**merged)
+
+    async def change_password(self, current_user: dict, payload: RestaurantChangePasswordRequest) -> MessageResponse:
+        if not password_manager.verify_password(payload.current_password, current_user["hashed_password"]):
+            raise ValidationException("Current password is incorrect")
+        if payload.current_password == payload.new_password:
+            raise ValidationException("New password must be different from current password")
+        await self.user_repository.update(
+            current_user["_id"],
+            {"hashed_password": password_manager.hash_password(payload.new_password)},
+        )
+        return MessageResponse(message="Password changed successfully")
 
     async def _get_or_generate_insights(
         self,
@@ -1847,7 +1975,7 @@ class RestaurantOperationsService(BaseService):
                 payload={
                     "manual_entry_id": manual_record.get("id") if manual_record else None,
                     "manual_method": manual_record.get("method") if manual_record else None,
-                    "manual_revenue": snapshot["total_revenue"],
+                    "manual_revenue": snapshot["revenue_summary"]["manual_entry_sales_total"],
                     "manual_entry_expenses": snapshot["manual_entry_expenses"],
                     "uploaded_document_total": snapshot["uploaded_document_total"],
                     "uploaded_document_count": len(uploaded_documents),
@@ -1872,6 +2000,11 @@ class RestaurantOperationsService(BaseService):
                     "dinner_covers": snapshot["dinner_covers"],
                     "total_covers": snapshot["total_covers"],
                     "avg_revenue_per_cover": snapshot["avg_revenue_per_cover"],
+                    "revenue_summary": snapshot["revenue_summary"],
+                    "expense_summary": snapshot["expense_summary"],
+                    "deposit_summary": snapshot["deposit_summary"],
+                    "cash_summary": snapshot["cash_summary"],
+                    "operations_summary": snapshot["operations_summary"],
                     "source_breakdown": {
                         "manual_entry": bool(manual_record),
                         "uploaded_document_count": len(uploaded_documents),
@@ -1960,6 +2093,7 @@ class RestaurantOperationsService(BaseService):
                 "manual_expense_ids": [item["id"] for item in weekly_expenses],
                 "uploaded_document_ids": [item["id"] for item in weekly_documents],
                 "bank_deposit_ids": [item["id"] for item in weekly_deposits],
+                "manual_revenue": snapshot["revenue_summary"]["manual_entry_sales_total"],
                 "cash_collected_total": snapshot["cash_collected_total"],
                 "base_cash_available": snapshot["base_cash_available"],
                 "cash_available": snapshot["cash_available"],
@@ -1976,6 +2110,11 @@ class RestaurantOperationsService(BaseService):
                 "profit": snapshot["profit"],
                 "total_covers": snapshot["total_covers"],
                 "avg_revenue_per_cover": snapshot["avg_revenue_per_cover"],
+                "revenue_summary": snapshot["revenue_summary"],
+                "expense_summary": snapshot["expense_summary"],
+                "deposit_summary": snapshot["deposit_summary"],
+                "cash_summary": snapshot["cash_summary"],
+                "operations_summary": snapshot["operations_summary"],
                 "invoice_count": len(weekly_documents),
                 "manual_entry_count": len(weekly_manual_records),
                 "manual_expense_count": len(weekly_expenses),
@@ -2044,6 +2183,7 @@ class RestaurantOperationsService(BaseService):
                 "manual_expense_ids": [item["id"] for item in monthly_expenses],
                 "uploaded_document_ids": [item["id"] for item in monthly_documents],
                 "bank_deposit_ids": [item["id"] for item in monthly_deposits],
+                "manual_revenue": snapshot["revenue_summary"]["manual_entry_sales_total"],
                 "cash_collected_total": snapshot["cash_collected_total"],
                 "base_cash_available": snapshot["base_cash_available"],
                 "cash_available": snapshot["cash_available"],
@@ -2060,6 +2200,11 @@ class RestaurantOperationsService(BaseService):
                 "profit": snapshot["profit"],
                 "total_covers": snapshot["total_covers"],
                 "avg_revenue_per_cover": snapshot["avg_revenue_per_cover"],
+                "revenue_summary": snapshot["revenue_summary"],
+                "expense_summary": snapshot["expense_summary"],
+                "deposit_summary": snapshot["deposit_summary"],
+                "cash_summary": snapshot["cash_summary"],
+                "operations_summary": snapshot["operations_summary"],
                 "invoice_count": len(monthly_documents),
                 "manual_entry_count": len(monthly_manual_records),
                 "manual_expense_count": len(monthly_expenses),
@@ -2411,7 +2556,7 @@ class RestaurantOperationsService(BaseService):
         by_day: dict[str, float] = {}
         for item in self.serialize_list(daily_records):
             key = item['business_date']
-            by_day[key] = by_day.get(key, 0.0) + float(item['total_revenue'])
+            by_day[key] = by_day.get(key, 0.0) + self._resolve_home_revenue_amount(item)
 
         points: list[ChartPointResponse] = []
         for index in range(4):
@@ -2615,15 +2760,28 @@ class RestaurantOperationsService(BaseService):
         return round((revenue_total - expenses_total) * self.VAT_RATE, 2)
 
     def _build_weekly_revenue_chart(self, daily_records: list[dict]) -> list[ChartPointResponse]:
-        today = datetime.now(UTC).date() - timedelta(days=1)
+        today = datetime.now(UTC).date()
         by_day: dict[str, float] = {}
         for item in self.serialize_list(daily_records):
-            by_day[item["business_date"]] = by_day.get(item["business_date"], 0.0) + float(item["total_revenue"])
+            by_day[item["business_date"]] = by_day.get(item["business_date"], 0.0) + self._resolve_home_revenue_amount(item)
         points: list[ChartPointResponse] = []
         for offset in range(6, -1, -1):
             target = today - timedelta(days=offset)
             points.append(ChartPointResponse(label=target.strftime("%a").upper(), value=round(by_day.get(target.isoformat(), 0.0), 2)))
         return points
+
+    @staticmethod
+    def _resolve_home_revenue_amount(record: dict[str, Any]) -> float:
+        explicit_revenue = round(float(record.get("total_revenue", 0) or 0), 2)
+        if explicit_revenue > 0:
+            return explicit_revenue
+        deposit_summary = record.get("deposit_summary") or {}
+        return round(
+            float(
+                deposit_summary.get("deposits_collection_total", record.get("deposits_collection_total", 0)) or 0
+            ),
+            2,
+        )
 
     def _build_recent_activity(self, *, daily_records: list[dict], expenses: list[dict], cash_deposits: list[dict]) -> list[ActivityItemResponse]:
         items: list[ActivityItemResponse] = []
@@ -2702,8 +2860,12 @@ class RestaurantOperationsService(BaseService):
                     "business_date": record["business_date"],
                     "total_revenue": 0.0,
                     "total_expenses": 0.0,
+                    "invoice_document_total": 0.0,
                     "total_covers": 0,
                     "avg_revenue_per_cover": 0.0,
+                    "opening_cash": 0.0,
+                    "closing_cash": 0.0,
+                    "cash_payments": 0.0,
                     "record_id": None,
                     "created_at": record["created_at"],
                     "data_sources": [],
@@ -2715,6 +2877,9 @@ class RestaurantOperationsService(BaseService):
             bucket["total_revenue"] = float(record.get("total_revenue", 0))
             bucket["total_covers"] = covers
             bucket["avg_revenue_per_cover"] = float(record.get("avg_revenue_per_cover", 0))
+            bucket["opening_cash"] = float(record.get("opening_cash", 0) or 0)
+            bucket["closing_cash"] = float(record.get("closing_cash", 0) or 0)
+            bucket["cash_payments"] = float(record.get("cash_payments", 0) or 0)
             bucket["created_at"] = record["created_at"]
             bucket["data_sources"].append(
                 DailyDataEntrySourceResponse(kind="daily_record", label="Daily data", count=1, endpoint=f"/api/v1/restaurant/daily-data/{record['id']}")
@@ -2734,8 +2899,12 @@ class RestaurantOperationsService(BaseService):
                     "business_date": expense_date,
                     "total_revenue": 0.0,
                     "total_expenses": 0.0,
+                    "invoice_document_total": 0.0,
                     "total_covers": 0,
                     "avg_revenue_per_cover": 0.0,
+                    "opening_cash": 0.0,
+                    "closing_cash": 0.0,
+                    "cash_payments": 0.0,
                     "record_id": None,
                     "created_at": expense.get("created_at", datetime.now(UTC).isoformat()),
                     "data_sources": [],
@@ -2747,9 +2916,6 @@ class RestaurantOperationsService(BaseService):
             invoice_date = str(document.get("invoice_date") or "")
             if not invoice_date:
                 continue
-            document_type = str(document.get("document_type", "expense")).lower()
-            expense_amount = float(document.get("expense_amount", document.get("total_amount", 0)) or 0)
-            revenue_amount = float(document.get("revenue_amount", document.get("total_amount", 0)) or 0)
             group = expense_groups.setdefault(invoice_date, {"uploaded_document": {"count": 0, "total": 0.0, "endpoint": None}, "manual_expense": {"count": 0, "total": 0.0, "endpoint": "/api/v1/restaurant/expenses"}})
             group["uploaded_document"]["count"] += 1
             group["uploaded_document"]["total"] += float(document.get("total_amount", 0))
@@ -2761,17 +2927,18 @@ class RestaurantOperationsService(BaseService):
                     "business_date": invoice_date,
                     "total_revenue": 0.0,
                     "total_expenses": 0.0,
+                    "invoice_document_total": 0.0,
                     "total_covers": 0,
                     "avg_revenue_per_cover": 0.0,
+                    "opening_cash": 0.0,
+                    "closing_cash": 0.0,
+                    "cash_payments": 0.0,
                     "record_id": None,
                     "created_at": document.get("created_at", datetime.now(UTC).isoformat()),
                     "data_sources": [],
                 },
             )
-            if document_type == "expense":
-                bucket["total_expenses"] = round(bucket.get("total_expenses", 0.0) + expense_amount, 2)
-            elif document_type == "revenue":
-                bucket["total_revenue"] = round(bucket.get("total_revenue", 0.0) + revenue_amount, 2)
+            bucket["invoice_document_total"] = round(bucket.get("invoice_document_total", 0.0) + float(document.get("total_amount", 0)), 2)
 
         for expense_date, grouped in expense_groups.items():
             bucket = buckets[expense_date]
@@ -3025,6 +3192,18 @@ class RestaurantOperationsService(BaseService):
     def _normalize_bank_account_name(value: str) -> str:
         return " ".join(value.strip().lower().split())
 
+    @staticmethod
+    def _build_register_summary(payload: dict[str, Any]) -> DailyDataRegisterSummaryResponse:
+        opening_cash = float(payload.get("opening_cash", 0) or 0)
+        closing_cash = float(payload.get("closing_cash", 0) or 0)
+        cash_payments = float(payload.get("cash_payments", 0) or 0)
+        return DailyDataRegisterSummaryResponse(
+            opening_cash=opening_cash,
+            closing_cash=closing_cash,
+            cash_payments=cash_payments,
+            total_cash_on_hand=round(closing_cash + cash_payments, 2),
+        )
+
     def _to_daily_data_response(self, record: dict) -> DailyDataResponse:
         serialized = self.serialize(record)
         lunch_covers = int(serialized.get("lunch_covers", 0))
@@ -3046,7 +3225,10 @@ class RestaurantOperationsService(BaseService):
             business_date=serialized["business_date"],
             method=serialized["method"],
             total_revenue=serialized["total_revenue"],
+            operating_revenue=serialized["total_revenue"],
             total_expenses=serialized["total_expenses"],
+            operating_expenses=serialized["total_expenses"],
+            invoice_document_total=float(serialized.get("uploaded_document_total", 0.0)),
             profit=serialized["profit"],
             lunch_covers=lunch_covers,
             dinner_covers=dinner_covers,
@@ -3054,10 +3236,7 @@ class RestaurantOperationsService(BaseService):
             avg_revenue_per_cover=serialized.get("avg_revenue_per_cover", 0.0),
             revenue_breakdown=revenue_breakdown,
             covers_summary=DailyDataCoversSummaryResponse(lunch=lunch_covers, dinner=dinner_covers, total=total_covers),
-            register_summary=DailyDataRegisterSummaryResponse(
-                opening_cash=float(serialized.get("opening_cash", 0)),
-                closing_cash=float(serialized.get("closing_cash", 0)),
-            ),
+            register_summary=self._build_register_summary(serialized),
             created_at=serialized["created_at"],
         )
 
@@ -3070,7 +3249,10 @@ class RestaurantOperationsService(BaseService):
             id=str(bucket["id"]),
             business_date=bucket["business_date"],
             total_revenue=revenue,
+            operating_revenue=revenue,
             total_expenses=expenses,
+            operating_expenses=expenses,
+            invoice_document_total=float(bucket.get("invoice_document_total", 0.0)),
             total_covers=int(bucket.get("total_covers", 0)),
             avg_revenue_per_cover=avg_value,
             created_at=str(bucket.get("created_at")),
@@ -3090,9 +3272,13 @@ class RestaurantOperationsService(BaseService):
         return DailyDataDetailResponse(
             business_date=list_item.business_date,
             total_revenue=list_item.total_revenue,
+            operating_revenue=list_item.operating_revenue,
             total_expenses=list_item.total_expenses,
+            operating_expenses=list_item.operating_expenses,
+            invoice_document_total=list_item.invoice_document_total,
             total_covers=list_item.total_covers,
             avg_revenue_per_cover=list_item.avg_revenue_per_cover,
+            register_summary=self._build_register_summary(bucket),
             documents=[
                 DailyDataDocumentItemResponse(
                     id=item["id"],

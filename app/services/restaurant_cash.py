@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
+SALE_TRANSACTION_TYPES = {"bank_collection", "cash_collection", "bank_deposit", "cash_deposit"}
+
 
 @dataclass(frozen=True)
 class CashLedgerSummary:
@@ -113,7 +115,14 @@ def calculate_cash_ledger(
     )
 
     return CashLedgerSummary(
-        total_collected=round(total_collected + direct_bank_collection_total + document_cash_total, 2),
+        total_collected=round(
+            total_collected
+            + direct_bank_collection_total
+            + document_cash_total
+            + manual_bank_deposits_total
+            + cash_deposits_total,
+            2,
+        ),
         base_cash_available=base_cash_available,
         cash_available=cash_available,
         withdrawals_total=withdrawals_total,
@@ -143,13 +152,43 @@ def build_aggregate_snapshot(
         daily_records=manual_record_items,
         finance_transactions=transaction_items,
     )
-    total_revenue = round(sum(float(item.get("total_revenue", 0)) for item in manual_record_items) + cash.document_revenue_total, 2)
+    manual_sales_total = round(sum(float(item.get("total_revenue", 0)) for item in manual_record_items), 2)
+    deposit_sales_total = round(
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("source_kind", "")).lower() == "deposit"
+            and str(item.get("transaction_type", "")).lower() in SALE_TRANSACTION_TYPES
+        ),
+        2,
+    )
+    document_sales_total = round(
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("source_kind", "")).lower() == "document"
+            and str(item.get("transaction_type", "")).lower() in SALE_TRANSACTION_TYPES
+        ),
+        2,
+    )
+    other_sales_total = round(
+        sum(
+            float(item.get("amount", 0))
+            for item in transaction_items
+            if str(item.get("source_kind", "")).lower() not in {"manual_entry", "document", "deposit"}
+            and str(item.get("transaction_type", "")).lower() in SALE_TRANSACTION_TYPES
+        ),
+        2,
+    )
+
+    total_revenue = round(manual_sales_total + deposit_sales_total + other_sales_total, 2)
     manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in manual_record_items), 2)
     lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in manual_record_items))
     dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in manual_record_items))
     total_covers = lunch_covers + dinner_covers
     total_expenses = round(manual_entry_expenses + cash.manual_expenses_total + cash.document_expense_total, 2)
-    calculated_profit = round(total_revenue - total_expenses, 2)
+    net_revenue_total = round(total_revenue - total_expenses, 2)
+    calculated_profit = net_revenue_total
 
     snapshot = {
         "total_revenue": total_revenue,
@@ -171,11 +210,50 @@ def build_aggregate_snapshot(
         "cash_available": cash.cash_available,
         "withdrawals_total": cash.withdrawals_total,
         "total_expenses": total_expenses,
-        "profit": round(calculated_profit + cash.document_profit_total, 2),
+        "profit": calculated_profit,
         "lunch_covers": lunch_covers,
         "dinner_covers": dinner_covers,
         "total_covers": total_covers,
         "avg_revenue_per_cover": round(total_revenue / max(total_covers, 1), 2) if total_revenue else 0.0,
+        "revenue_summary": {
+            "sales_total": total_revenue,
+            "manual_entry_sales_total": manual_sales_total,
+            "deposit_sales_total": deposit_sales_total,
+            "document_sales_total": document_sales_total,
+            "other_sales_total": other_sales_total,
+            "recognized_revenue_total": total_revenue,
+            "net_revenue_total": net_revenue_total,
+            "document_revenue_total": cash.document_revenue_total,
+            "document_profit_adjustment_total": cash.document_profit_total,
+        },
+        "expense_summary": {
+            "total_expenses": total_expenses,
+            "manual_entry_expenses": manual_entry_expenses,
+            "manual_expense_total": cash.manual_expenses_total,
+            "manual_cash_expense_total": cash.cash_expenses_total,
+            "document_expense_total": cash.document_expense_total,
+        },
+        "deposit_summary": {
+            "direct_bank_collection_total": cash.direct_bank_collection_total,
+            "manual_bank_deposits_total": cash.manual_bank_deposits_total,
+            "cash_deposits_total": cash.cash_deposits_total,
+            "bank_deposits_total": cash.bank_deposits_total,
+            "deposits_collection_total": cash.deposits_collection_total,
+        },
+        "cash_summary": {
+            "cash_collected_total": cash.total_collected,
+            "base_cash_available": cash.base_cash_available,
+            "cash_available": cash.cash_available,
+            "withdrawals_total": cash.withdrawals_total,
+            "document_cash_total": cash.document_cash_total,
+        },
+        "operations_summary": {
+            "profit": calculated_profit,
+            "lunch_covers": lunch_covers,
+            "dinner_covers": dinner_covers,
+            "total_covers": total_covers,
+            "avg_revenue_per_cover": round(total_revenue / max(total_covers, 1), 2) if total_revenue else 0.0,
+        },
     }
     snapshot.update({f"cash_{key}": value for key, value in asdict(cash).items() if key not in {"cash_available"}})
     return snapshot

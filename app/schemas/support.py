@@ -137,3 +137,17 @@ class SupportTicketDetailResponse(BaseSchema):
 class SupportTicketActionResponse(BaseSchema):
     message: str
     ticket: SupportTicketDetailResponse
+
+
+class HelpCenterArticleResponse(BaseSchema):
+    key: str
+    title: str
+    summary: str
+
+
+class RestaurantHelpCenterResponse(BaseSchema):
+    title: str = "Help Center"
+    subtitle: str = "Get help, submit a request, and track your support tickets."
+    create_ticket_endpoint: str = "/api/v1/restaurant/help-center/tickets"
+    list_tickets_endpoint: str = "/api/v1/restaurant/help-center/tickets"
+    articles: list[HelpCenterArticleResponse] = Field(default_factory=list)

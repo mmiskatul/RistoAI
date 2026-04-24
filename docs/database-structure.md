@@ -42,17 +42,27 @@
 
 ### Aggregate Collections
 
-- `restaurant_daily_records`
-  - One aggregate document per `tenant_id + business_date`.
-  - Summarizes manual entry revenue, invoice totals, manual expense totals, covers, and profit.
+- `restaurant_finance_snapshots`
+  - One aggregate document per tenant and period key.
+  - Stores `period_type` of `day`, `week`, or `month`.
+  - Keeps compatibility top-level fields such as `total_revenue`, `total_expenses`, `cash_available`, and `bank_deposits_total`.
+  - Also stores normalized nested groups:
+    - `revenue_summary`
+    - `expense_summary`
+    - `deposit_summary`
+    - `cash_summary`
+    - `operations_summary`
+  - Daily, weekly, and monthly repository accessors all read from this same collection.
 
-- `restaurant_weekly_records`
-  - One aggregate document per `tenant_id + week_start_date`.
-  - Summarizes the week for list/detail reporting.
-
-- `restaurant_monthly_records`
-  - One aggregate document per `tenant_id + month_key` (`YYYY-MM`).
-  - Summarizes the month for reporting.
+- `restaurant_finance_transactions`
+  - Immutable-like normalized finance movement rows derived from source records.
+  - Each row is linked to a `source_kind` and `source_id`.
+  - Transaction metadata now classifies whether the row affects revenue, cash, or profit.
+  - `metadata.ledger_group` values:
+    - `sale`
+    - `expense`
+    - `cash_movement`
+    - `other`
 
 ## Design Rules
 
@@ -70,3 +80,10 @@
 4. Recompute the impacted month aggregate.
 5. Read reporting screens from aggregate collections where possible.
 6. Read detail/edit screens from raw collections.
+
+## Finance Modeling Notes
+
+- Sales increase revenue once.
+- Deposits do not create new revenue; they only move already-earned money.
+- Cash withdrawals and cash-out operations reduce available cash but do not count as business expenses.
+- Only true expenses, such as `expenses_in_cash` and expense documents, reduce profit.

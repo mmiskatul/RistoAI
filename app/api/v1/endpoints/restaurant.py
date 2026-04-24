@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile,
 
 from app.core.exceptions import ValidationException
 from app.dependencies.auth import get_current_user
-from app.dependencies.services import get_restaurant_operations_service
+from app.dependencies.services import get_restaurant_operations_service, get_support_service
 from app.schemas.restaurant import (
     AnalyticsInsightBannerResponse,
     AnalyticsOverviewResponse,
@@ -40,11 +40,25 @@ from app.schemas.restaurant import (
     InventoryStockUpdateRequest,
     InventoryUpdateRequest,
     RestaurantHomeResponse,
+    RestaurantNotificationSettingsResponse,
+    RestaurantNotificationSettingsUpdateRequest,
+    RestaurantChangePasswordRequest,
     RestaurantProfileResponse,
     RestaurantProfileUpdateRequest,
+    RestaurantSettingsSubscriptionResponse,
     VatOverviewResponse,
 )
+from app.schemas.support import (
+    RestaurantHelpCenterResponse,
+    SupportTicketActionResponse,
+    SupportTicketCreateRequest,
+    SupportTicketDetailResponse,
+    SupportTicketQuery,
+    UserSupportTicketListResponse,
+)
+from app.schemas.common import MessageResponse
 from app.services.restaurant import RestaurantOperationsService
+from app.services.support import SupportService
 
 router = APIRouter()
 
@@ -393,4 +407,67 @@ async def update_profile(
         number_of_seats=number_of_seats,
     )
     return await service.update_profile_with_image(current_user, payload, profile_image=profile_image)
+
+
+@router.get('/settings/subscription', response_model=RestaurantSettingsSubscriptionResponse, tags=['Restaurant Settings'], summary='Subscription Settings', description='Returns the current restaurant subscription state and management endpoints.')
+async def get_settings_subscription(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RestaurantSettingsSubscriptionResponse:
+    return await service.get_settings_subscription(current_user)
+
+
+@router.get('/settings/notifications', response_model=RestaurantNotificationSettingsResponse, tags=['Restaurant Settings'], summary='Notification Settings', description='Returns restaurant notification preferences.')
+async def get_notification_settings(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RestaurantNotificationSettingsResponse:
+    return await service.get_notification_settings(current_user)
+
+
+@router.put('/settings/notifications', response_model=RestaurantNotificationSettingsResponse, tags=['Restaurant Settings'], summary='Update Notification Settings', description='Updates restaurant notification preferences.')
+async def update_notification_settings(
+    payload: RestaurantNotificationSettingsUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantNotificationSettingsResponse:
+    return await service.update_notification_settings(current_user, payload)
+
+
+@router.post('/settings/change-password', response_model=MessageResponse, tags=['Restaurant Settings'], summary='Change Password', description='Changes the current authenticated restaurant user password.')
+async def change_password(
+    payload: RestaurantChangePasswordRequest,
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> MessageResponse:
+    return await service.change_password(current_user, payload)
+
+
+@router.get('/help-center', response_model=RestaurantHelpCenterResponse, tags=['Restaurant Help Center'], summary='Help Center Overview', description='Returns the restaurant help center overview and ticket action endpoints.')
+async def get_help_center(
+    _: dict = Depends(get_current_user),
+    service: SupportService = Depends(get_support_service),
+) -> RestaurantHelpCenterResponse:
+    return await service.get_help_center()
+
+
+@router.post('/help-center/tickets', response_model=SupportTicketActionResponse, tags=['Restaurant Help Center'], summary='Create Help Center Ticket', description='Creates a support ticket from the restaurant help center and stores it in the admin support section.')
+async def create_help_center_ticket(
+    payload: SupportTicketCreateRequest,
+    current_user: dict = Depends(get_current_user),
+    service: SupportService = Depends(get_support_service),
+) -> SupportTicketActionResponse:
+    return await service.create_ticket(current_user, payload)
+
+
+@router.get('/help-center/tickets', response_model=UserSupportTicketListResponse, tags=['Restaurant Help Center'], summary='List Help Center Tickets', description='Lists help center tickets created by the current restaurant user.')
+async def list_help_center_tickets(
+    query: SupportTicketQuery = Depends(),
+    current_user: dict = Depends(get_current_user),
+    service: SupportService = Depends(get_support_service),
+) -> UserSupportTicketListResponse:
+    return await service.get_user_tickets(current_user, query)
+
+
+@router.get('/help-center/tickets/{ticket_id}', response_model=SupportTicketDetailResponse, tags=['Restaurant Help Center'], summary='Help Center Ticket Detail', description='Returns the detail for one help center ticket owned by the current restaurant user.')
+async def get_help_center_ticket_detail(
+    ticket_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: SupportService = Depends(get_support_service),
+) -> SupportTicketDetailResponse:
+    return await service.get_user_ticket_detail(current_user, ticket_id)
 

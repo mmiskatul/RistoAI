@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import AliasChoices, Field, computed_field, field_validator
+from pydantic import AliasChoices, Field, computed_field, field_validator, model_validator
 
+from app.core.enums import SubscriptionPlan, SubscriptionStatus
+from app.schemas.auth import validate_password_strength
 from app.schemas.common import BaseSchema
 
 
@@ -68,6 +70,8 @@ class RestaurantHomePeriodResponse(BaseSchema):
     cash_management: list[CashManagementItemResponse]
     vat_balance: float
     revenue: list[ChartPointResponse]
+    operating_revenue_total: float = 0.0
+    invoice_document_total: float = 0.0
     featured_insight: InsightSummaryResponse | None = None
 
 
@@ -476,6 +480,8 @@ class DailyDataCoversSummaryResponse(BaseSchema):
 class DailyDataRegisterSummaryResponse(BaseSchema):
     opening_cash: float = 0.0
     closing_cash: float = 0.0
+    cash_payments: float = 0.0
+    total_cash_on_hand: float = 0.0
 
 
 class DailyDataResponse(BaseSchema):
@@ -483,7 +489,10 @@ class DailyDataResponse(BaseSchema):
     business_date: str
     method: str
     total_revenue: float
+    operating_revenue: float
     total_expenses: float
+    operating_expenses: float
+    invoice_document_total: float = 0.0
     profit: float
     lunch_covers: int
     dinner_covers: int
@@ -520,7 +529,10 @@ class DailyDataListItemResponse(BaseSchema):
     id: str
     business_date: str
     total_revenue: float
+    operating_revenue: float
     total_expenses: float = 0.0
+    operating_expenses: float = 0.0
+    invoice_document_total: float = 0.0
     total_covers: int
     avg_revenue_per_cover: float
     created_at: str
@@ -550,9 +562,13 @@ class DailyDataDocumentItemResponse(BaseSchema):
 class DailyDataDetailResponse(BaseSchema):
     business_date: str
     total_revenue: float
+    operating_revenue: float
     total_expenses: float
+    operating_expenses: float
+    invoice_document_total: float = 0.0
     total_covers: int
     avg_revenue_per_cover: float
+    register_summary: DailyDataRegisterSummaryResponse = Field(default_factory=DailyDataRegisterSummaryResponse)
     documents: list[DailyDataDocumentItemResponse] = Field(default_factory=list)
     document_count: int = 0
 
@@ -666,6 +682,8 @@ class AnalyticsSupplierAlertResponse(BaseSchema):
 class AnalyticsOverviewResponse(BaseSchema):
     insight_banner: AnalyticsInsightBannerResponse
     revenue_total: float
+    operating_revenue_total: float
+    invoice_document_total: float = 0.0
     revenue_change_percent: float
     weekly_revenue: list[ChartPointResponse]
     metric_tiles: list[AnalyticsMetricTileResponse] = Field(default_factory=list)
@@ -754,4 +772,54 @@ class RestaurantProfileUpdateRequest(BaseSchema):
     location: str | None = Field(default=None, max_length=120)
     city_location: str | None = Field(default=None, max_length=120)
     number_of_seats: int | None = Field(default=None, ge=0)
+
+
+class RestaurantSettingsSubscriptionResponse(BaseSchema):
+    selection_required: bool
+    plan_name: str | None = None
+    billing_cycle: SubscriptionPlan | None = None
+    status: SubscriptionStatus | None = None
+    started_at: datetime | None = None
+    expires_at: datetime | None = None
+    plans_endpoint: str = "/api/v1/subscriptions/user/plans"
+    checkout_endpoint: str = "/api/v1/subscriptions/user/checkout-session"
+    customer_portal_endpoint: str = "/api/v1/subscriptions/user/customer-portal"
+
+
+class RestaurantNotificationSettingsResponse(BaseSchema):
+    email_notifications: bool = True
+    push_notifications: bool = True
+    marketing_notifications: bool = False
+    low_stock_alerts: bool = True
+    daily_summary_notifications: bool = True
+
+
+class RestaurantNotificationSettingsUpdateRequest(BaseSchema):
+    email_notifications: bool | None = None
+    push_notifications: bool | None = None
+    marketing_notifications: bool | None = None
+    low_stock_alerts: bool | None = None
+    daily_summary_notifications: bool | None = None
+
+
+class RestaurantChangePasswordRequest(BaseSchema):
+    current_password: str = Field(min_length=8, max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
+    confirm_password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+    @field_validator("confirm_password")
+    @classmethod
+    def validate_confirm_password(cls, value: str) -> str:
+        return validate_password_strength(value)
+
+    @model_validator(mode="after")
+    def validate_password_match(self) -> "RestaurantChangePasswordRequest":
+        if self.new_password != self.confirm_password:
+            raise ValueError("New password and confirm password must match")
+        return self
 

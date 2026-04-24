@@ -8,6 +8,8 @@ from app.core.enums import SupportTicketStatus
 from app.core.exceptions import NotFoundException
 from app.repositories.support_ticket import SupportTicketRepository
 from app.schemas.support import (
+    HelpCenterArticleResponse,
+    RestaurantHelpCenterResponse,
     SupportManagementFilterChipResponse,
     SupportManagementRowActionResponse,
     SupportManagementSummaryCardResponse,
@@ -33,6 +35,27 @@ from app.utils.pagination import build_pagination_meta
 class SupportService(BaseService):
     def __init__(self, support_ticket_repository: SupportTicketRepository) -> None:
         self.support_ticket_repository = support_ticket_repository
+
+    async def get_help_center(self) -> RestaurantHelpCenterResponse:
+        return RestaurantHelpCenterResponse(
+            articles=[
+                HelpCenterArticleResponse(
+                    key='billing',
+                    title='Billing And Subscription Help',
+                    summary='Get help with plan access, renewals, and billing issues.',
+                ),
+                HelpCenterArticleResponse(
+                    key='account',
+                    title='Account And Login Help',
+                    summary='Get help with password, login, and account access issues.',
+                ),
+                HelpCenterArticleResponse(
+                    key='technical',
+                    title='Technical Support',
+                    summary='Report bugs, upload issues, or problems using restaurant features.',
+                ),
+            ]
+        )
 
     async def create_ticket(self, current_user: dict, payload: SupportTicketCreateRequest) -> SupportTicketActionResponse:
         ticket = await self.support_ticket_repository.create(
