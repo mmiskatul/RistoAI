@@ -69,8 +69,49 @@ async def get_terms_and_conditions(
     return await service.get_public_legal_document('terms_of_service')
 
 
+@router.get('/terms-of-service', response_model=PublicLegalDocumentResponse, tags=['Settings'], summary='Public Terms Of Service', description='Returns the Terms of Service content managed by the admin settings page.')
+async def get_terms_of_service(
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> PublicLegalDocumentResponse:
+    return await service.get_public_legal_document('terms_of_service')
+
+
+@router.put('/terms-of-service', response_model=AdminSettingsActionResponse, tags=['Settings'], summary='Update Terms Of Service', description='Updates the Terms of Service content managed by the admin settings page.')
+async def update_terms_of_service(
+    payload: AdminLegalContentUpdateRequest,
+    current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> AdminSettingsActionResponse:
+    return await service.update_legal_editor('terms_of_service', current_user, payload)
+
+
 @router.get('/privacy-policy', response_model=PublicLegalDocumentResponse, tags=['Settings'], summary='Public Privacy Policy', description='Returns the Privacy Policy content managed by the admin settings page.')
 async def get_privacy_policy(
     service: AdminSettingsService = Depends(get_admin_settings_service),
 ) -> PublicLegalDocumentResponse:
     return await service.get_public_legal_document('privacy_policy')
+
+
+@router.get('/privacy', response_model=PublicLegalDocumentResponse, tags=['Settings'], summary='Public Privacy Policy Alias', description='Returns the Privacy Policy content managed by the admin settings page.')
+async def get_privacy_policy_alias(
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> PublicLegalDocumentResponse:
+    return await service.get_public_legal_document('privacy_policy')
+
+
+@router.put('/privacy-policy', response_model=AdminSettingsActionResponse, tags=['Settings'], summary='Update Privacy Policy', description='Updates the Privacy Policy content managed by the admin settings page.')
+async def update_privacy_policy(
+    payload: AdminLegalContentUpdateRequest,
+    current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> AdminSettingsActionResponse:
+    return await service.update_legal_editor('privacy_policy', current_user, payload)
+
+
+@router.put('/privacy', response_model=AdminSettingsActionResponse, tags=['Settings'], summary='Update Privacy Policy Alias', description='Updates the Privacy Policy content managed by the admin settings page.')
+async def update_privacy_policy_alias(
+    payload: AdminLegalContentUpdateRequest,
+    current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> AdminSettingsActionResponse:
+    return await service.update_legal_editor('privacy_policy', current_user, payload)

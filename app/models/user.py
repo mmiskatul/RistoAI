@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.core.enums import AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
+from app.core.enums import AccountStatus, AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
 from app.models.base import MongoDocument
 
 
@@ -20,5 +20,6 @@ class UserDocument(MongoDocument):
     subscription_plan_name: str | None = None
     subscription_plan: SubscriptionPlan | None = None
     subscription_status: SubscriptionStatus | None = None
+    account_status: AccountStatus | None = None
     subscription_started_at: datetime | None = None
     subscription_expires_at: datetime | None = None

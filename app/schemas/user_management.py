@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import EmailStr, Field
 
-from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
+from app.core.enums import AccountStatus, SubscriptionPlan, SubscriptionStatus, UserRole
 from app.schemas.common import BaseSchema
 
 
@@ -62,6 +62,7 @@ class UserManagementListItemResponse(BaseSchema):
     subscription_plan_name: str | None = None
     subscription_plan: SubscriptionPlan | None = None
     subscription_status: SubscriptionStatus | None = None
+    account_status: AccountStatus | None = None
     subscription_started_at: datetime | None = None
     subscription_expires_at: datetime | None = None
     status: str
@@ -93,6 +94,7 @@ class UserManagementUpdateRequest(BaseSchema):
     subscription_plan_name: str | None = Field(default=None, min_length=2, max_length=120)
     subscription_plan: SubscriptionPlan | None = None
     subscription_status: SubscriptionStatus | None = None
+    account_status: AccountStatus | None = None
     subscription_started_at: datetime | None = None
     subscription_expires_at: datetime | None = None
 

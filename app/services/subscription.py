@@ -21,6 +21,7 @@ from app.schemas.subscription import (
     CouponResponse,
     CouponUpdateRequest,
     SubscriptionActionResponse,
+    SubscriptionPlanCreateRequest,
     SubscriptionFilterChipResponse,
     SubscriptionOverviewQuery,
     SubscriptionOverviewResponse,
@@ -96,7 +97,7 @@ class SubscriptionService(BaseService):
 
     async def get_plan_management(self, query: CouponQuery) -> SubscriptionPlanManagementResponse:
         await self.coupon_repository.mark_expired_coupons()
-        plans = await self.subscription_plan_repository.get_active_plans()
+        plans = await self.subscription_plan_repository.get_plans()
         coupons, total = await self.coupon_repository.get_filtered_coupons(
             search=query.search,
             status=query.status,
@@ -105,7 +106,8 @@ class SubscriptionService(BaseService):
         )
         pagination = build_pagination_meta(total=total, page=query.page, page_size=query.page_size)
         serialized_plans = [self._to_plan_response(plan) for plan in plans]
-        active_plan = self._to_active_plan_display(plans[0]) if plans else None
+        active_source = next((plan for plan in plans if plan.get('is_active')), None)
+        active_plan = self._to_active_plan_display(active_source) if active_source else None
         return SubscriptionPlanManagementResponse(
             plan=serialized_plans[0] if serialized_plans else None,
             active_plan=active_plan,
@@ -130,7 +132,7 @@ class SubscriptionService(BaseService):
         payload: UserSubscriptionDiscountPreviewRequest,
     ) -> UserSubscriptionDiscountPreviewResponse:
         del current_user
-        plan = await self._get_single_visible_plan()
+        plan = await self._get_selected_visible_plan()
         pricing = await self._resolve_coupon_pricing(plan, payload.billing_cycle, payload.coupon_code)
         return UserSubscriptionDiscountPreviewResponse(
             coupon_code=pricing['coupon_code'],
@@ -140,7 +142,7 @@ class SubscriptionService(BaseService):
         )
 
     async def select_user_plan(self, current_user: dict, payload: UserSubscriptionSelectRequest) -> UserSubscriptionActionResponse:
-        plan = await self._get_single_visible_plan()
+        plan = await self._get_selected_visible_plan(payload.plan_id)
 
         now = datetime.now(UTC)
         if payload.start_trial and plan.get('trial_days', 0) > 0:
@@ -192,7 +194,7 @@ class SubscriptionService(BaseService):
     async def create_checkout_session(self, current_user: dict, payload: UserSubscriptionSelectRequest) -> UserSubscriptionCheckoutSessionResponse:
         if self.stripe_billing_service is None:
             raise ValidationException('Stripe billing is not available')
-        plan = await self._get_single_visible_plan()
+        plan = await self._get_selected_visible_plan(payload.plan_id)
         customer_id = current_user.get('stripe_customer_id')
         if not customer_id:
             customer = await self.stripe_billing_service.create_customer(
@@ -285,7 +287,7 @@ class SubscriptionService(BaseService):
 
         plan_name = metadata.get('plan_name') or user.get('subscription_plan_name')
         if not plan_name:
-            plan = await self._get_single_visible_plan()
+            plan = await self._get_selected_visible_plan()
             plan_name = str(plan['name'])
 
         user_updates = {
@@ -381,12 +383,38 @@ class SubscriptionService(BaseService):
         }
         return mapping.get(str(value), SubscriptionStatus.ACTIVE)
 
-    async def update_plan(self, payload: SubscriptionPlanUpdateRequest) -> SubscriptionPlanActionResponse:
+    async def create_plan(self, payload: SubscriptionPlanCreateRequest) -> SubscriptionPlanActionResponse:
+        existing_plans = await self.subscription_plan_repository.get_plans()
+        if any(str(plan.get('name', '')).lower() == payload.name.lower() for plan in existing_plans):
+            raise ConflictException('A subscription plan with this name already exists')
+
+        if payload.is_best_plan:
+            await self._clear_best_plan_flag()
+
+        plan = await self.subscription_plan_repository.create(payload.model_dump(mode='json'))
+        return SubscriptionPlanActionResponse(message='Subscription plan created successfully', plan=self._to_plan_response(plan))
+
+    async def get_plan(self, plan_id: str) -> SubscriptionPlanResponse:
+        plan = await self.subscription_plan_repository.get_by_id(plan_id)
+        return self._to_plan_response(plan)
+
+    async def update_plan(self, plan_id: str, payload: SubscriptionPlanUpdateRequest) -> SubscriptionPlanActionResponse:
         updates = payload.model_dump(exclude_none=True, mode='json')
         if not updates:
             raise ValidationException('No fields provided for update')
-        plan = await self.subscription_plan_repository.get_plan()
-        updated_plan = await self.subscription_plan_repository.update(plan['_id'], updates)
+
+        if 'name' in updates:
+            existing_plans = await self.subscription_plan_repository.get_plans()
+            if any(
+                str(plan.get('_id')) != plan_id and str(plan.get('name', '')).lower() == str(updates['name']).lower()
+                for plan in existing_plans
+            ):
+                raise ConflictException('A subscription plan with this name already exists')
+
+        if updates.get('is_best_plan') is True:
+            await self._clear_best_plan_flag(exclude_plan_id=plan_id)
+
+        updated_plan = await self.subscription_plan_repository.update(plan_id, updates)
         return SubscriptionPlanActionResponse(message='Subscription plan updated successfully', plan=self._to_plan_response(updated_plan))
 
     async def create_coupon(self, payload: CouponCreateRequest) -> CouponActionResponse:
@@ -421,11 +449,25 @@ class SubscriptionService(BaseService):
         await self.coupon_repository.delete(coupon_id)
         return SubscriptionActionResponse(message='Coupon deleted successfully')
 
-    async def _get_single_visible_plan(self) -> dict:
+    async def _get_selected_visible_plan(self, plan_id: str | None = None) -> dict:
         plans = await self.subscription_plan_repository.get_visible_plans()
         if not plans:
             raise ValidationException('No subscription plan is available')
-        return plans[0]
+        if plan_id:
+            selected = next((plan for plan in plans if str(plan['_id']) == str(plan_id)), None)
+            if selected is None:
+                raise ValidationException('Selected subscription plan is not available')
+            return selected
+        best_plan = next((plan for plan in plans if plan.get('is_best_plan')), None)
+        return best_plan or plans[0]
+
+    async def _clear_best_plan_flag(self, *, exclude_plan_id: str | None = None) -> None:
+        plans = await self.subscription_plan_repository.get_plans()
+        for plan in plans:
+            if exclude_plan_id and str(plan['_id']) == str(exclude_plan_id):
+                continue
+            if plan.get('is_best_plan'):
+                await self.subscription_plan_repository.update(plan['_id'], {'is_best_plan': False})
 
     async def _resolve_coupon_pricing(self, plan: dict, billing_cycle: SubscriptionPlan, coupon_code: str) -> dict:
         await self.coupon_repository.mark_expired_coupons()

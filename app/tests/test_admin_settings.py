@@ -84,20 +84,28 @@ def test_public_legal_document_endpoints_return_admin_managed_content():
 
     with TestClient(app) as client:
         update_terms_response = client.put(
-            '/api/v1/settings/legal-content/terms_of_service',
+            '/api/v1/settings/terms-of-service',
             headers=_admin_headers(admin_id),
             json={'content': '# Terms of Service\n\nAdmin managed terms content.'},
         )
         update_privacy_response = client.put(
-            '/api/v1/settings/legal-content/privacy_policy',
+            '/api/v1/settings/privacy-policy',
             headers=_admin_headers(admin_id),
             json={'content': '# Privacy Policy\n\nAdmin managed privacy content.'},
         )
+        terms_of_service_response = client.get('/api/v1/settings/terms-of-service')
         terms_response = client.get('/api/v1/settings/terms-and-conditions')
         privacy_response = client.get('/api/v1/settings/privacy-policy')
+        privacy_alias_response = client.get('/api/v1/settings/privacy')
 
     assert update_terms_response.status_code == 200
     assert update_privacy_response.status_code == 200
+    assert update_terms_response.json()['editor']['save_endpoint'] == '/api/v1/settings/legal-content/terms_of_service'
+    assert update_privacy_response.json()['editor']['save_endpoint'] == '/api/v1/settings/legal-content/privacy_policy'
+
+    assert terms_of_service_response.status_code == 200
+    assert terms_of_service_response.json()['key'] == 'terms_of_service'
+    assert 'Admin managed terms content.' in terms_of_service_response.json()['content']
 
     assert terms_response.status_code == 200
     assert terms_response.json()['key'] == 'terms_of_service'
@@ -110,6 +118,10 @@ def test_public_legal_document_endpoints_return_admin_managed_content():
     assert privacy_response.json()['title'] == 'Privacy Policy'
     assert 'Admin managed privacy content.' in privacy_response.json()['content']
     assert privacy_response.json()['updated_by'] == 'Admin User'
+
+    assert privacy_alias_response.status_code == 200
+    assert privacy_alias_response.json()['key'] == 'privacy_policy'
+    assert 'Admin managed privacy content.' in privacy_alias_response.json()['content']
 
 
 def test_admin_settings_update_and_legal_content_save_persist():
@@ -127,7 +139,7 @@ def test_admin_settings_update_and_legal_content_save_persist():
             },
         )
         legal_update_response = client.put(
-            '/api/v1/settings/legal-content/privacy_policy',
+            '/api/v1/settings/privacy',
             headers=_admin_headers(admin_id),
             json={'content': '# Privacy Policy\n\nUpdated content.'},
         )
@@ -215,3 +227,44 @@ def test_legacy_default_legal_content_is_backfilled_with_richer_terms():
 
     assert privacy_response.status_code == 200
     assert 'How We Use Information' in privacy_response.json()['content']
+
+
+def test_public_legal_document_endpoints_allow_authenticated_restaurant_user():
+    app, mock_db = _build_app_with_mock_db()
+    _seed_admin(mock_db)
+    owner_id = ObjectId()
+
+    asyncio.run(
+        mock_db['users'].insert_one(
+            {
+                '_id': owner_id,
+                'email': 'owner@example.com',
+                'full_name': 'Owner User',
+                'hashed_password': 'x',
+                'role': UserRole.RESTAURANT_OWNER,
+                'is_active': True,
+                'email_verified': True,
+                'subscription_plan_name': None,
+                'subscription_plan': None,
+                'subscription_status': None,
+                'created_at': datetime(2026, 3, 12, tzinfo=UTC),
+                'updated_at': datetime(2026, 3, 12, tzinfo=UTC),
+            }
+        )
+    )
+
+    owner_headers = {
+        'Authorization': f'Bearer {token_manager.create_access_token(str(owner_id), UserRole.RESTAURANT_OWNER)}'
+    }
+
+    with TestClient(app) as client:
+        terms_response = client.get('/api/v1/settings/terms-of-service', headers=owner_headers)
+        privacy_response = client.get('/api/v1/settings/privacy-policy', headers=owner_headers)
+        privacy_alias_response = client.get('/api/v1/settings/privacy', headers=owner_headers)
+
+    assert terms_response.status_code == 200
+    assert terms_response.json()['key'] == 'terms_of_service'
+    assert privacy_response.status_code == 200
+    assert privacy_response.json()['key'] == 'privacy_policy'
+    assert privacy_alias_response.status_code == 200
+    assert privacy_alias_response.json()['key'] == 'privacy_policy'

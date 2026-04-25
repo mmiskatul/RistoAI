@@ -4,7 +4,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from app.config.settings import get_settings
-from app.core.enums import AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
+from app.core.enums import AccountStatus, AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
 from app.core.exceptions import AuthenticationException, ConflictException, ValidationException
 from app.core.security import password_manager, token_manager
 from app.repositories.auth_code import AuthCodeRepository
@@ -71,6 +71,7 @@ class AuthService(BaseService):
                     'subscription_plan_name': user.get('subscription_plan_name'),
                     'subscription_plan': user.get('subscription_plan'),
                     'subscription_status': user.get('subscription_status'),
+                    'account_status': user.get('account_status'),
                     'subscription_started_at': user.get('subscription_started_at'),
                     'subscription_expires_at': user.get('subscription_expires_at'),
                 },
@@ -90,6 +91,7 @@ class AuthService(BaseService):
                     'subscription_plan_name': None,
                     'subscription_plan': None,
                     'subscription_status': None,
+                    'account_status': None,
                     'subscription_started_at': None,
                     'subscription_expires_at': None,
                 }
@@ -110,7 +112,7 @@ class AuthService(BaseService):
         return self._build_auth_response(user)
 
     async def login_restaurant(self, payload: LoginRequest) -> AuthResponse:
-        user = await self._authenticate_login(payload)
+        user = await self._authenticate_login(payload, allow_suspended_restaurant=True)
         if user['role'] not in self.RESTAURANT_AUTH_ROLES:
             raise AuthenticationException('Use the admin login endpoint for this account')
         return self._build_auth_response(user)
@@ -167,11 +169,17 @@ class AuthService(BaseService):
         )
         return LanguagePreferenceResponse(preferred_language=updated_user.get('preferred_language', AppLanguage.ENGLISH))
 
-    async def _authenticate_login(self, payload: LoginRequest) -> dict:
+    async def _authenticate_login(self, payload: LoginRequest, allow_suspended_restaurant: bool = False) -> dict:
         user = await self.user_repository.get_by_email(payload.email)
-        if not user or not password_manager.verify_password(payload.password, user['hashed_password']):
+        hashed_password = user.get('hashed_password') if user else None
+        if not user or not hashed_password or not password_manager.verify_password(payload.password, hashed_password):
             raise AuthenticationException('Invalid credentials')
         if not user['is_active']:
+            account_status = user.get('account_status')
+            if allow_suspended_restaurant and account_status in {AccountStatus.SUSPENDED, AccountStatus.RESTRICTED}:
+                return user
+            if allow_suspended_restaurant and account_status is None and user.get('subscription_status') == SubscriptionStatus.SUSPENDED:
+                return user
             raise AuthenticationException('User account is inactive')
         if not user.get('email_verified', False):
             raise AuthenticationException('Email is not verified')
@@ -268,6 +276,7 @@ class AuthService(BaseService):
         )
         return updated_user
 
+
     def _build_auth_response(self, user: dict) -> AuthResponse:
         public_user = self._to_auth_user_response(user)
         return AuthResponse(
@@ -291,6 +300,7 @@ class AuthService(BaseService):
             subscription_plan_name=serialized.get('subscription_plan_name'),
             subscription_plan=serialized.get('subscription_plan'),
             subscription_status=serialized.get('subscription_status'),
+            account_status=serialized.get('account_status'),
             subscription_started_at=serialized.get('subscription_started_at'),
             subscription_expires_at=serialized.get('subscription_expires_at'),
             subscription_selection_required=self._requires_subscription_selection(serialized),

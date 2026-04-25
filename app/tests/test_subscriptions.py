@@ -245,16 +245,11 @@ def test_subscription_plan_management_returns_plans_and_coupons():
     assert winter['status'] == 'expired'
 
 
-def test_update_seeded_plan_and_reject_create_plan_method():
+def test_create_and_update_subscription_plan_with_dynamic_routes():
     app, mock_db = _build_app_with_mock_db()
     admin_id, _ = _seed_subscription_data(mock_db)
 
     with TestClient(app) as client:
-        update_plan = client.patch(
-            '/api/v1/subscriptions/plans',
-            headers=_admin_headers(admin_id),
-            json={'annual_price': 1590, 'trial_days': 21, 'is_visible': False},
-        )
         create_plan = client.post(
             '/api/v1/subscriptions/plans',
             headers=_admin_headers(admin_id),
@@ -269,12 +264,31 @@ def test_update_seeded_plan_and_reject_create_plan_method():
                 'is_best_plan': False,
             },
         )
+        assert create_plan.status_code == 201
+        created_plan_id = create_plan.json()['plan']['id']
 
+        get_plan = client.get(
+            f'/api/v1/subscriptions/plans/{created_plan_id}',
+            headers=_admin_headers(admin_id),
+        )
+        update_plan = client.patch(
+            f'/api/v1/subscriptions/plans/{created_plan_id}',
+            headers=_admin_headers(admin_id),
+            json={'annual_price': 1590, 'trial_days': 21, 'is_visible': False},
+        )
+        list_plans = client.get(
+            '/api/v1/subscriptions/plans',
+            headers=_admin_headers(admin_id),
+        )
+
+    assert get_plan.status_code == 200
+    assert get_plan.json()['name'] == 'Enterprise AI'
     assert update_plan.status_code == 200
     assert update_plan.json()['plan']['annual_price'] == 1590.0
     assert update_plan.json()['plan']['is_visible'] is False
-    assert create_plan.status_code == 405
-    assert create_plan.json()['error']['code'] == 'method_not_allowed'
+    assert list_plans.status_code == 200
+    assert len(list_plans.json()) == 2
+    assert any(plan['name'] == 'Enterprise AI' for plan in list_plans.json())
 
 
 def test_create_and_pause_coupon():

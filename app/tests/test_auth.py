@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
+
+from bson import ObjectId
+from fastapi.testclient import TestClient
+from mongomock_motor import AsyncMongoMockClient
+
+from app.core.enums import AccountStatus, SubscriptionStatus, UserRole
+from app.core.security import password_manager
+from app.db.mongodb import get_database
+from app.main import create_app
 from app.tests.helpers import register_and_login
 
 
@@ -140,3 +151,99 @@ def test_reject_password_reset_when_password_confirmation_mismatch(client):
         },
     )
     assert response.status_code == 422
+
+
+def test_suspended_restaurant_user_can_login():
+    app = create_app(testing=True)
+    mock_client = AsyncMongoMockClient()
+    mock_db = mock_client['ristoai_test']
+
+    async def override_get_database():
+        return mock_db
+
+    app.dependency_overrides[get_database] = override_get_database
+
+    asyncio.run(
+        mock_db['users'].insert_one(
+            {
+                '_id': ObjectId(),
+                'email': 'suspended@example.com',
+                'full_name': 'Suspended User',
+                'hashed_password': password_manager.hash_password('SuspendedPass1'),
+                'role': UserRole.RESTAURANT_OWNER,
+                'is_active': False,
+                'email_verified': True,
+                'subscription_status': SubscriptionStatus.SUSPENDED,
+                'account_status': AccountStatus.SUSPENDED,
+                'preferred_language': 'en',
+                'restaurant_name': 'Suspended Bistro',
+                'location': 'Dhaka',
+                'created_at': datetime.now(UTC),
+                'updated_at': datetime.now(UTC),
+            }
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            '/api/v1/auth/restaurant/login',
+            json={'email': 'suspended@example.com', 'password': 'SuspendedPass1'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['user']['is_active'] is False
+    assert payload['user']['subscription_status'] == 'suspended'
+    assert payload['user']['account_status'] == 'suspended'
+
+    me_response = client.get(
+        '/api/v1/auth/me',
+        headers={'Authorization': f'Bearer {payload["tokens"]["access_token"]}'},
+    )
+
+    assert me_response.status_code == 200
+    assert me_response.json()['account_status'] == 'suspended'
+
+
+def test_restricted_restaurant_user_can_login():
+    app = create_app(testing=True)
+    mock_client = AsyncMongoMockClient()
+    mock_db = mock_client['ristoai_test']
+
+    async def override_get_database():
+        return mock_db
+
+    app.dependency_overrides[get_database] = override_get_database
+
+    asyncio.run(
+        mock_db['users'].insert_one(
+            {
+                '_id': ObjectId(),
+                'email': 'restricted@example.com',
+                'full_name': 'Restricted User',
+                'hashed_password': password_manager.hash_password('RestrictedPass1'),
+                'role': UserRole.RESTAURANT_OWNER,
+                'is_active': False,
+                'email_verified': True,
+                'subscription_status': SubscriptionStatus.ACTIVE,
+                'account_status': AccountStatus.RESTRICTED,
+                'preferred_language': 'en',
+                'restaurant_name': 'Restricted Bistro',
+                'location': 'Dhaka',
+                'created_at': datetime.now(UTC),
+                'updated_at': datetime.now(UTC),
+            }
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            '/api/v1/auth/restaurant/login',
+            json={'email': 'restricted@example.com', 'password': 'RestrictedPass1'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['user']['is_active'] is False
+    assert payload['user']['subscription_status'] == 'active'
+    assert payload['user']['account_status'] == 'restricted'

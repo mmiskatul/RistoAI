@@ -2850,6 +2850,13 @@ class RestaurantOperationsService(BaseService):
             return start_date, next_month - timedelta(days=1)
         return None, None
 
+    @staticmethod
+    def _summarize_daily_bucket_document(document: dict[str, Any]) -> dict[str, float]:
+        return {
+            "revenue": round(float(document.get("cash_amount", 0) or 0) + float(document.get("revenue_amount", 0) or 0), 2),
+            "invoice_total": round(float(document.get("total_amount", 0) or 0), 2),
+        }
+
     def _build_daily_data_buckets(self, records: list[dict[str, Any]], expenses: list[dict[str, Any]], documents: list[dict[str, Any]], *, anchor_date: date) -> list[dict[str, Any]]:
         buckets: dict[str, dict[str, Any]] = {}
         for record in records:
@@ -2916,9 +2923,10 @@ class RestaurantOperationsService(BaseService):
             invoice_date = str(document.get("invoice_date") or "")
             if not invoice_date:
                 continue
+            document_totals = self._summarize_daily_bucket_document(document)
             group = expense_groups.setdefault(invoice_date, {"uploaded_document": {"count": 0, "total": 0.0, "endpoint": None}, "manual_expense": {"count": 0, "total": 0.0, "endpoint": "/api/v1/restaurant/expenses"}})
             group["uploaded_document"]["count"] += 1
-            group["uploaded_document"]["total"] += float(document.get("total_amount", 0))
+            group["uploaded_document"]["total"] += document_totals["invoice_total"]
             group["uploaded_document"]["endpoint"] = f"/api/v1/restaurant/daily-data/by-date?business_date={invoice_date}"
             bucket = buckets.setdefault(
                 invoice_date,
@@ -2938,7 +2946,8 @@ class RestaurantOperationsService(BaseService):
                     "data_sources": [],
                 },
             )
-            bucket["invoice_document_total"] = round(bucket.get("invoice_document_total", 0.0) + float(document.get("total_amount", 0)), 2)
+            bucket["total_revenue"] = round(bucket.get("total_revenue", 0.0) + document_totals["revenue"], 2)
+            bucket["invoice_document_total"] = round(bucket.get("invoice_document_total", 0.0) + document_totals["invoice_total"], 2)
 
         for expense_date, grouped in expense_groups.items():
             bucket = buckets[expense_date]

@@ -103,6 +103,17 @@ class SubscriptionPlanUpdateRequest(BaseSchema):
     is_best_plan: bool | None = None
 
 
+class SubscriptionPlanCreateRequest(BaseSchema):
+    name: str = Field(min_length=2, max_length=120)
+    monthly_price: float = Field(ge=0)
+    annual_price: float = Field(ge=0)
+    trial_days: int = Field(ge=0, le=365)
+    features: list[str] = Field(default_factory=list)
+    is_visible: bool = True
+    is_active: bool = True
+    is_best_plan: bool = False
+
+
 class CouponQuery(BaseSchema):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=10, ge=1, le=100)
@@ -211,6 +222,7 @@ class UserSubscriptionPlanListResponse(BaseSchema):
 
 
 class UserSubscriptionSelectRequest(BaseSchema):
+    plan_id: str | None = None
     billing_cycle: SubscriptionPlan
     start_trial: bool = True
 

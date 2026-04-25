@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.core.enums import SubscriptionPlan, SubscriptionStatus
+from app.core.enums import AccountStatus, SubscriptionPlan, SubscriptionStatus
 from app.core.exceptions import ConflictException, ValidationException
 from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
@@ -93,7 +93,7 @@ class UserManagementService(BaseService):
         self._prevent_self_deactivation(actor_user=actor_user, target_user=user)
         updated_user = await self.user_repository.update(
             user_id,
-            {"is_active": False, "subscription_status": SubscriptionStatus.SUSPENDED},
+            {"is_active": False, "account_status": AccountStatus.SUSPENDED},
         )
         item = self._to_item(updated_user)
         return UserManagementActionResponse(message="User suspended successfully", user=item)
@@ -105,17 +105,20 @@ class UserManagementService(BaseService):
             resolved_status = SubscriptionStatus.ACTIVE
         updated_user = await self.user_repository.update(
             user_id,
-            {"is_active": True, "subscription_status": resolved_status},
+            {"is_active": True, "subscription_status": resolved_status, "account_status": None},
         )
         item = self._to_item(updated_user)
         return UserManagementActionResponse(message="User activated successfully", user=item)
 
-    async def delete_user(self, *, actor_user: dict, user_id: str) -> None:
+    async def restrict_user(self, *, actor_user: dict, user_id: str) -> UserManagementActionResponse:
         user = await self.user_repository.get_by_id(user_id)
         self._prevent_self_deactivation(actor_user=actor_user, target_user=user)
-        await self.user_repository.delete(user_id)
-        await self.onboarding_repository.delete_by_user_id(str(user["_id"]))
-        await self.auth_code_repository.delete_by_user_id(user["_id"])
+        updated_user = await self.user_repository.update(
+            user_id,
+            {"is_active": False, "account_status": AccountStatus.RESTRICTED},
+        )
+        item = self._to_item(updated_user)
+        return UserManagementActionResponse(message="User restricted successfully", user=item)
 
     def _to_item(self, user: dict) -> UserManagementListItemResponse:
         serialized_user = self.serialize(user)
@@ -132,6 +135,7 @@ class UserManagementService(BaseService):
             subscription_plan_name=serialized_user.get("subscription_plan_name"),
             subscription_plan=subscription_plan,
             subscription_status=serialized_user.get("subscription_status"),
+            account_status=serialized_user.get("account_status"),
             subscription_started_at=serialized_user.get("subscription_started_at"),
             subscription_expires_at=serialized_user.get("subscription_expires_at"),
             status=status,
@@ -144,10 +148,12 @@ class UserManagementService(BaseService):
 
     @staticmethod
     def _resolve_status(user: dict) -> str:
+        if not user["is_active"]:
+            if user.get("account_status"):
+                return user["account_status"]
+            return "suspended"
         if user.get("subscription_status"):
             return user["subscription_status"]
-        if not user["is_active"]:
-            return "suspended"
         if user.get("email_verified", False):
             return "active"
         return "pending"
@@ -155,7 +161,7 @@ class UserManagementService(BaseService):
     @staticmethod
     def _prevent_self_deactivation(*, actor_user: dict, target_user: dict) -> None:
         if str(actor_user["_id"]) == str(target_user["_id"]):
-            raise ValidationException("You cannot suspend or delete your own account")
+            raise ValidationException("You cannot suspend or restrict your own account")
 
     @staticmethod
     def _prevent_self_demotion(*, actor_user: dict, target_user: dict, updates: dict) -> None:

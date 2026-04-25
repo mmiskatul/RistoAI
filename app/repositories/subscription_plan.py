@@ -22,10 +22,11 @@ class SubscriptionPlanRepository(BaseRepository[dict]):
     async def get_optional_plan(self) -> dict | None:
         return await self.collection.find_one({}, sort=[('created_at', 1)])
 
+    async def get_plans(self) -> list[dict]:
+        return await self.collection.find().sort([('is_best_plan', -1), ('created_at', 1)]).to_list(length=None)
+
     async def get_active_plans(self) -> list[dict]:
-        plan = await self.collection.find_one({'is_active': True}, sort=[('created_at', 1)])
-        return [plan] if plan else []
+        return await self.collection.find({'is_active': True}).sort([('is_best_plan', -1), ('created_at', 1)]).to_list(length=None)
 
     async def get_visible_plans(self) -> list[dict]:
-        plan = await self.collection.find_one({'is_active': True, 'is_visible': True}, sort=[('created_at', 1)])
-        return [plan] if plan else []
+        return await self.collection.find({'is_active': True, 'is_visible': True}).sort([('is_best_plan', -1), ('created_at', 1)]).to_list(length=None)

@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     refresh_token_expiry_days: int = Field(default=7, alias="REFRESH_TOKEN_EXPIRY_DAYS")
 
     cors_origins: list[str] = Field(default_factory=lambda: ["*"], alias="CORS_ORIGINS")
+    cors_allow_origin_regex: str | None = Field(
+        default=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
+        alias="CORS_ALLOW_ORIGIN_REGEX",
+    )
 
     smtp_enabled: bool = Field(default=False, alias="SMTP_ENABLED")
     smtp_host: str | None = Field(default=None, alias="SMTP_HOST")

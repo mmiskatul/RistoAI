@@ -28,6 +28,11 @@ class SubscriptionStatus(StrEnum):
     CANCELED = 'canceled'
 
 
+class AccountStatus(StrEnum):
+    RESTRICTED = 'restricted'
+    SUSPENDED = 'suspended'
+
+
 class CouponDiscountType(StrEnum):
     PERCENTAGE = 'percentage'
     FIXED = 'fixed'

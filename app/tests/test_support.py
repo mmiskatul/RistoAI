@@ -12,6 +12,8 @@ from app.core.security import token_manager
 from app.db.mongodb import get_database
 from app.main import create_app
 from app.tests.helpers import register_and_login
+from app.core.enums import SubscriptionStatus
+from app.core.security import password_manager
 
 
 def _build_app_with_mock_db():
@@ -231,3 +233,102 @@ def test_restaurant_help_center_creates_ticket_in_support_management():
 
     assert admin_detail_response.status_code == 200
     assert admin_detail_response.json()['subject'] == 'Need invoice upload help'
+
+
+def test_suspended_restaurant_can_access_help_center_and_create_support_request():
+    app, mock_db = _build_app_with_mock_db()
+    admin_id = _seed_admin(mock_db)
+    suspended_user_id = ObjectId()
+    now = datetime(2026, 3, 12, tzinfo=UTC)
+
+    asyncio.run(
+        mock_db['users'].insert_one(
+            {
+                '_id': suspended_user_id,
+                'email': 'suspended-help@example.com',
+                'full_name': 'Suspended Help User',
+                'phone': '+15550999999',
+                'hashed_password': password_manager.hash_password('SuspendedPass1'),
+                'role': UserRole.RESTAURANT_OWNER,
+                'is_active': False,
+                'email_verified': True,
+                'subscription_status': SubscriptionStatus.SUSPENDED,
+                'preferred_language': 'en',
+                'restaurant_name': 'Frozen Kitchen',
+                'location': 'Dhaka',
+                'created_at': now,
+                'updated_at': now,
+            }
+        )
+    )
+
+    suspended_headers = {
+        'Authorization': f'Bearer {token_manager.create_access_token(str(suspended_user_id), UserRole.RESTAURANT_OWNER)}'
+    }
+
+    with TestClient(app) as client:
+        overview_response = client.get('/api/v1/restaurant/help-center', headers=suspended_headers)
+        create_response = client.post(
+            '/api/v1/restaurant/help-center/tickets',
+            headers=suspended_headers,
+            json={
+                'subject': 'Suspension review request',
+                'message': 'Please review this suspension and restore my access.',
+                'priority': 'high',
+            },
+        )
+        admin_management_response = client.get('/api/v1/support/management?page=1&page_size=10', headers=_admin_headers(admin_id))
+
+    assert overview_response.status_code == 200
+    assert create_response.status_code == 200
+    assert create_response.json()['ticket']['subject'] == 'Suspension review request'
+    assert admin_management_response.status_code == 200
+    assert admin_management_response.json()['items'][0]['issue_subject'] == 'Suspension review request'
+
+
+def test_inactive_restaurant_user_cannot_access_regular_support_module():
+    app, mock_db = _build_app_with_mock_db()
+    suspended_user_id = ObjectId()
+    now = datetime(2026, 3, 12, tzinfo=UTC)
+
+    asyncio.run(
+        mock_db['users'].insert_one(
+            {
+                '_id': suspended_user_id,
+                'email': 'inactive-support@example.com',
+                'full_name': 'Inactive Support User',
+                'phone': '+15550888888',
+                'hashed_password': password_manager.hash_password('SuspendedPass1'),
+                'role': UserRole.RESTAURANT_OWNER,
+                'is_active': False,
+                'email_verified': True,
+                'subscription_status': SubscriptionStatus.SUSPENDED,
+                'preferred_language': 'en',
+                'restaurant_name': 'Blocked Kitchen',
+                'location': 'Dhaka',
+                'created_at': now,
+                'updated_at': now,
+            }
+        )
+    )
+
+    suspended_headers = {
+        'Authorization': f'Bearer {token_manager.create_access_token(str(suspended_user_id), UserRole.RESTAURANT_OWNER)}'
+    }
+
+    with TestClient(app) as client:
+        create_response = client.post(
+            '/api/v1/support/tickets',
+            headers=suspended_headers,
+            json={
+                'subject': 'Should be blocked',
+                'message': 'This should only work from help center.',
+                'priority': 'normal',
+            },
+        )
+        list_response = client.get('/api/v1/support/user/tickets?page=1&page_size=10', headers=suspended_headers)
+
+    assert create_response.status_code == 401
+    assert create_response.json()['error']['message'] == 'User account is invalid or inactive'
+    assert list_response.status_code == 401
+    assert list_response.json()['error']['message'] == 'User account is invalid or inactive'

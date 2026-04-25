@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, Request
 
 from app.core.enums import UserRole
+from app.core.exceptions import ValidationException
 from app.dependencies.auth import require_roles
 from app.dependencies.services import get_subscription_service
 from app.schemas.subscription import (
@@ -11,10 +12,12 @@ from app.schemas.subscription import (
     CouponQuery,
     CouponUpdateRequest,
     SubscriptionActionResponse,
+    SubscriptionPlanCreateRequest,
     SubscriptionOverviewQuery,
     SubscriptionOverviewResponse,
     SubscriptionPlanActionResponse,
     SubscriptionPlanManagementResponse,
+    SubscriptionPlanResponse,
     SubscriptionPlanUpdateRequest,
     StripeWebhookResponse,
     UserCurrentSubscriptionResponse,
@@ -47,6 +50,33 @@ async def get_subscription_plan_management(
     service: SubscriptionService = Depends(get_subscription_service),
 ) -> SubscriptionPlanManagementResponse:
     return await service.get_plan_management(query)
+
+
+@router.get('/plans', response_model=list[SubscriptionPlanResponse], tags=['Subscription Management'])
+async def get_subscription_plans(
+    _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> list[SubscriptionPlanResponse]:
+    management = await service.get_plan_management(CouponQuery(page=1, page_size=10))
+    return management.plans
+
+
+@router.post('/plans', response_model=SubscriptionPlanActionResponse, status_code=201, tags=['Subscription Management'])
+async def create_subscription_plan(
+    payload: SubscriptionPlanCreateRequest,
+    _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> SubscriptionPlanActionResponse:
+    return await service.create_plan(payload)
+
+
+@router.get('/plans/{plan_id}', response_model=SubscriptionPlanResponse, tags=['Subscription Management'])
+async def get_subscription_plan(
+    plan_id: str,
+    _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> SubscriptionPlanResponse:
+    return await service.get_plan(plan_id)
 
 
 @router.get('/user/plans', response_model=UserSubscriptionPlanListResponse, tags=['User Subscription'])
@@ -116,7 +146,20 @@ async def update_subscription_plan(
     _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
     service: SubscriptionService = Depends(get_subscription_service),
 ) -> SubscriptionPlanActionResponse:
-    return await service.update_plan(payload)
+    management = await service.get_plan_management(CouponQuery(page=1, page_size=1))
+    if not management.active_plan:
+        raise ValidationException('No active subscription plan found')
+    return await service.update_plan(management.active_plan.id, payload)
+
+
+@router.patch('/plans/{plan_id}', response_model=SubscriptionPlanActionResponse, tags=['Subscription Management'])
+async def update_subscription_plan_by_id(
+    plan_id: str,
+    payload: SubscriptionPlanUpdateRequest,
+    _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> SubscriptionPlanActionResponse:
+    return await service.update_plan(plan_id, payload)
 
 
 @router.post('/coupons', response_model=CouponActionResponse, status_code=201, tags=['Subscription Management'])

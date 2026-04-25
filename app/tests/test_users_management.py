@@ -7,7 +7,7 @@ from bson import ObjectId
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
-from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
+from app.core.enums import AccountStatus, SubscriptionPlan, SubscriptionStatus, UserRole
 from app.core.security import token_manager
 from app.db.mongodb import get_database
 from app.main import create_app
@@ -51,6 +51,7 @@ def _seed_users(mock_db):
                     'subscription_plan_name': None,
                     'subscription_plan': None,
                     'subscription_status': None,
+                    'account_status': None,
                     'subscription_started_at': None,
                     'subscription_expires_at': None,
                     'created_at': now,
@@ -70,6 +71,7 @@ def _seed_users(mock_db):
                     'subscription_plan_name': 'Pro Plan',
                     'subscription_plan': SubscriptionPlan.ONE_YEAR,
                     'subscription_status': SubscriptionStatus.ACTIVE,
+                    'account_status': None,
                     'subscription_started_at': datetime(2026, 1, 1, tzinfo=UTC),
                     'subscription_expires_at': datetime(2026, 12, 31, tzinfo=UTC),
                     'created_at': datetime(2026, 2, 1, tzinfo=UTC),
@@ -89,6 +91,7 @@ def _seed_users(mock_db):
                     'subscription_plan_name': 'Growth Plan',
                     'subscription_plan': SubscriptionPlan.ONE_MONTH,
                     'subscription_status': SubscriptionStatus.SUSPENDED,
+                    'account_status': AccountStatus.SUSPENDED,
                     'subscription_started_at': datetime(2026, 1, 1, tzinfo=UTC),
                     'subscription_expires_at': datetime(2026, 2, 1, tzinfo=UTC),
                     'created_at': datetime(2026, 1, 20, tzinfo=UTC),
@@ -108,6 +111,7 @@ def _seed_users(mock_db):
                     'subscription_plan_name': 'Starter Plan',
                     'subscription_plan': SubscriptionPlan.ONE_MONTH,
                     'subscription_status': SubscriptionStatus.TRIAL,
+                    'account_status': None,
                     'subscription_started_at': datetime(2026, 1, 5, tzinfo=UTC),
                     'subscription_expires_at': datetime(2026, 2, 5, tzinfo=UTC),
                     'created_at': datetime(2026, 1, 5, tzinfo=UTC),
@@ -205,20 +209,26 @@ def test_update_user_updates_user_details():
 
 
 
-def test_suspend_and_delete_user():
+def test_suspend_and_restrict_user():
     app, mock_db = _build_app_with_mock_db()
     admin_id, owner_id, _, _ = _seed_users(mock_db)
 
     with TestClient(app) as client:
         suspend_response = client.post(f'/api/v1/users/{owner_id}/suspend', headers=_admin_headers(admin_id))
-        delete_response = client.delete(f'/api/v1/users/{owner_id}', headers=_admin_headers(admin_id))
+        restrict_response = client.post(f'/api/v1/users/{owner_id}/restrict', headers=_admin_headers(admin_id))
         list_response = client.get('/api/v1/users/management', headers=_admin_headers(admin_id))
 
     assert suspend_response.status_code == 200
     assert suspend_response.json()['user']['status'] == 'suspended'
-    assert suspend_response.json()['user']['subscription_status'] == 'suspended'
-    assert delete_response.status_code == 204
-    assert all(item['id'] != str(owner_id) for item in list_response.json()['items'])
+    assert suspend_response.json()['user']['subscription_status'] == 'active'
+    assert suspend_response.json()['user']['account_status'] == 'suspended'
+    assert restrict_response.status_code == 200
+    assert restrict_response.json()['message'] == 'User restricted successfully'
+    assert restrict_response.json()['user']['account_status'] == 'restricted'
+    updated_item = next(item for item in list_response.json()['items'] if item['id'] == str(owner_id))
+    assert updated_item['status'] == 'restricted'
+    assert updated_item['subscription_status'] == 'active'
+    assert updated_item['account_status'] == 'restricted'
 
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status
 
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, get_current_user_allow_inactive
 from app.dependencies.services import get_auth_service
 from app.schemas.auth import (
     AuthChallengeResponse,
@@ -94,7 +94,7 @@ async def refresh(payload: RefreshTokenRequest, service: AuthService = Depends(g
 
 
 @router.get('/me', response_model=AuthUserResponse, tags=['Authentication'])
-async def me(current_user: dict = Depends(get_current_user), service: AuthService = Depends(get_auth_service)) -> AuthUserResponse:
+async def me(current_user: dict = Depends(get_current_user_allow_inactive), service: AuthService = Depends(get_auth_service)) -> AuthUserResponse:
     return await service.get_me(current_user)
 
 

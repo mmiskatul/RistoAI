@@ -53,11 +53,20 @@ async def activate_user(
     return await service.activate_user(user_id)
 
 
-@router.delete('/{user_id}', status_code=status.HTTP_204_NO_CONTENT, summary='Delete User', description='Deletes a user account from the admin users management page.')
+@router.post('/{user_id}/restrict', response_model=UserManagementActionResponse, summary='Restrict User', description='Restricts a user account from the admin users management page without deleting their data.')
+async def restrict_user(
+    user_id: str,
+    current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: UserManagementService = Depends(get_user_management_service),
+) -> UserManagementActionResponse:
+    return await service.restrict_user(actor_user=current_user, user_id=user_id)
+
+
+@router.delete('/{user_id}', status_code=status.HTTP_204_NO_CONTENT, summary='Restrict User (Legacy)', description='Legacy restrict endpoint retained for backward compatibility.')
 async def delete_user(
     user_id: str,
     current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
     service: UserManagementService = Depends(get_user_management_service),
 ) -> Response:
-    await service.delete_user(actor_user=current_user, user_id=user_id)
+    await service.restrict_user(actor_user=current_user, user_id=user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

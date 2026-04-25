@@ -5,7 +5,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
 from app.core.exceptions import ValidationException
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, get_current_user_allow_inactive
 from app.dependencies.services import get_restaurant_operations_service, get_support_service
 from app.schemas.restaurant import (
     AnalyticsInsightBannerResponse,
@@ -439,7 +439,7 @@ async def change_password(
 
 @router.get('/help-center', response_model=RestaurantHelpCenterResponse, tags=['Restaurant Help Center'], summary='Help Center Overview', description='Returns the restaurant help center overview and ticket action endpoints.')
 async def get_help_center(
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user_allow_inactive),
     service: SupportService = Depends(get_support_service),
 ) -> RestaurantHelpCenterResponse:
     return await service.get_help_center()
@@ -448,7 +448,7 @@ async def get_help_center(
 @router.post('/help-center/tickets', response_model=SupportTicketActionResponse, tags=['Restaurant Help Center'], summary='Create Help Center Ticket', description='Creates a support ticket from the restaurant help center and stores it in the admin support section.')
 async def create_help_center_ticket(
     payload: SupportTicketCreateRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_allow_inactive),
     service: SupportService = Depends(get_support_service),
 ) -> SupportTicketActionResponse:
     return await service.create_ticket(current_user, payload)
@@ -457,7 +457,7 @@ async def create_help_center_ticket(
 @router.get('/help-center/tickets', response_model=UserSupportTicketListResponse, tags=['Restaurant Help Center'], summary='List Help Center Tickets', description='Lists help center tickets created by the current restaurant user.')
 async def list_help_center_tickets(
     query: SupportTicketQuery = Depends(),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_allow_inactive),
     service: SupportService = Depends(get_support_service),
 ) -> UserSupportTicketListResponse:
     return await service.get_user_tickets(current_user, query)
@@ -466,7 +466,7 @@ async def list_help_center_tickets(
 @router.get('/help-center/tickets/{ticket_id}', response_model=SupportTicketDetailResponse, tags=['Restaurant Help Center'], summary='Help Center Ticket Detail', description='Returns the detail for one help center ticket owned by the current restaurant user.')
 async def get_help_center_ticket_detail(
     ticket_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_allow_inactive),
     service: SupportService = Depends(get_support_service),
 ) -> SupportTicketDetailResponse:
     return await service.get_user_ticket_detail(current_user, ticket_id)

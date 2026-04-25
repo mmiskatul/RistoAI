@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import ConfigDict, EmailStr, Field, field_validator, model_validator
 
-from app.core.enums import AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
+from app.core.enums import AccountStatus, AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
 from app.schemas.common import BaseSchema
 
 
@@ -130,6 +130,7 @@ class AuthUserResponse(BaseSchema):
     subscription_plan_name: str | None = None
     subscription_plan: SubscriptionPlan | None = None
     subscription_status: SubscriptionStatus | None = None
+    account_status: AccountStatus | None = None
     subscription_started_at: datetime | None = None
     subscription_expires_at: datetime | None = None
     subscription_selection_required: bool

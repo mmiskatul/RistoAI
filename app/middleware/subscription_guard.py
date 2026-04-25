@@ -17,6 +17,8 @@ ALLOWED_PATH_PREFIXES = (
     '/docs',
     '/openapi.json',
     '/api/v1/auth',
+    '/api/v1/settings',
+    '/api/v1/restaurant/help-center',
     '/api/v1/subscriptions/user',
     '/api/v1/dashboard',
     '/api/v1/users',

@@ -11,6 +11,9 @@ class DashboardKpiResponse(BaseSchema):
     verified_users: int
     completed_onboarding: int
     pending_verifications: int
+    active_subscriptions: int
+    trial_users: int
+    monthly_revenue: float
     admins: int
     restaurant_owners: int
     managers: int
@@ -19,6 +22,12 @@ class DashboardKpiResponse(BaseSchema):
 
 class DashboardMonthlyPointResponse(BaseSchema):
     month: int = Field(ge=1, le=12)
+    label: str
+    value: int | float = Field(ge=0)
+
+
+class DashboardSeriesPointResponse(BaseSchema):
+    key: str
     label: str
     value: int | float = Field(ge=0)
 
@@ -32,7 +41,10 @@ class DashboardRoleBreakdownResponse(BaseSchema):
 class DashboardChartsResponse(BaseSchema):
     monthly_new_users: list[DashboardMonthlyPointResponse]
     monthly_completed_onboarding: list[DashboardMonthlyPointResponse]
+    monthly_revenue: list[DashboardSeriesPointResponse]
+    weekly_revenue: list[DashboardSeriesPointResponse]
     users_by_role: list[DashboardRoleBreakdownResponse]
+    subscription_breakdown: list[DashboardUserGrowthSliceResponse]
 
 
 class DashboardMetaResponse(BaseSchema):

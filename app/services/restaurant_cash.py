@@ -181,7 +181,7 @@ def build_aggregate_snapshot(
         2,
     )
 
-    total_revenue = round(manual_sales_total + deposit_sales_total + other_sales_total, 2)
+    total_revenue = round(manual_sales_total + deposit_sales_total + document_sales_total + other_sales_total, 2)
     manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in manual_record_items), 2)
     lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in manual_record_items))
     dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in manual_record_items))
