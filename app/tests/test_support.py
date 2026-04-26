@@ -160,6 +160,7 @@ def test_restaurant_can_create_support_ticket_and_admin_can_manage_it():
     assert management_payload['items'][0]['status'] == 'open'
     assert management_payload['items'][0]['priority'] == 'high'
     assert management_payload['items'][0]['ticket_number'].startswith('TKT-')
+    assert management_payload['items'][0]['view_endpoint'] == f'/api/v1/support/tickets/{ticket_id}'
 
     assert detail_response.status_code == 200
     detail_payload = detail_response.json()
@@ -170,6 +171,8 @@ def test_restaurant_can_create_support_ticket_and_admin_can_manage_it():
     assert detail_payload['badges'][1] == {'label': 'Open', 'variant': 'warning'}
     assert detail_payload['customer']['user_name'] == 'Alex Rivera'
     assert detail_payload['messages'][0]['attachment_name'] == 'screenshot_order_status.png'
+    assert detail_payload['reply_composer']['reply_endpoint'] == f'/api/v1/support/tickets/{ticket_id}/reply'
+    assert detail_payload['reply_composer']['resolve_endpoint'] == f'/api/v1/support/tickets/{ticket_id}/resolve'
 
     assert reply_response.status_code == 200
     assert len(reply_response.json()['ticket']['messages']) == 2
@@ -233,6 +236,35 @@ def test_restaurant_help_center_creates_ticket_in_support_management():
 
     assert admin_detail_response.status_code == 200
     assert admin_detail_response.json()['subject'] == 'Need invoice upload help'
+
+
+def test_support_priority_is_auto_escalated_for_urgent_ticket_content():
+    app, mock_db = _build_app_with_mock_db()
+    _seed_admin(mock_db)
+
+    with TestClient(app) as client:
+        restaurant_headers = register_and_login(
+            client,
+            {
+                'full_name': 'Urgent User',
+                'email': 'urgent@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550777777',
+            },
+        )
+
+        create_response = client.post(
+            '/api/v1/support/tickets',
+            headers=restaurant_headers,
+            json={
+                'subject': 'Payment failed on checkout',
+                'message': 'Orders are down and we need this fixed asap.',
+                'priority': 'normal',
+            },
+        )
+
+    assert create_response.status_code == 200
+    assert create_response.json()['ticket']['priority'] == 'high'
 
 
 def test_suspended_restaurant_can_access_help_center_and_create_support_request():

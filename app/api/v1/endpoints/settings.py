@@ -9,6 +9,7 @@ from app.schemas.admin_settings import (
     AdminLegalContentEditorResponse,
     AdminLegalContentUpdateRequest,
     AdminSettingsActionResponse,
+    AdminSettingsGeneralResponse,
     AdminSettingsOverviewResponse,
     AdminSettingsUpdateRequest,
     PublicLegalDocumentResponse,
@@ -16,6 +17,31 @@ from app.schemas.admin_settings import (
 from app.services.admin_settings import AdminSettingsService
 
 router = APIRouter()
+
+
+@router.get('/general', response_model=AdminSettingsGeneralResponse, tags=['Settings'], summary='Admin General Settings', description='Returns the admin dashboard general settings card payload.')
+async def get_general_settings(
+    current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> AdminSettingsGeneralResponse:
+    return await service.get_general(current_user)
+
+
+@router.put('/general', response_model=AdminSettingsActionResponse, tags=['Settings'], summary='Update Admin General Settings', description='Updates the admin dashboard general settings card fields.')
+async def update_general_settings(
+    platform_name: str = Form(..., min_length=2, max_length=120),
+    support_email: str = Form(...),
+    default_language: str = Form(..., min_length=2, max_length=80),
+    profile_image: UploadFile | None = File(default=None),
+    current_user: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: AdminSettingsService = Depends(get_admin_settings_service),
+) -> AdminSettingsActionResponse:
+    payload = AdminSettingsUpdateRequest(
+        platform_name=platform_name,
+        support_email=support_email,
+        default_language=default_language,
+    )
+    return await service.update_general(current_user, payload, profile_image=profile_image)
 
 
 @router.get('/overview', response_model=AdminSettingsOverviewResponse, tags=['Settings'], summary='Admin Settings Overview', description='Returns the admin settings page payload including general settings and connected legal page links.')

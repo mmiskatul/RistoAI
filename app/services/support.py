@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from bson import ObjectId
 
-from app.core.enums import SupportTicketStatus
+from app.core.enums import SupportTicketPriority, SupportTicketStatus
 from app.core.exceptions import NotFoundException
 from app.repositories.support_ticket import SupportTicketRepository
 from app.schemas.support import (
@@ -69,7 +69,7 @@ class SupportService(BaseService):
                 'location': current_user.get('location'),
                 'subject': payload.subject,
                 'status': SupportTicketStatus.OPEN,
-                'priority': payload.priority,
+                'priority': self._calculate_priority(payload.subject, payload.message, payload.priority),
                 'messages': [
                     {
                         'author_name': current_user['full_name'],
@@ -98,9 +98,6 @@ class SupportService(BaseService):
             open_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.OPEN),
             resolved_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.RESOLVED),
         )
-        start = ((query.page - 1) * query.page_size) + 1 if total else 0
-        end = min(query.page * query.page_size, total) if total else 0
-        active_filter = str(query.status) if query.status else 'open'
         return SupportTicketManagementResponse(
             summary=summary,
             items=[self._to_ticket_list_item(ticket) for ticket in tickets],
@@ -162,6 +159,7 @@ class SupportService(BaseService):
             status=serialized['status'],
             priority=serialized['priority'],
             date=serialized['created_at'],
+            view_endpoint=f"/api/v1/support/tickets/{serialized['id']}",
         )
 
     def _to_ticket_detail(self, ticket: dict) -> SupportTicketDetailResponse:
@@ -198,7 +196,39 @@ class SupportService(BaseService):
                 restaurant_name=serialized.get('restaurant_name'),
             ),
             messages=messages,
+            reply_composer=SupportTicketReplyComposerResponse(
+                reply_endpoint=f"/api/v1/support/tickets/{serialized['id']}/reply",
+                resolve_endpoint=f"/api/v1/support/tickets/{serialized['id']}/resolve",
+            ),
         )
+
+    @staticmethod
+    def _calculate_priority(subject: str, message: str, requested_priority: SupportTicketPriority) -> SupportTicketPriority:
+        if requested_priority == SupportTicketPriority.HIGH:
+            return SupportTicketPriority.HIGH
+
+        urgent_terms = (
+            'urgent',
+            'asap',
+            'immediately',
+            'not received',
+            'refund',
+            'failed',
+            'failure',
+            'payment',
+            'cannot',
+            "can't",
+            'unable',
+            'down',
+            'suspend',
+            'suspension',
+            'crash',
+            'bug',
+        )
+        haystack = f'{subject} {message}'.lower()
+        if any(term in haystack for term in urgent_terms):
+            return SupportTicketPriority.HIGH
+        return SupportTicketPriority.NORMAL
 
     @staticmethod
     def _status_variant(status: str) -> str:

@@ -29,6 +29,15 @@ class AdminSettingsOverviewResponse(BaseSchema):
     legal_pages: list[AdminSettingsLegalPageItemResponse] = Field(default_factory=list)
 
 
+class AdminSettingsGeneralResponse(BaseSchema):
+    profile_image_url: str | None = None
+    platform_name: str
+    support_email: EmailStr
+    default_language: str
+    language_options: list[AdminSettingsLanguageOptionResponse] = Field(default_factory=list)
+    save_endpoint: str
+
+
 class AdminSettingsUpdateRequest(BaseSchema):
     platform_name: str = Field(min_length=2, max_length=120)
     support_email: EmailStr
@@ -68,5 +77,6 @@ class PublicLegalDocumentResponse(BaseSchema):
 
 class AdminSettingsActionResponse(BaseSchema):
     message: str
+    general: AdminSettingsGeneralResponse | None = None
     settings: AdminSettingsOverviewResponse | None = None
     editor: AdminLegalContentEditorResponse | None = None

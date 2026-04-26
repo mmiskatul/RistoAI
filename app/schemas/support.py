@@ -89,6 +89,7 @@ class SupportTicketListItemResponse(BaseSchema):
     status: SupportTicketStatus
     priority: SupportTicketPriority
     date: datetime
+    view_endpoint: str | None = None
 
 
 class SupportTicketSummaryResponse(BaseSchema):
@@ -132,6 +133,7 @@ class SupportTicketDetailResponse(BaseSchema):
     badges: list[SupportTicketDetailBadgeResponse] = Field(default_factory=list)
     customer: SupportTicketCustomerResponse
     messages: list[SupportTicketMessageResponse]
+    reply_composer: SupportTicketReplyComposerResponse | None = None
 
 
 class SupportTicketActionResponse(BaseSchema):

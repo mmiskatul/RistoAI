@@ -78,6 +78,23 @@ def test_admin_settings_overview_and_legal_editor_are_connected():
     assert 'Restaurant Account Responsibility' in editor['content']
 
 
+def test_admin_general_settings_endpoint_returns_dashboard_general_card_payload():
+    app, mock_db = _build_app_with_mock_db()
+    admin_id = _seed_admin(mock_db)
+
+    with TestClient(app) as client:
+        response = client.get('/api/v1/settings/general', headers=_admin_headers(admin_id))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['platform_name'] == 'Risto AI'
+    assert payload['support_email'] == 'support@risto-ai.com'
+    assert payload['default_language'] == 'en-US'
+    assert payload['profile_image_url'] == 'https://example.com/admin.png'
+    assert payload['save_endpoint'] == '/api/v1/settings/general'
+    assert any(option['key'] == 'en-US' and option['active'] is True for option in payload['language_options'])
+
+
 def test_public_legal_document_endpoints_return_admin_managed_content():
     app, mock_db = _build_app_with_mock_db()
     admin_id = _seed_admin(mock_db)
@@ -135,7 +152,7 @@ def test_admin_settings_update_and_legal_content_save_persist():
             data={
                 'platform_name': 'Horizon SaaS',
                 'support_email': 'support@horizon-saas.com',
-                'default_language': 'English (United States)',
+                'default_language': 'en-US',
             },
         )
         legal_update_response = client.put(
@@ -162,6 +179,35 @@ def test_admin_settings_update_and_legal_content_save_persist():
     assert 'Updated content.' in refreshed_editor.json()['content']
 
 
+def test_admin_general_settings_update_persists_and_returns_general_payload():
+    app, mock_db = _build_app_with_mock_db()
+    admin_id = _seed_admin(mock_db)
+
+    with TestClient(app) as client:
+        response = client.put(
+            '/api/v1/settings/general',
+            headers=_admin_headers(admin_id),
+            data={
+                'platform_name': 'Horizon SaaS',
+                'support_email': 'support@horizon-saas.com',
+                'default_language': 'it',
+            },
+        )
+        refreshed = client.get('/api/v1/settings/general', headers=_admin_headers(admin_id))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['message'] == 'Admin general settings updated successfully'
+    assert payload['general']['platform_name'] == 'Horizon SaaS'
+    assert payload['general']['support_email'] == 'support@horizon-saas.com'
+    assert payload['general']['default_language'] == 'it'
+    assert any(option['key'] == 'it' and option['active'] is True for option in payload['general']['language_options'])
+
+    assert refreshed.status_code == 200
+    assert refreshed.json()['platform_name'] == 'Horizon SaaS'
+    assert refreshed.json()['default_language'] == 'it'
+
+
 def test_admin_settings_update_uploads_image_and_stores_url():
     app, mock_db = _build_app_with_mock_db()
     admin_id = _seed_admin(mock_db)
@@ -173,7 +219,7 @@ def test_admin_settings_update_uploads_image_and_stores_url():
             data={
                 'platform_name': 'Risto AI',
                 'support_email': 'support@risto-ai.com',
-                'default_language': 'English (United States)',
+                'default_language': 'en-US',
             },
             files={
                 'profile_image': ('admin.webp', b'fake-image-bytes', 'image/webp'),
@@ -202,7 +248,7 @@ def test_legacy_default_legal_content_is_backfilled_with_richer_terms():
                 'singleton_key': 'platform_settings',
                 'platform_name': 'Risto AI',
                 'support_email': 'support@risto-ai.com',
-                'default_language': 'English (United States)',
+                'default_language': 'en-US',
                 'legal_documents': {
                     'terms_of_service': {
                         'title': 'Terms of Service',

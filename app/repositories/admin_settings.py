@@ -100,7 +100,7 @@ class AdminSettingsRepository(BaseRepository[dict]):
                 'singleton_key': 'platform_settings',
                 'platform_name': 'Risto AI',
                 'support_email': 'support@risto-ai.com',
-                'default_language': 'English (United States)',
+                'default_language': 'en-US',
                 'legal_documents': {
                     'terms_of_service': {
                         'title': 'Terms of Service',
