@@ -382,6 +382,11 @@ async def create_inventory_item(payload: InventoryCreateRequest, current_user: d
     return await service.create_inventory_item(current_user, payload)
 
 
+@router.post('/inventory/add-item', response_model=InventoryItemResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Inventory'], summary='Add Inventory Item', description='Dedicated endpoint for the mobile add-item inventory screen.')
+async def add_inventory_item(payload: InventoryCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryItemResponse:
+    return await service.create_inventory_item(current_user, payload)
+
+
 @router.get('/inventory', response_model=InventoryListResponse, tags=['Restaurant Inventory'], summary='Inventory List', description='Lists inventory items and summary card data for the inventory screen.', include_in_schema=False)
 async def list_inventory(
     page: int = Query(default=1, ge=1),
