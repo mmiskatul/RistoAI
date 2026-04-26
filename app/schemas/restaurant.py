@@ -86,6 +86,34 @@ class RestaurantHomeResponse(BaseSchema):
     recent_activity: list[ActivityItemResponse]
 
 
+class RestaurantHomeMetricsResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[MetricCardResponse] = Field(default_factory=list)
+
+
+class RestaurantHomeCashManagementResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[CashManagementItemResponse] = Field(default_factory=list)
+
+
+class RestaurantHomeRevenueResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[ChartPointResponse] = Field(default_factory=list)
+
+
+class RestaurantHomeInsightResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    insight: InsightSummaryResponse | None = None
+
+
+class RestaurantHomeRecentActivityResponse(BaseSchema):
+    items: list[ActivityItemResponse] = Field(default_factory=list)
+
+
+class RestaurantHomeVatBalanceResponse(BaseSchema):
+    balance: float
+
+
 class VatOverviewResponse(BaseSchema):
     estimated_vat_balance: float
     vat_payable: float
@@ -694,6 +722,49 @@ class AnalyticsOverviewResponse(BaseSchema):
     avg_revenue_per_cover: float
     cost_breakdown: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
     supplier_price_alerts: list[AnalyticsSupplierAlertResponse] = Field(default_factory=list)
+
+
+class AnalyticsMetricTilesResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[AnalyticsMetricTileResponse] = Field(default_factory=list)
+
+
+class AnalyticsRevenueTrendResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    revenue_total: float
+    change_percent: float
+    points: list[ChartPointResponse] = Field(default_factory=list)
+
+
+class AnalyticsSummaryStatsResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
+
+
+class AnalyticsRevenueComparisonResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[AnalyticsComparisonRowResponse] = Field(default_factory=list)
+
+
+class AnalyticsActivityCostResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    covers_activity: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
+    cost_breakdown: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
+
+
+class AnalyticsCoversActivityResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
+
+
+class AnalyticsCostBreakdownResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[AnalyticsSummaryStatResponse] = Field(default_factory=list)
+
+
+class AnalyticsSupplierAlertsResponse(BaseSchema):
+    period: Literal["weekly", "monthly"]
+    items: list[AnalyticsSupplierAlertResponse] = Field(default_factory=list)
 
 
 class ChatMessageCreateRequest(BaseSchema):

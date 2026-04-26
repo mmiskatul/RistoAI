@@ -8,8 +8,16 @@ from app.core.exceptions import ValidationException
 from app.dependencies.auth import get_current_user, get_current_user_allow_inactive
 from app.dependencies.services import get_restaurant_operations_service, get_support_service
 from app.schemas.restaurant import (
+    AnalyticsActivityCostResponse,
+    AnalyticsCostBreakdownResponse,
+    AnalyticsCoversActivityResponse,
     AnalyticsInsightBannerResponse,
+    AnalyticsMetricTilesResponse,
     AnalyticsOverviewResponse,
+    AnalyticsRevenueComparisonResponse,
+    AnalyticsRevenueTrendResponse,
+    AnalyticsSupplierAlertsResponse,
+    AnalyticsSummaryStatsResponse,
     CashDepositCreateRequest,
     CashDepositResponse,
     CashDepositUpdateRequest,
@@ -40,6 +48,12 @@ from app.schemas.restaurant import (
     InventoryStockUpdateRequest,
     InventoryUpdateRequest,
     RestaurantHomeResponse,
+    RestaurantHomeMetricsResponse,
+    RestaurantHomeCashManagementResponse,
+    RestaurantHomeRevenueResponse,
+    RestaurantHomeInsightResponse,
+    RestaurantHomeRecentActivityResponse,
+    RestaurantHomeVatBalanceResponse,
     RestaurantNotificationSettingsResponse,
     RestaurantNotificationSettingsUpdateRequest,
     RestaurantChangePasswordRequest,
@@ -68,10 +82,85 @@ async def get_home(
     period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
     from_date: date | None = Query(default=None),
     to_date: date | None = Query(default=None),
+    include_metrics: bool = Query(default=True),
+    include_cash_management: bool = Query(default=True),
+    include_revenue: bool = Query(default=True),
+    include_featured_insight: bool = Query(default=True),
+    include_recent_activity: bool = Query(default=True),
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> RestaurantHomeResponse:
-    return await service.get_home(current_user, period=period, from_date=from_date, to_date=to_date)
+    return await service.get_home(
+        current_user,
+        period=period,
+        from_date=from_date,
+        to_date=to_date,
+        include_metrics=include_metrics,
+        include_cash_management=include_cash_management,
+        include_revenue=include_revenue,
+        include_featured_insight=include_featured_insight,
+        include_recent_activity=include_recent_activity,
+    )
+
+
+@router.get('/home/metrics', response_model=RestaurantHomeMetricsResponse, tags=['Restaurant Home'], summary='Home Metrics Section', description='Restaurant dashboard KPI card section for the mobile home screen.')
+async def get_home_metrics(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantHomeMetricsResponse:
+    return await service.get_home_metrics(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/home/cash-management', response_model=RestaurantHomeCashManagementResponse, tags=['Restaurant Home'], summary='Home Cash Management Section', description='Restaurant dashboard cash management section for the mobile home screen.')
+async def get_home_cash_management(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantHomeCashManagementResponse:
+    return await service.get_home_cash_management(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/home/revenue', response_model=RestaurantHomeRevenueResponse, tags=['Restaurant Home'], summary='Home Revenue Section', description='Restaurant dashboard revenue chart section for the mobile home screen.')
+async def get_home_revenue(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantHomeRevenueResponse:
+    return await service.get_home_revenue(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/home/insight', response_model=RestaurantHomeInsightResponse, tags=['Restaurant Home'], summary='Home Insight Section', description='Restaurant dashboard featured insight section for the mobile home screen.')
+async def get_home_insight(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantHomeInsightResponse:
+    return await service.get_home_insight(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/home/recent-activity', response_model=RestaurantHomeRecentActivityResponse, tags=['Restaurant Home'], summary='Home Recent Activity Section', description='Restaurant dashboard recent activity section for the mobile home screen.')
+async def get_home_recent_activity(
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantHomeRecentActivityResponse:
+    return await service.get_home_recent_activity(current_user)
+
+
+@router.get('/home/vat-balance', response_model=RestaurantHomeVatBalanceResponse, tags=['Restaurant Home'], summary='Home VAT Balance Section', description='Restaurant dashboard estimated VAT balance card for the mobile home screen.')
+async def get_home_vat_balance(
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantHomeVatBalanceResponse:
+    return await service.get_home_vat_balance(current_user)
 
 
 @router.get('/vat/overview', response_model=VatOverviewResponse, tags=['Restaurant VAT'], summary='VAT Overview', description='VAT balance, payable, receivable, and filing summary for the VAT screen.')
@@ -341,6 +430,94 @@ async def get_analytics(
 @router.get('/analytics/business-insight', response_model=AnalyticsInsightBannerResponse, tags=['Restaurant Analytics'], summary='Analytics Business Insight', description='Returns the top analytics insight banner generated from restaurant data.')
 async def get_analytics_business_insight(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> AnalyticsInsightBannerResponse:
     return await service.get_analytics_business_insight(current_user)
+
+
+@router.get('/analytics/metric-tiles', response_model=AnalyticsMetricTilesResponse, tags=['Restaurant Analytics'], summary='Analytics Metric Tiles', description='Returns the top analytics metric cards section.')
+async def get_analytics_metric_tiles(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsMetricTilesResponse:
+    return await service.get_analytics_metric_tiles(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/analytics/revenue-trend', response_model=AnalyticsRevenueTrendResponse, tags=['Restaurant Analytics'], summary='Analytics Revenue Trend', description='Returns the analytics revenue trend section.')
+async def get_analytics_revenue_trend(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsRevenueTrendResponse:
+    return await service.get_analytics_revenue_trend(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/analytics/summary-stats', response_model=AnalyticsSummaryStatsResponse, tags=['Restaurant Analytics'], summary='Analytics Summary Stats', description='Returns the analytics revenue, covers, and average revenue section.')
+async def get_analytics_summary_stats(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsSummaryStatsResponse:
+    return await service.get_analytics_summary_stats(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/analytics/revenue-comparison', response_model=AnalyticsRevenueComparisonResponse, tags=['Restaurant Analytics'], summary='Analytics Revenue Comparison', description='Returns the analytics revenue comparison section.')
+async def get_analytics_revenue_comparison(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsRevenueComparisonResponse:
+    return await service.get_analytics_revenue_comparison(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/analytics/activity-cost', response_model=AnalyticsActivityCostResponse, tags=['Restaurant Analytics'], summary='Analytics Activity And Cost', description='Returns the analytics covers activity and cost breakdown section.')
+async def get_analytics_activity_cost(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsActivityCostResponse:
+    return await service.get_analytics_activity_cost(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/analytics/covers-activity', response_model=AnalyticsCoversActivityResponse, tags=['Restaurant Analytics'], summary='Analytics Covers Activity', description='Returns the analytics covers activity section.')
+async def get_analytics_covers_activity(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsCoversActivityResponse:
+    return await service.get_analytics_covers_activity(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/analytics/cost-breakdown', response_model=AnalyticsCostBreakdownResponse, tags=['Restaurant Analytics'], summary='Analytics Cost Breakdown', description='Returns the analytics cost breakdown section.')
+async def get_analytics_cost_breakdown(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsCostBreakdownResponse:
+    return await service.get_analytics_cost_breakdown(current_user, period=period, from_date=from_date, to_date=to_date)
+
+
+@router.get('/analytics/supplier-alerts', response_model=AnalyticsSupplierAlertsResponse, tags=['Restaurant Analytics'], summary='Analytics Supplier Alerts', description='Returns the analytics supplier alert section.')
+async def get_analytics_supplier_alerts(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsSupplierAlertsResponse:
+    return await service.get_analytics_supplier_alerts(current_user, period=period, from_date=from_date, to_date=to_date)
 
 
 @router.get('/chat/messages', response_model=ChatConversationResponse, tags=['Restaurant Chat'], summary='List Chat Messages', description='Returns the current restaurant AI chat conversation.')

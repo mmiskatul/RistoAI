@@ -1032,6 +1032,33 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert home_custom_range_response.status_code == 200
     assert "weekly" in home_custom_range_response.json()
 
+    home_shell_response = client.get(
+        "/api/v1/restaurant/home?period=weekly&include_metrics=false&include_cash_management=false",
+        headers=headers,
+    )
+    assert home_shell_response.status_code == 200
+    home_shell_payload = home_shell_response.json()
+    assert home_shell_payload["weekly"]["metrics"] == []
+    assert home_shell_payload["weekly"]["cash_management"] == []
+
+    home_metrics_response = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
+    assert home_metrics_response.status_code == 200
+    assert home_metrics_response.json()["period"] == "weekly"
+    assert home_metrics_response.json()["items"][0]["label"] == "Revenue"
+
+    home_cash_response = client.get("/api/v1/restaurant/home/cash-management?period=weekly", headers=headers)
+    assert home_cash_response.status_code == 200
+    assert home_cash_response.json()["period"] == "weekly"
+    assert {item["label"] for item in home_cash_response.json()["items"]} == {
+        "Total Cash Collected",
+        "Cash Available",
+        "Cash Deposited",
+    }
+
+    home_vat_balance_response = client.get("/api/v1/restaurant/home/vat-balance", headers=headers)
+    assert home_vat_balance_response.status_code == 200
+    assert "balance" in home_vat_balance_response.json()
+
     cash_deposit_response = client.post(
         "/api/v1/restaurant/cash/deposits",
         headers=headers,
@@ -1202,6 +1229,32 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert analytics_monthly_response.status_code == 200
     analytics_monthly_payload = analytics_monthly_response.json()
     assert analytics_monthly_payload["revenue_comparison"][0]["label"] == "This Month Revenue"
+
+    analytics_revenue_comparison_response = client.get("/api/v1/restaurant/analytics/revenue-comparison", headers=headers)
+    assert analytics_revenue_comparison_response.status_code == 200
+    analytics_revenue_comparison_payload = analytics_revenue_comparison_response.json()
+    assert analytics_revenue_comparison_payload["period"] == "weekly"
+    assert analytics_revenue_comparison_payload["items"][0]["label"] == "This Week Revenue"
+
+    analytics_covers_activity_response = client.get("/api/v1/restaurant/analytics/covers-activity", headers=headers)
+    assert analytics_covers_activity_response.status_code == 200
+    analytics_covers_activity_payload = analytics_covers_activity_response.json()
+    assert analytics_covers_activity_payload["period"] == "weekly"
+    assert analytics_covers_activity_payload["items"][0]["label"] == "Lunch"
+
+    analytics_cost_breakdown_response = client.get("/api/v1/restaurant/analytics/cost-breakdown", headers=headers)
+    assert analytics_cost_breakdown_response.status_code == 200
+    analytics_cost_breakdown_payload = analytics_cost_breakdown_response.json()
+    assert analytics_cost_breakdown_payload["period"] == "weekly"
+    assert analytics_cost_breakdown_payload["items"][0]["label"] == "Food Cost"
+
+    analytics_supplier_alerts_response = client.get("/api/v1/restaurant/analytics/supplier-alerts", headers=headers)
+    assert analytics_supplier_alerts_response.status_code == 200
+    analytics_supplier_alerts_payload = analytics_supplier_alerts_response.json()
+    assert analytics_supplier_alerts_payload["period"] == "weekly"
+    assert len(analytics_supplier_alerts_payload["items"]) >= 1
+    assert analytics_supplier_alerts_payload["items"][0]["title"]
+    assert analytics_supplier_alerts_payload["items"][0]["subtitle"]
 
     analytics_export_response = client.get("/api/v1/restaurant/analytics/export?period=weekly&format=pdf", headers=headers)
     assert analytics_export_response.status_code == 404
