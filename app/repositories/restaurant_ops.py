@@ -81,6 +81,17 @@ class RestaurantExpenseRepository(ScopedRepository):
             filters["expense_date"] = date_filters
         return await self.get_multi(filters=filters, page=page, page_size=page_size)
 
+    async def find_inventory_linked_expense(self, *, scope_id: str, inventory_item_id: str) -> dict[str, Any] | None:
+        return await self.get_one(
+            self.scope_filters(
+                scope_id,
+                {
+                    "source_kind": "inventory",
+                    "source_inventory_item_id": inventory_item_id,
+                },
+            )
+        )
+
 
 class RestaurantCashDepositRepository(ScopedRepository):
     collection_name = RestaurantCollections.CASH_DEPOSITS

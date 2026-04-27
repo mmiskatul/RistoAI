@@ -512,6 +512,19 @@ class DailyDataRegisterSummaryResponse(BaseSchema):
     total_cash_on_hand: float = 0.0
 
 
+class DailyDataSectionFieldResponse(BaseSchema):
+    key: str
+    label: str
+    value: float | int | str | None = None
+    value_type: Literal["currency", "integer", "text"] = "text"
+
+
+class DailyDataSectionResponse(BaseSchema):
+    key: str
+    title: str
+    fields: list[DailyDataSectionFieldResponse] = Field(default_factory=list)
+
+
 class DailyDataResponse(BaseSchema):
     id: str
     business_date: str
@@ -529,6 +542,7 @@ class DailyDataResponse(BaseSchema):
     revenue_breakdown: list[DailyDataRevenueBreakdownItemResponse] = Field(default_factory=list)
     covers_summary: DailyDataCoversSummaryResponse = Field(default_factory=DailyDataCoversSummaryResponse)
     register_summary: DailyDataRegisterSummaryResponse = Field(default_factory=DailyDataRegisterSummaryResponse)
+    method_sections: list[DailyDataSectionResponse] = Field(default_factory=list)
     created_at: str
 
 
@@ -597,6 +611,7 @@ class DailyDataDetailResponse(BaseSchema):
     total_covers: int
     avg_revenue_per_cover: float
     register_summary: DailyDataRegisterSummaryResponse = Field(default_factory=DailyDataRegisterSummaryResponse)
+    method_sections: list[DailyDataSectionResponse] = Field(default_factory=list)
     documents: list[DailyDataDocumentItemResponse] = Field(default_factory=list)
     document_count: int = 0
 
@@ -669,6 +684,10 @@ class InventoryItemResponse(BaseSchema):
 class InventoryDetailResponse(InventoryItemResponse):
     current_stock_value: float = 0.0
     history: list[InventoryHistoryItemResponse]
+
+
+class InventoryValueResponse(BaseSchema):
+    total_inventory_value: float
 
 
 class InventoryListResponse(BaseSchema):

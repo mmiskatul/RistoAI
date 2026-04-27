@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import UTC, date, datetime, timedelta
 from html import escape
@@ -73,6 +74,8 @@ from app.schemas.restaurant import (
     DailyDataListItemResponse,
     DailyDataListResponse,
     DailyDataResponse,
+    DailyDataSectionFieldResponse,
+    DailyDataSectionResponse,
     DailyDataSummaryCardResponse,
     DocumentConfirmRequest,
     DocumentConfirmSaveResponse,
@@ -95,6 +98,7 @@ from app.schemas.restaurant import (
     InventoryHistoryItemResponse,
     InventoryItemResponse,
     InventoryListResponse,
+    InventoryValueResponse,
     InventoryStockUpdateRequest,
     InventoryUpdateRequest,
     InventoryListItemActionResponse,
@@ -261,6 +265,79 @@ class RestaurantOperationsService(BaseService):
                 },
             }
         ]
+
+    async def _upsert_inventory_linked_expense(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        inventory_item_id: str,
+        product_name: str,
+        category: str,
+        stock_quantity: float,
+        unit_price: float,
+        purchase_date: date | None,
+        section: str = "cash",
+    ) -> dict[str, Any] | None:
+        if purchase_date is None:
+            return None
+
+        amount = round(max(stock_quantity, 0) * max(unit_price, 0), 2)
+        existing = await self.expense_repository.find_inventory_linked_expense(
+            scope_id=scope_id,
+            inventory_item_id=inventory_item_id,
+        )
+        payload = {
+            "category": category,
+            "amount": amount,
+            "expense_date": datetime.combine(purchase_date, datetime.min.time(), tzinfo=UTC),
+            "section": section,
+            "notes": product_name,
+            "source_kind": "inventory",
+            "source_inventory_item_id": inventory_item_id,
+        }
+        if existing is None:
+            created = await self.expense_repository.create(
+                {
+                    "tenant_id": scope_id,
+                    **payload,
+                    "created_by_user_id": str(current_user["_id"]),
+                }
+            )
+            serialized_created = self.serialize(created)
+            await self._replace_transactions_for_source(
+                scope_id=scope_id,
+                source_kind="expense",
+                source_id=serialized_created["id"],
+                transactions=self._build_expense_transactions(serialized_created),
+            )
+            return created
+
+        updated = await self.expense_repository.update(existing["_id"], payload)
+        serialized_updated = self.serialize(updated)
+        await self._replace_transactions_for_source(
+            scope_id=scope_id,
+            source_kind="expense",
+            source_id=serialized_updated["id"],
+            transactions=self._build_expense_transactions(serialized_updated),
+        )
+        return updated
+
+    async def _delete_inventory_linked_expense(self, *, scope_id: str, inventory_item_id: str) -> date | None:
+        existing = await self.expense_repository.find_inventory_linked_expense(
+            scope_id=scope_id,
+            inventory_item_id=inventory_item_id,
+        )
+        if existing is None:
+            return None
+        existing_expense_date = self._safe_parse_date(existing.get("expense_date"))
+        await self._delete_transactions_for_source(
+            scope_id=scope_id,
+            source_kind="expense",
+            source_id=str(existing["_id"]),
+        )
+        await self.expense_repository.delete(existing["_id"])
+        return existing_expense_date
 
     def _build_cash_deposit_transactions(self, deposit: dict[str, Any]) -> list[dict[str, Any]]:
         deposit_date = self._safe_parse_date(deposit.get("deposit_date"))
@@ -1358,7 +1435,16 @@ class RestaurantOperationsService(BaseService):
             "created_at": datetime.now(UTC).isoformat(),
             "data_sources": [],
         }
-        return self._to_daily_data_detail(bucket, documents=filtered_documents, anchor_date=business_date, reference_date=business_date, period_start=business_date, period_end=business_date)
+        return self._to_daily_data_detail(
+            bucket,
+            records=filtered_records,
+            expenses=filtered_expenses,
+            documents=filtered_documents,
+            anchor_date=business_date,
+            reference_date=business_date,
+            period_start=business_date,
+            period_end=business_date,
+        )
 
     async def get_daily_data_by_week_detail(self, current_user: dict, *, reference_date: date | None = None) -> DailyDataDetailResponse | DailyDataCollectionResponse:
         if reference_date is None:
@@ -1382,6 +1468,12 @@ class RestaurantOperationsService(BaseService):
         items = [
             self._to_daily_data_detail(
                 bucket,
+                records=[item for item in serialized_records if item["business_date"] == bucket["business_date"]],
+                expenses=[
+                    item
+                    for item in serialized_expenses
+                    if datetime.fromisoformat(item["expense_date"].replace("Z", "+00:00")).date().isoformat() == bucket["business_date"]
+                ],
                 documents=[item for item in serialized_documents if item.get("status") == "processed" and item.get("invoice_date") == bucket["business_date"]],
                 anchor_date=datetime.fromisoformat(bucket["business_date"]).date(),
                 reference_date=datetime.fromisoformat(bucket["business_date"]).date(),
@@ -1470,6 +1562,8 @@ class RestaurantOperationsService(BaseService):
         ] if filtered_documents else []
         return self._to_daily_data_detail(
             aggregate_bucket,
+            records=filtered_records,
+            expenses=filtered_expenses,
             documents=filtered_documents,
             anchor_date=reference_date,
             reference_date=reference_date,
@@ -1508,6 +1602,18 @@ class RestaurantOperationsService(BaseService):
                 "created_by_user_id": str(current_user["_id"]),
             }
         )
+        purchase_date = payload.purchase_date or datetime.now(UTC).date()
+        await self._upsert_inventory_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            inventory_item_id=str(document["_id"]),
+            product_name=payload.product_name,
+            category=payload.category,
+            stock_quantity=float(payload.stock_quantity),
+            unit_price=float(payload.unit_price),
+            purchase_date=purchase_date,
+        )
+        await self._sync_restaurant_record(scope_id=scope_id, business_date=purchase_date, current_user=current_user)
         return self._to_inventory_item_response(document)
 
     async def list_inventory(self, current_user: dict, *, page: int, page_size: int, search: str | None, status: str | None, category: str | None) -> InventoryListResponse:
@@ -1517,6 +1623,13 @@ class RestaurantOperationsService(BaseService):
         total_inventory_value = round(sum(item["stock_quantity"] * item["unit_price"] for item in serialized_items), 2)
         return InventoryListResponse(total_inventory_value=total_inventory_value, items=[self._to_inventory_item_response(item) for item in items], **build_pagination_meta(total=total, page=page, page_size=page_size))
 
+    async def get_inventory_value(self, current_user: dict) -> InventoryValueResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        items, _ = await self.inventory_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        serialized_items = self.serialize_list(items)
+        total_inventory_value = round(sum(item["stock_quantity"] * item["unit_price"] for item in serialized_items), 2)
+        return InventoryValueResponse(total_inventory_value=total_inventory_value)
+
     async def get_inventory_item(self, current_user: dict, item_id: str) -> InventoryDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
@@ -1525,6 +1638,7 @@ class RestaurantOperationsService(BaseService):
     async def update_inventory_item(self, current_user: dict, item_id: str, payload: InventoryUpdateRequest) -> InventoryDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
+        previous_purchase_date = self._safe_parse_date(item.get("purchase_date"))
         updates = payload.model_dump(exclude_none=True)
         if "purchase_date" in updates and updates["purchase_date"] is not None:
             updates["purchase_date"] = updates["purchase_date"].isoformat()
@@ -1532,12 +1646,34 @@ class RestaurantOperationsService(BaseService):
         alert_threshold = float(updates.get("alert_threshold", item.get("alert_threshold", 0)))
         updates["stock_status"] = self._resolve_stock_status(stock_quantity, alert_threshold)
         updated = await self.inventory_repository.update(item["_id"], updates)
+        serialized_updated = self.serialize(updated)
+        new_purchase_date = self._safe_parse_date(serialized_updated.get("purchase_date")) or previous_purchase_date or datetime.now(UTC).date()
+        await self._upsert_inventory_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            inventory_item_id=item_id,
+            product_name=str(serialized_updated.get("product_name") or ""),
+            category=str(serialized_updated.get("category") or "Inventory"),
+            stock_quantity=float(serialized_updated.get("stock_quantity", 0) or 0),
+            unit_price=float(serialized_updated.get("unit_price", 0) or 0),
+            purchase_date=new_purchase_date,
+        )
+        if previous_purchase_date is not None:
+            await self._sync_restaurant_record(scope_id=scope_id, business_date=previous_purchase_date, current_user=current_user)
+        if new_purchase_date != previous_purchase_date:
+            await self._sync_restaurant_record(scope_id=scope_id, business_date=new_purchase_date, current_user=current_user)
         return self._to_inventory_detail_response(updated)
 
     async def delete_inventory_item(self, current_user: dict, item_id: str) -> None:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
+        purchase_date = self._safe_parse_date(item.get("purchase_date"))
+        deleted_expense_date = await self._delete_inventory_linked_expense(scope_id=scope_id, inventory_item_id=item_id)
         await self.inventory_repository.delete(item["_id"])
+        if purchase_date is not None:
+            await self._sync_restaurant_record(scope_id=scope_id, business_date=purchase_date, current_user=current_user)
+        if deleted_expense_date is not None and deleted_expense_date != purchase_date:
+            await self._sync_restaurant_record(scope_id=scope_id, business_date=deleted_expense_date, current_user=current_user)
 
     async def update_inventory_stock(self, current_user: dict, item_id: str, payload: InventoryStockUpdateRequest) -> InventoryDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1722,6 +1858,20 @@ class RestaurantOperationsService(BaseService):
     async def create_chat_message(self, current_user: dict, payload: ChatMessageCreateRequest) -> ChatConversationResponse:
         return await self._create_chat_conversation(current_user=current_user, payload=payload)
 
+    async def _load_chat_generation_context(self, *, scope_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        recent_task = self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=8)
+        daily_records_task = self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=14)
+        expenses_task = self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=14)
+        recent, daily_records_result, expenses_result = await asyncio.gather(
+            recent_task,
+            daily_records_task,
+            expenses_task,
+        )
+        daily_records, _ = daily_records_result
+        expenses, _ = expenses_result
+        metrics_context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
+        return recent, metrics_context
+
     async def update_chat_message(self, current_user: dict, message_id: str, payload: ChatMessageUpdateRequest) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         if not message_id:
@@ -1739,10 +1889,7 @@ class RestaurantOperationsService(BaseService):
                 "last_edited_by_user_id": str(current_user["_id"]),
             },
         )
-        recent = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=12)
-        daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
-        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
-        metrics_context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
+        recent, metrics_context = await self._load_chat_generation_context(scope_id=scope_id)
         assistant_text = await self.openai_service.generate_chat_reply(
             prompt=payload.message,
             metrics_context=metrics_context,
@@ -1807,10 +1954,7 @@ class RestaurantOperationsService(BaseService):
             user_message_payload["attachment_source"] = attachment_source
             user_message_payload["attachment_summary"] = attachment_summary
         user_message = await self.chat_repository.create(user_message_payload)
-        recent = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=12)
-        daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
-        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
-        metrics_context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
+        recent, metrics_context = await self._load_chat_generation_context(scope_id=scope_id)
         assistant_text = await self.openai_service.generate_chat_reply(
             prompt=payload.message,
             metrics_context=metrics_context,
@@ -1818,23 +1962,25 @@ class RestaurantOperationsService(BaseService):
             attachment_context=attachment_context,
         )
         insight_message = self._build_chat_insight_message(metrics_context)
-        await self.chat_repository.create(
-            {
-                "tenant_id": scope_id,
-                "role": "insight",
-                "message": insight_message,
-                "created_by_user_id": str(current_user["_id"]),
-                "reply_to_message_id": str(user_message["_id"]),
-            }
-        )
-        await self.chat_repository.create(
-            {
-                "tenant_id": scope_id,
-                "role": "assistant",
-                "message": assistant_text,
-                "created_by_user_id": str(current_user["_id"]),
-                "reply_to_message_id": str(user_message["_id"]),
-            }
+        await asyncio.gather(
+            self.chat_repository.create(
+                {
+                    "tenant_id": scope_id,
+                    "role": "insight",
+                    "message": insight_message,
+                    "created_by_user_id": str(current_user["_id"]),
+                    "reply_to_message_id": str(user_message["_id"]),
+                }
+            ),
+            self.chat_repository.create(
+                {
+                    "tenant_id": scope_id,
+                    "role": "assistant",
+                    "message": assistant_text,
+                    "created_by_user_id": str(current_user["_id"]),
+                    "reply_to_message_id": str(user_message["_id"]),
+                }
+            ),
         )
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
         return ChatConversationResponse(
@@ -3424,6 +3570,258 @@ class RestaurantOperationsService(BaseService):
             total_cash_on_hand=round(closing_cash + cash_payments, 2),
         )
 
+    def _build_daily_data_sections(self, payload: dict[str, Any]) -> list[DailyDataSectionResponse]:
+        if payload.get("method") == "method_2":
+            return [
+                DailyDataSectionResponse(
+                    key="deposit_section",
+                    title="Deposit Section",
+                    fields=[
+                        DailyDataSectionFieldResponse(
+                            key="pos_payments",
+                            label="POS Payments",
+                            value=float(payload.get("pos_payments", 0) or 0),
+                            value_type="currency",
+                        ),
+                        DailyDataSectionFieldResponse(
+                            key="cash_payments",
+                            label="Cash Payments",
+                            value=float(payload.get("cash_payments", 0) or 0),
+                            value_type="currency",
+                        ),
+                        DailyDataSectionFieldResponse(
+                            key="bank_transfer_payments",
+                            label="Bank Transfer Payments",
+                            value=float(payload.get("bank_transfer_payments", 0) or 0),
+                            value_type="currency",
+                        ),
+                        DailyDataSectionFieldResponse(
+                            key="total_deposits",
+                            label="Total Deposits",
+                            value=round(
+                                float(payload.get("pos_payments", 0) or 0)
+                                + float(payload.get("cash_payments", 0) or 0)
+                                + float(payload.get("bank_transfer_payments", 0) or 0),
+                                2,
+                            ),
+                            value_type="currency",
+                        ),
+                    ],
+                ),
+                DailyDataSectionResponse(
+                    key="covers_section",
+                    title="Covers Section",
+                    fields=[
+                        DailyDataSectionFieldResponse(
+                            key="lunch_covers",
+                            label="Lunch Covers",
+                            value=int(payload.get("lunch_covers", 0) or 0),
+                            value_type="integer",
+                        ),
+                        DailyDataSectionFieldResponse(
+                            key="dinner_covers",
+                            label="Dinner Covers",
+                            value=int(payload.get("dinner_covers", 0) or 0),
+                            value_type="integer",
+                        ),
+                        DailyDataSectionFieldResponse(
+                            key="total_covers",
+                            label="Total Covers",
+                            value=int(payload.get("lunch_covers", 0) or 0) + int(payload.get("dinner_covers", 0) or 0),
+                            value_type="integer",
+                        ),
+                    ],
+                ),
+                DailyDataSectionResponse(
+                    key="register_section",
+                    title="Register Section",
+                    fields=[
+                        DailyDataSectionFieldResponse(
+                            key="opening_cash",
+                            label="Opening Cash",
+                            value=float(payload.get("opening_cash", 0) or 0),
+                            value_type="currency",
+                        ),
+                        DailyDataSectionFieldResponse(
+                            key="closing_cash",
+                            label="Closing Cash",
+                            value=float(payload.get("closing_cash", 0) or 0),
+                            value_type="currency",
+                        ),
+                        DailyDataSectionFieldResponse(
+                            key="cash_payments",
+                            label="Cash Payments in Register",
+                            value=float(payload.get("cash_payments", 0) or 0),
+                            value_type="currency",
+                        ),
+                    ],
+                ),
+            ]
+
+        return [
+            DailyDataSectionResponse(
+                key="deposit_section",
+                title="Deposit Section",
+                fields=[
+                    DailyDataSectionFieldResponse(
+                        key="pos_payments",
+                        label="POS Payments",
+                        value=float(payload.get("pos_payments", 0) or 0),
+                        value_type="currency",
+                    ),
+                    DailyDataSectionFieldResponse(
+                        key="cash_in",
+                        label="Cash In",
+                        value=float(payload.get("cash_in", 0) or 0),
+                        value_type="currency",
+                    ),
+                    DailyDataSectionFieldResponse(
+                        key="total_deposits",
+                        label="Total Deposits",
+                        value=round(
+                            float(payload.get("pos_payments", 0) or 0) + float(payload.get("cash_in", 0) or 0),
+                            2,
+                        ),
+                        value_type="currency",
+                    ),
+                ],
+            ),
+            DailyDataSectionResponse(
+                key="expense_section",
+                title="Expense Section",
+                fields=[
+                    DailyDataSectionFieldResponse(
+                        key="expenses_in_cash",
+                        label="Expenses in Cash",
+                        value=float(payload.get("expenses_in_cash", 0) or 0),
+                        value_type="currency",
+                    ),
+                ],
+            ),
+            DailyDataSectionResponse(
+                key="cash_movement_section",
+                title="Cash Movement Section",
+                fields=[
+                    DailyDataSectionFieldResponse(
+                        key="cash_withdrawals",
+                        label="Cash Withdrawals",
+                        value=float(payload.get("cash_withdrawals", 0) or 0),
+                        value_type="currency",
+                    ),
+                    DailyDataSectionFieldResponse(
+                        key="cash_out",
+                        label="Cash Out",
+                        value=float(payload.get("cash_out", 0) or 0),
+                        value_type="currency",
+                    ),
+                ],
+            ),
+            DailyDataSectionResponse(
+                key="notes_section",
+                title="Notes Section",
+                fields=[
+                    DailyDataSectionFieldResponse(
+                        key="notes",
+                        label="Notes",
+                        value=str(payload.get("notes", "") or ""),
+                        value_type="text",
+                    ),
+                ],
+            )
+        ]
+
+    def _build_grouped_daily_data_sections(
+        self,
+        *,
+        records: list[dict[str, Any]],
+        expenses: list[dict[str, Any]],
+        documents: list[dict[str, Any]],
+        bucket: dict[str, Any],
+    ) -> list[DailyDataSectionResponse]:
+        pos_total = round(sum(float(item.get("pos_payments", 0) or 0) for item in records), 2)
+        cash_in_total = round(sum(float(item.get("cash_in", 0) or 0) for item in records), 2)
+        cash_payments_total = round(sum(float(item.get("cash_payments", 0) or 0) for item in records), 2)
+        bank_transfer_total = round(sum(float(item.get("bank_transfer_payments", 0) or 0) for item in records), 2)
+        daily_cash_expense_total = round(sum(float(item.get("expenses_in_cash", 0) or 0) for item in records), 2)
+        cash_withdrawals_total = round(sum(float(item.get("cash_withdrawals", 0) or 0) for item in records), 2)
+        cash_out_total = round(sum(float(item.get("cash_out", 0) or 0) for item in records), 2)
+        opening_cash_total = round(sum(float(item.get("opening_cash", 0) or 0) for item in records), 2)
+        closing_cash_total = round(sum(float(item.get("closing_cash", 0) or 0) for item in records), 2)
+        lunch_covers_total = sum(int(item.get("lunch_covers", 0) or 0) for item in records)
+        dinner_covers_total = sum(int(item.get("dinner_covers", 0) or 0) for item in records)
+        additional_manual_expenses_total = round(
+            sum(float(item.get("amount", 0) or 0) for item in expenses if str(item.get("category", "")) != "Daily Data Expense"),
+            2,
+        )
+        uploaded_document_total = round(sum(float(item.get("total_amount", 0) or 0) for item in documents), 2)
+
+        sections = [
+            DailyDataSectionResponse(
+                key="deposit_section",
+                title="Deposit Section",
+                fields=[
+                    DailyDataSectionFieldResponse(key="pos_payments", label="POS Payments", value=pos_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(key="cash_payments", label="Cash Payments", value=cash_payments_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(key="cash_in", label="Cash In", value=cash_in_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(key="bank_transfer_payments", label="Bank Transfer Payments", value=bank_transfer_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(
+                        key="total_deposits",
+                        label="Total Deposits",
+                        value=round(pos_total + cash_payments_total + cash_in_total + bank_transfer_total, 2),
+                        value_type="currency",
+                    ),
+                ],
+            ),
+            DailyDataSectionResponse(
+                key="expense_section",
+                title="Expense Section",
+                fields=[
+                    DailyDataSectionFieldResponse(key="daily_data_expenses", label="Daily Data Cash Expense", value=daily_cash_expense_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(key="manual_expenses", label="Additional Manual Expenses", value=additional_manual_expenses_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(key="uploaded_documents", label="Uploaded Documents", value=uploaded_document_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(
+                        key="total_expense_collection",
+                        label="Total Expense Collection",
+                        value=round(daily_cash_expense_total + additional_manual_expenses_total + uploaded_document_total, 2),
+                        value_type="currency",
+                    ),
+                ],
+            ),
+            DailyDataSectionResponse(
+                key="cash_movement_section",
+                title="Cash Movement Section",
+                fields=[
+                    DailyDataSectionFieldResponse(key="cash_withdrawals", label="Cash Withdrawals", value=cash_withdrawals_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(key="cash_out", label="Cash Out", value=cash_out_total, value_type="currency"),
+                ],
+            ),
+            DailyDataSectionResponse(
+                key="register_section",
+                title="Register Section",
+                fields=[
+                    DailyDataSectionFieldResponse(key="opening_cash", label="Opening Cash", value=opening_cash_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(key="closing_cash", label="Closing Cash", value=closing_cash_total, value_type="currency"),
+                    DailyDataSectionFieldResponse(key="cash_payments_register", label="Cash Payments in Register", value=float(bucket.get("cash_payments", 0) or 0), value_type="currency"),
+                    DailyDataSectionFieldResponse(key="cash_on_hand", label="Total Cash On Hand", value=float(bucket.get("closing_cash", 0) or 0) + float(bucket.get("cash_payments", 0) or 0), value_type="currency"),
+                ],
+            ),
+        ]
+
+        if lunch_covers_total or dinner_covers_total:
+            sections.append(
+                DailyDataSectionResponse(
+                    key="covers_section",
+                    title="Covers Section",
+                    fields=[
+                        DailyDataSectionFieldResponse(key="lunch_covers", label="Lunch Covers", value=lunch_covers_total, value_type="integer"),
+                        DailyDataSectionFieldResponse(key="dinner_covers", label="Dinner Covers", value=dinner_covers_total, value_type="integer"),
+                        DailyDataSectionFieldResponse(key="total_covers", label="Total Covers", value=lunch_covers_total + dinner_covers_total, value_type="integer"),
+                    ],
+                )
+            )
+
+        return sections
+
     def _to_daily_data_response(self, record: dict) -> DailyDataResponse:
         serialized = self.serialize(record)
         lunch_covers = int(serialized.get("lunch_covers", 0))
@@ -3457,6 +3855,7 @@ class RestaurantOperationsService(BaseService):
             revenue_breakdown=revenue_breakdown,
             covers_summary=DailyDataCoversSummaryResponse(lunch=lunch_covers, dinner=dinner_covers, total=total_covers),
             register_summary=self._build_register_summary(serialized),
+            method_sections=self._build_daily_data_sections(serialized),
             created_at=serialized["created_at"],
         )
 
@@ -3482,6 +3881,8 @@ class RestaurantOperationsService(BaseService):
         self,
         bucket: dict[str, Any],
         *,
+        records: list[dict[str, Any]],
+        expenses: list[dict[str, Any]],
         documents: list[dict[str, Any]],
         anchor_date: date | None = None,
         reference_date: date | None = None,
@@ -3499,6 +3900,12 @@ class RestaurantOperationsService(BaseService):
             total_covers=list_item.total_covers,
             avg_revenue_per_cover=list_item.avg_revenue_per_cover,
             register_summary=self._build_register_summary(bucket),
+            method_sections=self._build_grouped_daily_data_sections(
+                records=records,
+                expenses=expenses,
+                documents=documents,
+                bucket=bucket,
+            ),
             documents=[
                 DailyDataDocumentItemResponse(
                     id=item["id"],

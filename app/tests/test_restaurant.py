@@ -410,6 +410,10 @@ def test_manual_entry_method_one_creates_finance_transactions(client, app):
     assert payload["total_expenses"] == 35.0
     assert payload["profit"] == 515.0
     assert payload["register_summary"]["closing_cash"] == 230.0
+    assert payload["method_sections"][0]["title"] == "Deposit Section"
+    assert payload["method_sections"][0]["fields"][0]["key"] == "pos_payments"
+    assert payload["method_sections"][1]["fields"][0]["value"] == 35.0
+    assert payload["method_sections"][3]["fields"][0]["value"] == "Method 1 ledger test"
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     record_id = payload["id"]
@@ -1138,6 +1142,15 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert detail_payload["register_summary"]["cash_payments"] == 200
     assert detail_payload["register_summary"]["closing_cash"] == 220
     assert detail_payload["register_summary"]["total_cash_on_hand"] == 420
+    assert [section["key"] for section in detail_payload["method_sections"]] == [
+        "deposit_section",
+        "expense_section",
+        "cash_movement_section",
+        "register_section",
+        "covers_section",
+    ]
+    assert detail_payload["method_sections"][0]["fields"][1]["value"] == 200.0
+    assert detail_payload["method_sections"][4]["fields"][2]["value"] == 38
 
     date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-date?business_date={today_iso}", headers=headers)
     assert date_detail_response.status_code == 200
@@ -1150,6 +1163,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert date_detail_payload["register_summary"]["cash_payments"] == 200
     assert date_detail_payload["register_summary"]["total_cash_on_hand"] == 420
     assert date_detail_payload["document_count"] == 0
+    assert date_detail_payload["method_sections"][0]["key"] == "deposit_section"
+    assert date_detail_payload["method_sections"][1]["fields"][3]["value"] == 0.0
 
     week_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-week?reference_date={today_iso}", headers=headers)
     assert week_detail_response.status_code == 200
@@ -1162,6 +1177,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert week_detail_payload["invoice_document_total"] == 0.0
     assert week_detail_payload["total_covers"] == 143
     assert week_detail_payload["document_count"] == 0
+    assert week_detail_payload["method_sections"][0]["fields"][4]["value"] == 2220.0
 
     date_reference_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-date-reference?reference_date={today_iso}", headers=headers)
     assert date_reference_detail_response.status_code == 200

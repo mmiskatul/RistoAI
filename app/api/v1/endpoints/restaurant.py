@@ -47,6 +47,7 @@ from app.schemas.restaurant import (
     InventoryListResponse,
     InventoryStockUpdateRequest,
     InventoryUpdateRequest,
+    InventoryValueResponse,
     RestaurantHomeResponse,
     RestaurantHomeMetricsResponse,
     RestaurantHomeCashManagementResponse,
@@ -398,6 +399,14 @@ async def list_inventory(
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> InventoryListResponse:
     return await service.list_inventory(current_user, page=page, page_size=page_size, search=search, status=status_filter, category=category)
+
+
+@router.get('/inventory/value', response_model=InventoryValueResponse, tags=['Restaurant Inventory'], summary='Inventory Value', description='Returns only the total inventory value for the inventory summary card.')
+async def get_inventory_value(
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> InventoryValueResponse:
+    return await service.get_inventory_value(current_user)
 
 
 @router.get('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Inventory Detail', description='Returns the inventory detail screen payload for one product.', include_in_schema=False)
