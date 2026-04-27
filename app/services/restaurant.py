@@ -425,7 +425,7 @@ class RestaurantOperationsService(BaseService):
         include_recent_activity: bool = True,
     ) -> RestaurantHomeResponse:
         del period
-        scope_id, daily_records, expenses, documents, cash_deposits = await self._load_home_dependencies(current_user)
+        scope_id, daily_records, expenses, documents, cash_deposits, inventory_items = await self._load_home_dependencies(current_user)
 
         weekly_snapshot = await self._build_home_period_snapshot(
             scope_id=scope_id,
@@ -460,7 +460,9 @@ class RestaurantOperationsService(BaseService):
             self._build_recent_activity(
                 daily_records=self.serialize_list(daily_records),
                 expenses=self.serialize_list(expenses),
+                documents=self.serialize_list(documents),
                 cash_deposits=self.serialize_list(cash_deposits),
+                inventory_items=self.serialize_list(inventory_items),
             )
             if include_recent_activity
             else []
@@ -489,7 +491,7 @@ class RestaurantOperationsService(BaseService):
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> RestaurantHomeMetricsResponse:
-        _, daily_records, expenses, _, _ = await self._load_home_dependencies(current_user)
+        _, daily_records, expenses, _, _, _ = await self._load_home_dependencies(current_user)
         filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
         filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
         metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
@@ -507,7 +509,7 @@ class RestaurantOperationsService(BaseService):
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> RestaurantHomeCashManagementResponse:
-        _, daily_records, _, _, cash_deposits = await self._load_home_dependencies(current_user)
+        _, daily_records, _, _, cash_deposits, _ = await self._load_home_dependencies(current_user)
         filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
         filtered_cash_deposits = self._filter_home_cash_deposits(cash_deposits, period=period, from_date=from_date, to_date=to_date)
         return RestaurantHomeCashManagementResponse(
@@ -526,7 +528,7 @@ class RestaurantOperationsService(BaseService):
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> RestaurantHomeRevenueResponse:
-        _, daily_records, _, _, _ = await self._load_home_dependencies(current_user)
+        _, daily_records, _, _, _, _ = await self._load_home_dependencies(current_user)
         filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
         revenue_points = self._build_home_revenue_chart(filtered_daily_records, period=period)
         if period == 'monthly':
@@ -541,19 +543,21 @@ class RestaurantOperationsService(BaseService):
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> RestaurantHomeInsightResponse:
-        scope_id, daily_records, expenses, _, _ = await self._load_home_dependencies(current_user)
+        scope_id, daily_records, expenses, _, _, _ = await self._load_home_dependencies(current_user)
         filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
         filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
         insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=filtered_daily_records, expenses=filtered_expenses)
         return RestaurantHomeInsightResponse(period=period, insight=insights[0] if insights else None)
 
     async def get_home_recent_activity(self, current_user: dict) -> RestaurantHomeRecentActivityResponse:
-        _, daily_records, expenses, _, cash_deposits = await self._load_home_dependencies(current_user)
+        _, daily_records, expenses, documents, cash_deposits, inventory_items = await self._load_home_dependencies(current_user)
         return RestaurantHomeRecentActivityResponse(
             items=self._build_recent_activity(
                 daily_records=self.serialize_list(daily_records),
                 expenses=self.serialize_list(expenses),
+                documents=self.serialize_list(documents),
                 cash_deposits=self.serialize_list(cash_deposits),
+                inventory_items=self.serialize_list(inventory_items),
             )
         )
 
@@ -561,13 +565,14 @@ class RestaurantOperationsService(BaseService):
         vat_overview = await self.get_vat_overview(current_user)
         return RestaurantHomeVatBalanceResponse(balance=vat_overview.estimated_vat_balance)
 
-    async def _load_home_dependencies(self, current_user: dict) -> tuple[str, list[dict], list[dict], list[dict], list[dict]]:
+    async def _load_home_dependencies(self, current_user: dict) -> tuple[str, list[dict], list[dict], list[dict], list[dict], list[dict]]:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
         documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
         cash_deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=120)
-        return scope_id, daily_records, expenses, documents, cash_deposits
+        inventory_items, _ = await self.inventory_repository.list_by_scope(scope_id=scope_id, page=1, page_size=120)
+        return scope_id, daily_records, expenses, documents, cash_deposits, inventory_items
 
     async def _build_home_period_snapshot(
         self,
@@ -3140,14 +3145,49 @@ class RestaurantOperationsService(BaseService):
             2,
         )
 
-    def _build_recent_activity(self, *, daily_records: list[dict], expenses: list[dict], cash_deposits: list[dict]) -> list[ActivityItemResponse]:
+    def _build_recent_activity(
+        self,
+        *,
+        daily_records: list[dict],
+        expenses: list[dict],
+        documents: list[dict],
+        cash_deposits: list[dict],
+        inventory_items: list[dict],
+    ) -> list[ActivityItemResponse]:
         items: list[ActivityItemResponse] = []
         for item in self.serialize_list(daily_records[:3]):
             items.append(ActivityItemResponse(kind="daily_record", title="Daily data saved", subtitle=item["business_date"], timestamp=item["created_at"]))
+        for item in self.serialize_list(documents[:3]):
+            items.append(
+                ActivityItemResponse(
+                    kind="invoice",
+                    title="Invoice uploaded",
+                    subtitle=str(item.get("counterparty_name") or item.get("supplier_name") or item.get("source_file_name") or "Document"),
+                    timestamp=item["created_at"],
+                )
+            )
         for item in self.serialize_list(expenses[:3]):
             items.append(ActivityItemResponse(kind="expense", title="Expense added", subtitle=item["category"], timestamp=item["created_at"]))
         for item in self.serialize_list(cash_deposits[:3]):
-            items.append(ActivityItemResponse(kind="cash", title="Bank deposit logged", subtitle=item.get("bank_account") or item.get("deposit_type", ""), timestamp=item["created_at"]))
+            items.append(
+                ActivityItemResponse(
+                    kind="cash",
+                    title="Bank deposit logged" if item.get("type", "bank_deposit") == "bank_deposit" else "Cash deposit logged",
+                    subtitle=item.get("bank_account") or item.get("deposit_type", ""),
+                    timestamp=item["created_at"],
+                )
+            )
+        for item in self.serialize_list(inventory_items[:3]):
+            items.append(
+                ActivityItemResponse(
+                    kind="inventory",
+                    title="Inventory item added",
+                    subtitle=str(item.get("product_name") or item.get("category") or "Inventory"),
+                    timestamp=item["created_at"],
+                )
+            )
+        for item in items:
+            item.timestamp = str(item.timestamp)
         return sorted(items, key=lambda value: value.timestamp, reverse=True)[:6]
 
     @staticmethod

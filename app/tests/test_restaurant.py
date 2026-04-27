@@ -909,6 +909,101 @@ def test_home_revenue_uses_deposit_sales_when_no_manual_revenue_exists(client, a
     assert any(point["value"] == 275.0 for point in home_payload["weekly"]["revenue"])
 
 
+def test_home_recent_activity_includes_all_core_operations(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Recent Activity Owner",
+            "email": "recent-activity@example.com",
+            "password": "RecentActivity123",
+            "phone": "+1555000310",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+
+    manual_entry_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "method_two": {
+                "business_date": today_iso,
+                "pos_payments": 150,
+                "cash_payments": 40,
+                "bank_transfer_payments": 10,
+                "lunch_covers": 5,
+                "dinner_covers": 7,
+                "opening_cash": 20,
+                "closing_cash": 35,
+            },
+        },
+    )
+    assert manual_entry_response.status_code == 201
+
+    document_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
+        headers=headers,
+        json={
+            "document_type": "expense",
+            "document_label": "Expense",
+            "supplier_name": "Fresh Produce Co",
+            "invoice_number": "INV-RECENT-1",
+            "invoice_date": today_iso,
+            "total_amount": 88.0,
+            "currency": "EUR",
+            "expense_amount": 88.0,
+            "cash_amount": 0.0,
+            "revenue_amount": 0.0,
+            "profit_amount": 0.0,
+            "line_items": [],
+            "source_file_name": "recent-invoice.pdf",
+            "ai_provider": "fallback",
+            "ai_summary": "Recent activity coverage",
+        },
+    )
+    assert document_response.status_code == 201
+
+    expense_response = client.post(
+        "/api/v1/restaurant/expenses",
+        headers=headers,
+        json={"category": "Utilities", "amount": 25.0, "expense_date": today_iso, "section": "cash", "notes": "Water"},
+    )
+    assert expense_response.status_code == 201
+
+    deposit_response = client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={"deposit_date": today_iso, "amount": 90.0, "type": "bank_deposit", "bank_account": "Primary Bank", "notes": "Drop"},
+    )
+    assert deposit_response.status_code == 201
+
+    inventory_response = client.post(
+        "/api/v1/restaurant/inventory",
+        headers=headers,
+        json={
+            "product_name": "Olive Oil",
+            "category": "Pantry",
+            "stock_quantity": 8,
+            "unit_type": "bottles",
+            "supplier_name": "Kitchen Supply Co",
+            "unit_price": 9.5,
+            "alert_threshold": 2,
+            "purchase_date": today_iso,
+        },
+    )
+    assert inventory_response.status_code == 201
+
+    recent_activity_response = client.get("/api/v1/restaurant/home/recent-activity", headers=headers)
+    assert recent_activity_response.status_code == 200
+    recent_activity_payload = recent_activity_response.json()
+    assert set(recent_activity_payload.keys()) == {"items"}
+    kinds = {item["kind"] for item in recent_activity_payload["items"]}
+    assert {"daily_record", "invoice", "expense", "cash", "inventory"}.issubset(kinds)
+
+
 def test_restaurant_cash_api_contracts_remain_stable(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(
