@@ -56,7 +56,46 @@ class RestaurantDocumentRepository(ScopedRepository):
                 {"invoice_number": regex},
                 {"source_file_name": regex},
             ]
-        return await self.get_multi(filters=filters, page=page, page_size=page_size, sort=[("invoice_date", DESCENDING), ("created_at", DESCENDING)])
+        skip = (page - 1) * page_size
+        pipeline: list[dict[str, Any]] = [
+            {"$match": filters},
+            {"$sort": {"invoice_date": DESCENDING, "created_at": DESCENDING}},
+            {
+                "$facet": {
+                    "items": [
+                        {"$skip": skip},
+                        {"$limit": page_size},
+                        {
+                            "$project": {
+                                "_id": 1,
+                                "document_type": 1,
+                                "document_label": 1,
+                                "counterparty_name": 1,
+                                "supplier_name": 1,
+                                "invoice_number": 1,
+                                "invoice_date": 1,
+                                "upload_date": 1,
+                                "total_amount": 1,
+                                "status": 1,
+                                "created_by_user_id": 1,
+                                "last_edited_by_user_id": 1,
+                                "confirmed_at": 1,
+                                "line_item_count": {
+                                    "$size": {"$ifNull": ["$line_items", []]},
+                                },
+                            }
+                        },
+                    ],
+                    "total": [{"$count": "count"}],
+                }
+            },
+        ]
+        result = await self.aggregate(pipeline)
+        facet = result[0] if result else {}
+        items = facet.get("items", [])
+        total_entries = facet.get("total", [])
+        total = int(total_entries[0]["count"]) if total_entries else 0
+        return items, total
 
 
 class RestaurantExpenseRepository(ScopedRepository):

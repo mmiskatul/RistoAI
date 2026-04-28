@@ -3613,6 +3613,7 @@ class RestaurantOperationsService(BaseService):
         serialized = self.serialize(document)
         invoice_date = serialized.get("invoice_date")
         status = str(serialized.get("status", "pending_review"))
+        line_item_count = serialized.get("line_item_count")
         return DocumentListItemResponse(
             id=serialized["id"],
             document_type=str(serialized.get("document_type", "unknown")).lower(),
@@ -3623,7 +3624,7 @@ class RestaurantOperationsService(BaseService):
             upload_date=serialized["upload_date"],
             total_amount=float(serialized.get("total_amount", 0.0)),
             status=status,
-            line_item_count=len(serialized.get("line_items", [])),
+            line_item_count=int(line_item_count if line_item_count is not None else len(serialized.get("line_items", []))),
             created_by_user_id=serialized.get("created_by_user_id"),
             last_edited_by_user_id=serialized.get("last_edited_by_user_id"),
             confirmed_at=serialized.get("confirmed_at"),
