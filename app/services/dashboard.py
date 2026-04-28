@@ -15,6 +15,10 @@ from app.repositories.restaurant_ops import (
 from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 from app.schemas.dashboard import (
+    DashboardAnalyticsBreakdownItemResponse,
+    DashboardAnalyticsPointResponse,
+    DashboardAnalyticsResponse,
+    DashboardAnalyticsStatCardResponse,
     DashboardCashRowResponse,
     DashboardChartsResponse,
     DashboardDailyDataRowResponse,
@@ -72,6 +76,78 @@ class DashboardService(BaseService):
             restaurant_owners=role_counts.get(UserRole.RESTAURANT_OWNER, 0),
             managers=role_counts.get(UserRole.MANAGER, 0),
             staff=role_counts.get(UserRole.STAFF, 0),
+        )
+
+    async def get_analytics(self, *, range_key: str = "30d") -> DashboardAnalyticsResponse:
+        users = await self.user_repository.get_users_with_subscription_data()
+        plan_map = await self._get_plan_map()
+        now = datetime.now(UTC)
+        current_range_start = self._range_start(now, range_key)
+        previous_range_start = self._range_start(current_range_start - timedelta(seconds=1), range_key)
+        previous_range_end = current_range_start
+
+        active_now = sum(1 for user in users if self._is_subscription_active_on(user, now))
+        active_previous = sum(1 for user in users if self._is_subscription_active_on(user, previous_range_end))
+        trial_now = sum(1 for user in users if user.get("subscription_status") == SubscriptionStatus.TRIAL)
+        trial_previous = sum(
+            1
+            for user in users
+            if user.get("subscription_status") == SubscriptionStatus.TRIAL
+            and (self._as_utc(user.get("created_at")) or now) < previous_range_end
+        )
+        total_users = len(users)
+        total_users_previous = sum(1 for user in users if (self._as_utc(user.get("created_at")) or now) < previous_range_end)
+        monthly_revenue_now = round(
+            sum(self._monthly_revenue_value(user, plan_map) for user in users if self._is_subscription_active_on(user, now)),
+            2,
+        )
+        monthly_revenue_previous = round(
+            sum(self._monthly_revenue_value(user, plan_map) for user in users if self._is_subscription_active_on(user, previous_range_end)),
+            2,
+        )
+        conversion_now = self._safe_percent(active_now, active_now + trial_now)
+        conversion_previous = self._safe_percent(active_previous, active_previous + trial_previous)
+
+        return DashboardAnalyticsResponse(
+            range_key=range_key,
+            stat_cards=[
+                DashboardAnalyticsStatCardResponse(
+                    key="total_users",
+                    label="Total Users",
+                    value=float(total_users),
+                    value_formatted=f"{total_users:,}",
+                    change_percent=self._change_percent(total_users, total_users_previous),
+                    trend="up" if total_users >= total_users_previous else "down",
+                ),
+                DashboardAnalyticsStatCardResponse(
+                    key="active_subscriptions",
+                    label="Active Subscriptions",
+                    value=float(active_now),
+                    value_formatted=f"{active_now:,}",
+                    change_percent=self._change_percent(active_now, active_previous),
+                    trend="up" if active_now >= active_previous else "down",
+                ),
+                DashboardAnalyticsStatCardResponse(
+                    key="monthly_revenue",
+                    label="Monthly Revenue",
+                    value=monthly_revenue_now,
+                    value_formatted=self._format_currency(monthly_revenue_now),
+                    change_percent=self._change_percent(monthly_revenue_now, monthly_revenue_previous),
+                    trend="up" if monthly_revenue_now >= monthly_revenue_previous else "down",
+                ),
+                DashboardAnalyticsStatCardResponse(
+                    key="trial_conversion",
+                    label="Trial Conversion",
+                    value=conversion_now,
+                    value_formatted=f"{conversion_now:.1f}%",
+                    change_percent=self._change_percent(conversion_now, conversion_previous),
+                    trend="up" if conversion_now >= conversion_previous else "down",
+                ),
+            ],
+            user_growth=self._build_analytics_user_growth(users, range_key=range_key, now=now),
+            revenue_growth=self._build_analytics_revenue_growth(users, plan_map=plan_map, range_key=range_key, now=now),
+            subscription_status=self._build_analytics_subscription_status(users),
+            billing_cycle=self._build_analytics_billing_cycle(users),
         )
 
     async def get_overview(self, current_user: dict, year: int | None = None) -> DashboardOverviewResponse:
@@ -320,12 +396,182 @@ class DashboardService(BaseService):
         return started_at < period_end and expires_at >= period_start
 
     @staticmethod
+    def _is_subscription_active_on(user: dict, point_in_time: datetime) -> bool:
+        if user.get("subscription_status") != SubscriptionStatus.ACTIVE:
+            return False
+
+        started_at = DashboardService._as_utc(user.get("subscription_started_at") or user.get("created_at"))
+        if not started_at or started_at > point_in_time:
+            return False
+
+        expires_at = DashboardService._as_utc(user.get("subscription_expires_at"))
+        return expires_at is None or expires_at >= point_in_time
+
+    @staticmethod
     def _as_utc(value: datetime | None) -> datetime | None:
         if value is None:
             return None
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
+
+    @staticmethod
+    def _safe_percent(numerator: float, denominator: float) -> float:
+        if denominator <= 0:
+            return 0.0
+        return round((numerator / denominator) * 100, 2)
+
+    @staticmethod
+    def _change_percent(current: float, previous: float) -> float:
+        if previous <= 0:
+            return round(100.0 if current > 0 else 0.0, 2)
+        return round(((current - previous) / previous) * 100, 2)
+
+    @staticmethod
+    def _range_start(anchor: datetime, range_key: str) -> datetime:
+        days = {"7d": 7, "30d": 30, "90d": 90}.get(range_key, 30)
+        normalized = anchor.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        return normalized - timedelta(days=days - 1)
+
+    @staticmethod
+    def _bucket_count(range_key: str) -> int:
+        return {"7d": 7, "30d": 6, "90d": 3}.get(range_key, 6)
+
+    @staticmethod
+    def _bucket_span_days(range_key: str) -> int:
+        return {"7d": 1, "30d": 5, "90d": 30}.get(range_key, 5)
+
+    def _build_analytics_user_growth(
+        self,
+        users: list[dict],
+        *,
+        range_key: str,
+        now: datetime,
+    ) -> list[DashboardAnalyticsPointResponse]:
+        start = self._range_start(now, range_key)
+        bucket_count = self._bucket_count(range_key)
+        span_days = self._bucket_span_days(range_key)
+        points: list[DashboardAnalyticsPointResponse] = []
+
+        for index in range(bucket_count):
+            bucket_start = start + timedelta(days=index * span_days)
+            bucket_end = min(bucket_start + timedelta(days=span_days), now + timedelta(days=1))
+            value = sum(
+                1
+                for user in users
+                if bucket_start <= (self._as_utc(user.get("created_at")) or now) < bucket_end
+            )
+            points.append(
+                DashboardAnalyticsPointResponse(
+                    key=bucket_start.date().isoformat(),
+                    label=self._format_analytics_bucket_label(bucket_start, range_key=range_key),
+                    value=float(value),
+                )
+            )
+
+        return points
+
+    def _build_analytics_revenue_growth(
+        self,
+        users: list[dict],
+        *,
+        plan_map: dict[str, dict],
+        range_key: str,
+        now: datetime,
+    ) -> list[DashboardAnalyticsPointResponse]:
+        start = self._range_start(now, range_key)
+        bucket_count = self._bucket_count(range_key)
+        span_days = self._bucket_span_days(range_key)
+        points: list[DashboardAnalyticsPointResponse] = []
+
+        for index in range(bucket_count):
+            bucket_start = start + timedelta(days=index * span_days)
+            bucket_end = min(bucket_start + timedelta(days=span_days), now + timedelta(days=1))
+            value = round(
+                sum(
+                    self._monthly_revenue_value(user, plan_map)
+                    for user in users
+                    if self._subscription_overlaps_period(user, bucket_start, bucket_end)
+                ),
+                2,
+            )
+            points.append(
+                DashboardAnalyticsPointResponse(
+                    key=bucket_start.date().isoformat(),
+                    label=self._format_analytics_bucket_label(bucket_start, range_key=range_key),
+                    value=value,
+                )
+            )
+
+        return points
+
+    def _build_analytics_subscription_status(self, users: list[dict]) -> list[DashboardAnalyticsBreakdownItemResponse]:
+        active = sum(1 for user in users if user.get("subscription_status") == SubscriptionStatus.ACTIVE)
+        trial = sum(1 for user in users if user.get("subscription_status") == SubscriptionStatus.TRIAL)
+        other = max(len(users) - active - trial, 0)
+        total = max(active + trial + other, 1)
+        return [
+            DashboardAnalyticsBreakdownItemResponse(
+                key="active",
+                label="Active",
+                value=active,
+                percentage=round((active / total) * 100, 2),
+                color_key="primary",
+            ),
+            DashboardAnalyticsBreakdownItemResponse(
+                key="trial",
+                label="Trial",
+                value=trial,
+                percentage=round((trial / total) * 100, 2),
+                color_key="dark",
+            ),
+            DashboardAnalyticsBreakdownItemResponse(
+                key="other",
+                label="Other",
+                value=other,
+                percentage=round((other / total) * 100, 2),
+                color_key="muted",
+            ),
+        ]
+
+    def _build_analytics_billing_cycle(self, users: list[dict]) -> list[DashboardAnalyticsBreakdownItemResponse]:
+        monthly = sum(
+            1
+            for user in users
+            if user.get("subscription_status") == SubscriptionStatus.ACTIVE
+            and user.get("subscription_plan") != SubscriptionPlan.ONE_YEAR
+        )
+        yearly = sum(
+            1
+            for user in users
+            if user.get("subscription_status") == SubscriptionStatus.ACTIVE
+            and user.get("subscription_plan") == SubscriptionPlan.ONE_YEAR
+        )
+        total = max(monthly + yearly, 1)
+        return [
+            DashboardAnalyticsBreakdownItemResponse(
+                key="monthly",
+                label="Monthly",
+                value=monthly,
+                percentage=round((monthly / total) * 100, 2),
+                color_key="primary",
+            ),
+            DashboardAnalyticsBreakdownItemResponse(
+                key="yearly",
+                label="Yearly",
+                value=yearly,
+                percentage=round((yearly / total) * 100, 2),
+                color_key="dark",
+            ),
+        ]
+
+    @staticmethod
+    def _format_analytics_bucket_label(bucket_start: datetime, *, range_key: str) -> str:
+        if range_key == "7d":
+            return bucket_start.strftime("%a").upper()
+        if range_key == "30d":
+            return bucket_start.strftime("%d %b")
+        return bucket_start.strftime("%b")
 
     async def _get_plan_map(self) -> dict[str, dict]:
         plans = await self.subscription_plan_repository.get_active_plans()

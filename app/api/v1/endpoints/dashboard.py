@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from app.core.enums import UserRole
 from app.dependencies.auth import require_roles
 from app.dependencies.services import get_dashboard_service
-from app.schemas.dashboard import DashboardOverviewResponse, DashboardUserMetricsResponse
+from app.schemas.dashboard import DashboardAnalyticsResponse, DashboardOverviewResponse, DashboardUserMetricsResponse
 from app.services.dashboard import DashboardService
 
 router = APIRouter()
@@ -28,3 +28,12 @@ async def get_user_metrics(
     service: DashboardService = Depends(get_dashboard_service),
 ) -> DashboardUserMetricsResponse:
     return await service.get_user_metrics()
+
+
+@router.get('/analytics', response_model=DashboardAnalyticsResponse, tags=['Admin Dashboard'], summary='Admin Dashboard Analytics', description='Returns the platform analytics payload for the admin analytics page.')
+async def get_dashboard_analytics(
+    range_key: str = Query(default="30d", pattern="^(7d|30d|90d)$"),
+    _: dict = Depends(require_roles(UserRole.SUPER_ADMIN)),
+    service: DashboardService = Depends(get_dashboard_service),
+) -> DashboardAnalyticsResponse:
+    return await service.get_analytics(range_key=range_key)

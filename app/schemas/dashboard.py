@@ -165,3 +165,35 @@ class DashboardUserMetricsResponse(BaseSchema):
     restaurant_owners: int
     managers: int
     staff: int
+
+
+class DashboardAnalyticsStatCardResponse(BaseSchema):
+    key: str
+    label: str
+    value: float
+    value_formatted: str
+    change_percent: float = 0.0
+    trend: str = "up"
+
+
+class DashboardAnalyticsPointResponse(BaseSchema):
+    key: str
+    label: str
+    value: float
+
+
+class DashboardAnalyticsBreakdownItemResponse(BaseSchema):
+    key: str
+    label: str
+    value: int
+    percentage: float = 0.0
+    color_key: str
+
+
+class DashboardAnalyticsResponse(BaseSchema):
+    range_key: str
+    stat_cards: list[DashboardAnalyticsStatCardResponse] = Field(default_factory=list)
+    user_growth: list[DashboardAnalyticsPointResponse] = Field(default_factory=list)
+    revenue_growth: list[DashboardAnalyticsPointResponse] = Field(default_factory=list)
+    subscription_status: list[DashboardAnalyticsBreakdownItemResponse] = Field(default_factory=list)
+    billing_cycle: list[DashboardAnalyticsBreakdownItemResponse] = Field(default_factory=list)
