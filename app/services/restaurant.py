@@ -1344,7 +1344,6 @@ class RestaurantOperationsService(BaseService):
                 "cash_out": max(data["opening_cash"] - data["closing_cash"], 0),
                 "expenses_in_cash": 0.0,
             }
-        existing = await self.daily_record_repository.find_by_business_date(scope_id=scope_id, business_date=business_date)
         final_payload = {
             "tenant_id": scope_id,
             "business_date": business_date.isoformat(),
@@ -1358,10 +1357,7 @@ class RestaurantOperationsService(BaseService):
             "avg_revenue_per_cover": round(total_revenue / max(lunch_covers + dinner_covers, 1), 2),
             "created_by_user_id": str(current_user["_id"]),
         }
-        if existing:
-            document = await self.daily_record_repository.update(existing["_id"], final_payload)
-        else:
-            document = await self.daily_record_repository.create(final_payload)
+        document = await self.daily_record_repository.create(final_payload)
         serialized_document = self.serialize(document)
         await self._replace_transactions_for_source(
             scope_id=scope_id,
@@ -1492,18 +1488,23 @@ class RestaurantOperationsService(BaseService):
         ]
 
         buckets = self._build_daily_data_buckets(filtered_records, filtered_expenses, filtered_documents, anchor_date=business_date)
-        bucket = buckets[0] if buckets else {
+        bucket = {
             "id": f"date:{target_iso}",
             "business_date": target_iso,
-            "total_revenue": 0.0,
-            "total_expenses": 0.0,
-            "invoice_document_total": round(sum(float(item.get("total_amount", 0)) for item in filtered_documents), 2),
-            "total_covers": 0,
+            "total_revenue": round(sum(float(item.get("total_revenue", 0)) for item in buckets), 2),
+            "total_expenses": round(sum(float(item.get("total_expenses", 0)) for item in buckets), 2),
+            "invoice_document_total": round(sum(float(item.get("invoice_document_total", 0)) for item in buckets), 2),
+            "total_covers": int(sum(int(item.get("total_covers", 0)) for item in buckets)),
             "avg_revenue_per_cover": 0.0,
+            "opening_cash": round(sum(float(item.get("opening_cash", 0)) for item in buckets), 2),
+            "closing_cash": round(sum(float(item.get("closing_cash", 0)) for item in buckets), 2),
+            "cash_payments": round(sum(float(item.get("cash_payments", 0)) for item in buckets), 2),
             "record_id": None,
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": buckets[0].get("created_at") if buckets else datetime.now(UTC).isoformat(),
             "data_sources": [],
         }
+        if bucket["total_revenue"]:
+            bucket["avg_revenue_per_cover"] = round(bucket["total_revenue"] / max(bucket["total_covers"], 1), 2)
         return self._to_daily_data_detail(
             bucket,
             records=filtered_records,
@@ -2432,7 +2433,11 @@ class RestaurantOperationsService(BaseService):
         serialized_deposits = self.serialize_list(all_deposits)
         serialized_transactions = self.serialize_list(all_transactions)
 
-        manual_record = next((item for item in serialized_daily_records if str(item.get("business_date", "")).startswith(target_date)), None)
+        manual_records = [
+            item
+            for item in serialized_daily_records
+            if str(item.get("business_date", "")).startswith(target_date)
+        ]
         manual_expenses = [
             item
             for item in serialized_expenses
@@ -2455,22 +2460,25 @@ class RestaurantOperationsService(BaseService):
         ]
 
         now = datetime.now(UTC)
-        if not manual_record and not manual_expenses and not uploaded_documents and not deposits:
+        if not manual_records and not manual_expenses and not uploaded_documents and not deposits:
             existing = await self.record_repository.find_by_business_date(scope_id=scope_id, business_date=resolved_business_date)
             if existing:
                 await self.record_repository.delete(existing["_id"])
         else:
             snapshot = build_aggregate_snapshot(
-                manual_records=[manual_record] if manual_record else [],
+                manual_records=manual_records,
                 finance_transactions=finance_transactions,
             )
+            primary_manual_record = manual_records[0] if manual_records else None
 
             await self.record_repository.upsert_by_business_date(
                 scope_id=scope_id,
                 business_date=resolved_business_date,
                 payload={
-                    "manual_entry_id": manual_record.get("id") if manual_record else None,
-                    "manual_method": manual_record.get("method") if manual_record else None,
+                    "manual_entry_id": primary_manual_record.get("id") if primary_manual_record else None,
+                    "manual_entry_ids": [item["id"] for item in manual_records],
+                    "manual_entry_count": len(manual_records),
+                    "manual_method": primary_manual_record.get("method") if primary_manual_record else None,
                     "manual_revenue": snapshot["revenue_summary"]["manual_entry_sales_total"],
                     "manual_entry_expenses": snapshot["manual_entry_expenses"],
                     "uploaded_document_total": snapshot["uploaded_document_total"],
@@ -2502,7 +2510,8 @@ class RestaurantOperationsService(BaseService):
                     "cash_summary": snapshot["cash_summary"],
                     "operations_summary": snapshot["operations_summary"],
                     "source_breakdown": {
-                        "manual_entry": bool(manual_record),
+                        "manual_entry": bool(manual_records),
+                        "manual_entry_count": len(manual_records),
                         "uploaded_document_count": len(uploaded_documents),
                         "manual_expense_count": len(manual_expenses),
                         "bank_deposit_count": len(deposits),
@@ -3342,7 +3351,7 @@ class RestaurantOperationsService(BaseService):
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=item["business_date"],
-                    route=f"/(tabs)/home/daily-record-details?segment=date&referenceDate={item['business_date']}",
+                    route=f"/(tabs)/home/daily-record-details?recordId={item['id']}",
                 )
             )
         for item in self.serialize_list(documents[:3]):
@@ -3380,7 +3389,7 @@ class RestaurantOperationsService(BaseService):
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=str(self._safe_parse_date(item.get("deposit_date")) or ""),
-                    route="/(tabs)/home/cash-management",
+                    route=f"/(tabs)/home/cash-transaction-details?id={item['id']}",
                 )
             )
         for item in self.serialize_list(inventory_items[:3]):
@@ -3466,37 +3475,27 @@ class RestaurantOperationsService(BaseService):
     def _build_daily_data_buckets(self, records: list[dict[str, Any]], expenses: list[dict[str, Any]], documents: list[dict[str, Any]], *, anchor_date: date) -> list[dict[str, Any]]:
         buckets: dict[str, dict[str, Any]] = {}
         for record in records:
-            bucket = buckets.setdefault(
-                record["business_date"],
-                {
-                    "id": f"date:{record['business_date']}",
-                    "business_date": record["business_date"],
-                    "total_revenue": 0.0,
-                    "total_expenses": 0.0,
-                    "invoice_document_total": 0.0,
-                    "total_covers": 0,
-                    "avg_revenue_per_cover": 0.0,
-                    "opening_cash": 0.0,
-                    "closing_cash": 0.0,
-                    "cash_payments": 0.0,
-                    "record_id": None,
-                    "created_at": record["created_at"],
-                    "data_sources": [],
-                },
-            )
+            bucket_key = f"record:{record['id']}"
             covers = int(record.get("lunch_covers", 0) + record.get("dinner_covers", 0))
-            bucket["id"] = record["id"]
-            bucket["record_id"] = record["id"]
-            bucket["total_revenue"] = float(record.get("total_revenue", 0))
-            bucket["total_covers"] = covers
-            bucket["avg_revenue_per_cover"] = float(record.get("avg_revenue_per_cover", 0))
-            bucket["opening_cash"] = float(record.get("opening_cash", 0) or 0)
-            bucket["closing_cash"] = float(record.get("closing_cash", 0) or 0)
-            bucket["cash_payments"] = float(record.get("cash_payments", 0) or 0)
-            bucket["created_at"] = record["created_at"]
+            bucket = {
+                "id": record["id"],
+                "business_date": record["business_date"],
+                "total_revenue": float(record.get("total_revenue", 0)),
+                "total_expenses": float(record.get("total_expenses", 0)),
+                "invoice_document_total": float(record.get("uploaded_document_total", 0.0)),
+                "total_covers": covers,
+                "avg_revenue_per_cover": float(record.get("avg_revenue_per_cover", 0)),
+                "opening_cash": float(record.get("opening_cash", 0) or 0),
+                "closing_cash": float(record.get("closing_cash", 0) or 0),
+                "cash_payments": float(record.get("cash_payments", 0) or 0),
+                "record_id": record["id"],
+                "created_at": record["created_at"],
+                "data_sources": [],
+            }
             bucket["data_sources"].append(
                 DailyDataEntrySourceResponse(kind="daily_record", label="Daily data", count=1, endpoint=f"/api/v1/restaurant/daily-data/{record['id']}")
             )
+            buckets[bucket_key] = bucket
 
         expense_groups: dict[str, dict[str, Any]] = {}
         for expense in expenses:
@@ -3580,7 +3579,11 @@ class RestaurantOperationsService(BaseService):
             if bucket["total_revenue"]:
                 bucket["avg_revenue_per_cover"] = round(bucket["total_revenue"] / max(bucket["total_covers"], 1), 2)
 
-        return sorted(buckets.values(), key=lambda item: item["business_date"], reverse=True)
+        return sorted(
+            buckets.values(),
+            key=lambda item: (item["business_date"], str(item.get("created_at", ""))),
+            reverse=True,
+        )
 
     @staticmethod
     def _filter_expenses_by_date_range(expenses: list[dict[str, Any]], *, start_date: date, end_date: date) -> list[dict[str, Any]]:
