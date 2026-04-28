@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from mimetypes import guess_extension
+from mimetypes import guess_extension, guess_type
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import UploadFile
@@ -11,11 +13,29 @@ from starlette.concurrency import run_in_threadpool
 from app.config.settings import Settings
 from app.core.exceptions import ValidationException
 
-ALLOWED_IMAGE_CONTENT_TYPES = {
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/webp",
+IMAGE_CONTENT_TYPE_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "image/x-icon": "image/vnd.microsoft.icon",
+}
+SAFE_IMAGE_EXTENSION_PATTERN = re.compile(r"^\.[a-z0-9]{1,16}$")
+SUPPORTED_IMAGE_EXTENSIONS = {
+    ".apng",
+    ".avif",
+    ".bmp",
+    ".gif",
+    ".heic",
+    ".heif",
+    ".ico",
+    ".jfif",
+    ".jpeg",
+    ".jpg",
+    ".pjpeg",
+    ".pjp",
+    ".png",
+    ".svg",
+    ".tif",
+    ".tiff",
+    ".webp",
 }
 
 
@@ -46,13 +66,31 @@ class ImageStorageService:
                 {"missing_fields": missing},
             )
 
-    def _normalize_extension(self, content_type: str) -> str:
-        extension = guess_extension(content_type) or ""
+    def _resolve_image_metadata(self, *, file_name: str | None, content_type: str | None) -> tuple[str, str]:
+        normalized_content_type = IMAGE_CONTENT_TYPE_ALIASES.get((content_type or "").lower(), (content_type or "").lower())
+        file_extension = Path(file_name or "").suffix.lower()
+        guessed_content_type = guess_type(file_name or "")[0]
+
+        if not normalized_content_type or normalized_content_type == "application/octet-stream":
+            normalized_content_type = guessed_content_type or ""
+            normalized_content_type = IMAGE_CONTENT_TYPE_ALIASES.get(normalized_content_type, normalized_content_type)
+
+        if not normalized_content_type.startswith("image/") and file_extension not in SUPPORTED_IMAGE_EXTENSIONS:
+            raise ValidationException("Only image files are supported")
+
+        if not normalized_content_type.startswith("image/"):
+            normalized_content_type = "image/*"
+
+        if normalized_content_type.startswith("image/") and SAFE_IMAGE_EXTENSION_PATTERN.match(file_extension):
+            return normalized_content_type, file_extension
+
+        if file_extension in SUPPORTED_IMAGE_EXTENSIONS:
+            return normalized_content_type, file_extension
+
+        extension = guess_extension(normalized_content_type) or ""
         if extension == ".jpe":
-            return ".jpg"
-        if extension in {".jpg", ".jpeg", ".png", ".webp"}:
-            return extension
-        return ".jpg"
+            extension = ".jpg"
+        return normalized_content_type, extension if extension in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
 
     def _build_public_url(self, key: str) -> str:
         if self.settings.aws_s3_public_base_url:
@@ -70,14 +108,13 @@ class ImageStorageService:
             return value
         return self._build_public_url(value)
 
-    def _upload_sync(self, *, file_name: str, content_type: str, file_bytes: bytes, prefix: str) -> UploadedImage:
+    def _upload_sync(self, *, content_type: str, extension: str, file_bytes: bytes, prefix: str) -> UploadedImage:
         self._validate_config()
         try:
             import boto3
         except ImportError as exc:  # pragma: no cover - dependency issue
             raise ValidationException("boto3 is required for AWS image uploads") from exc
 
-        extension = self._normalize_extension(content_type)
         safe_prefix = prefix.strip("/").replace(" ", "-")
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         key = f"{safe_prefix}/{timestamp}-{uuid4().hex}{extension}"
@@ -97,16 +134,17 @@ class ImageStorageService:
         return UploadedImage(url=self._build_public_url(key), key=key)
 
     async def upload_file(self, *, file: UploadFile, prefix: str) -> UploadedImage:
-        content_type = (file.content_type or "").lower()
-        if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
-            raise ValidationException("Only JPG, JPEG, PNG, and WEBP images are supported")
+        content_type, extension = self._resolve_image_metadata(
+            file_name=file.filename,
+            content_type=file.content_type,
+        )
         file_bytes = await file.read()
         if not file_bytes:
             raise ValidationException("Uploaded image is empty")
         return await run_in_threadpool(
             self._upload_sync,
-            file_name=file.filename or "upload-image",
             content_type=content_type,
+            extension=extension,
             file_bytes=file_bytes,
             prefix=prefix,
         )
@@ -114,14 +152,14 @@ class ImageStorageService:
 
 class DummyImageStorageService(ImageStorageService):
     async def upload_file(self, *, file: UploadFile, prefix: str) -> UploadedImage:
-        content_type = (file.content_type or "").lower()
-        if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
-            raise ValidationException("Only JPG, JPEG, PNG, and WEBP images are supported")
+        _, extension = self._resolve_image_metadata(
+            file_name=file.filename,
+            content_type=file.content_type,
+        )
         file_bytes = await file.read()
         if not file_bytes:
             raise ValidationException("Uploaded image is empty")
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        extension = self._normalize_extension(content_type)
         key = f"{prefix.strip('/').replace(' ', '-')}/{timestamp}-{uuid4().hex}{extension}"
         return UploadedImage(url=f"https://example.com/{key}", key=key)
 

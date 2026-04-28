@@ -590,6 +590,10 @@ class DashboardService(BaseService):
         return 29.0
 
     @staticmethod
+    def _format_currency(value: float) -> str:
+        return f"${value:,.2f}" if value >= 0 else f"-${abs(value):,.2f}"
+
+    @staticmethod
     def _charge_value(user: dict, plan_map: dict[str, dict]) -> float:
         plan = plan_map.get(user.get("subscription_plan_name"))
         if plan:

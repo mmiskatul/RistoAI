@@ -7,7 +7,7 @@ from bson import ObjectId
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
-from app.core.enums import UserRole
+from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
 from app.core.security import token_manager
 from app.db.mongodb import get_database
 from app.main import create_app
@@ -255,6 +255,103 @@ def test_dashboard_user_metrics_returns_counts_for_admin():
         'managers': 0,
         'staff': 0,
     }
+
+
+def test_dashboard_analytics_returns_platform_metrics_for_admin():
+    app, mock_db = _build_app_with_mock_db()
+
+    now = datetime.now(UTC)
+    admin_id = ObjectId()
+    monthly_owner_id = ObjectId()
+    yearly_owner_id = ObjectId()
+    trial_owner_id = ObjectId()
+
+    asyncio.run(
+        mock_db['users'].insert_many(
+            [
+                {
+                    '_id': admin_id,
+                    'email': 'admin@example.com',
+                    'full_name': 'Admin User',
+                    'hashed_password': 'x',
+                    'role': UserRole.SUPER_ADMIN,
+                    'is_active': True,
+                    'email_verified': True,
+                    'created_at': now - timedelta(days=30),
+                    'updated_at': now - timedelta(days=30),
+                },
+                {
+                    '_id': monthly_owner_id,
+                    'email': 'monthly@example.com',
+                    'full_name': 'Monthly Owner',
+                    'hashed_password': 'x',
+                    'role': UserRole.RESTAURANT_OWNER,
+                    'is_active': True,
+                    'email_verified': True,
+                    'subscription_status': SubscriptionStatus.ACTIVE,
+                    'subscription_plan': SubscriptionPlan.ONE_MONTH,
+                    'created_at': now - timedelta(days=3),
+                    'updated_at': now - timedelta(days=3),
+                },
+                {
+                    '_id': yearly_owner_id,
+                    'email': 'yearly@example.com',
+                    'full_name': 'Yearly Owner',
+                    'hashed_password': 'x',
+                    'role': UserRole.RESTAURANT_OWNER,
+                    'is_active': True,
+                    'email_verified': True,
+                    'subscription_status': SubscriptionStatus.ACTIVE,
+                    'subscription_plan': SubscriptionPlan.ONE_YEAR,
+                    'created_at': now - timedelta(days=2),
+                    'updated_at': now - timedelta(days=2),
+                },
+                {
+                    '_id': trial_owner_id,
+                    'email': 'trial@example.com',
+                    'full_name': 'Trial Owner',
+                    'hashed_password': 'x',
+                    'role': UserRole.RESTAURANT_OWNER,
+                    'is_active': True,
+                    'email_verified': True,
+                    'subscription_status': SubscriptionStatus.TRIAL,
+                    'subscription_plan': SubscriptionPlan.ONE_MONTH,
+                    'created_at': now - timedelta(days=1),
+                    'updated_at': now - timedelta(days=1),
+                },
+            ]
+        )
+    )
+
+    access_token = token_manager.create_access_token(str(admin_id), UserRole.SUPER_ADMIN)
+
+    with TestClient(app) as client:
+        response = client.get(
+            '/api/v1/dashboard/analytics?range_key=7d',
+            headers={'Authorization': f'Bearer {access_token}'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    stat_cards = {item['key']: item for item in payload['stat_cards']}
+
+    assert payload['range_key'] == '7d'
+    assert stat_cards['total_users']['value'] == 3.0
+    assert stat_cards['active_subscriptions']['value'] == 2.0
+    assert stat_cards['monthly_revenue']['value'] == 53.17
+    assert stat_cards['monthly_revenue']['value_formatted'] == '$53.17'
+    assert stat_cards['trial_conversion']['value'] == 66.67
+    assert len(payload['user_growth']) == 7
+    assert len(payload['revenue_growth']) == 7
+    assert payload['subscription_status'] == [
+        {'key': 'active', 'label': 'Active', 'value': 2, 'percentage': 66.67, 'color_key': 'primary'},
+        {'key': 'trial', 'label': 'Trial', 'value': 1, 'percentage': 33.33, 'color_key': 'dark'},
+        {'key': 'other', 'label': 'Other', 'value': 0, 'percentage': 0.0, 'color_key': 'muted'},
+    ]
+    assert payload['billing_cycle'] == [
+        {'key': 'monthly', 'label': 'Monthly', 'value': 1, 'percentage': 50.0, 'color_key': 'primary'},
+        {'key': 'yearly', 'label': 'Yearly', 'value': 1, 'percentage': 50.0, 'color_key': 'dark'},
+    ]
 
 
 

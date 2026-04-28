@@ -290,6 +290,7 @@ class AuthService(BaseService):
             id=serialized['id'],
             email=serialized['email'],
             full_name=serialized['full_name'],
+            avatar_url=serialized.get('avatar_url'),
             phone=serialized.get('phone'),
             role=serialized['role'],
             preferred_language=serialized.get('preferred_language', AppLanguage.ENGLISH),

@@ -120,6 +120,7 @@ class AuthUserResponse(BaseSchema):
     id: str
     email: EmailStr
     full_name: str
+    avatar_url: str | None = None
     phone: str | None = None
     role: UserRole
     preferred_language: AppLanguage

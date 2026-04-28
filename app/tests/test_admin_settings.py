@@ -238,6 +238,38 @@ def test_admin_settings_update_uploads_image_and_stores_url():
     assert stored_admin['avatar_url'] == profile_image_url
 
 
+def test_admin_settings_upload_accepts_image_formats_and_stores_public_url():
+    app, mock_db = _build_app_with_mock_db()
+    admin_id = _seed_admin(mock_db)
+
+    with TestClient(app) as client:
+        response = client.put(
+            '/api/v1/settings/general',
+            headers=_admin_headers(admin_id),
+            data={
+                'platform_name': 'Risto AI',
+                'support_email': 'support@risto-ai.com',
+                'default_language': 'en-US',
+            },
+            files={
+                'profile_image': ('admin.svg', b'<svg xmlns="http://www.w3.org/2000/svg" />', 'image/svg+xml'),
+            },
+        )
+        me_response = client.get('/api/v1/auth/me', headers=_admin_headers(admin_id))
+
+    assert response.status_code == 200
+    profile_image_url = response.json()['general']['profile_image_url']
+    assert profile_image_url is not None
+    assert profile_image_url.endswith('.svg')
+
+    stored_admin = asyncio.run(mock_db['users'].find_one({'_id': admin_id}))
+    assert stored_admin is not None
+    assert stored_admin['avatar_url'] == profile_image_url
+
+    assert me_response.status_code == 200
+    assert me_response.json()['avatar_url'] == profile_image_url
+
+
 def test_legacy_default_legal_content_is_backfilled_with_richer_terms():
     app, mock_db = _build_app_with_mock_db()
     _seed_admin(mock_db)
