@@ -56,6 +56,8 @@ class ActivityItemResponse(BaseSchema):
     timestamp: str
     entity_id: str | None = None
     reference_date: str | None = None
+    source_kind: str | None = None
+    source_entity_id: str | None = None
     route: str | None = None
 
 

@@ -1088,6 +1088,11 @@ class RestaurantOperationsService(BaseService):
             this_month=build_period(month_items),
         )
 
+    async def get_expense_detail(self, current_user: dict, expense_id: str) -> ExpenseResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        expense = await self.expense_repository.get_scoped_by_id(expense_id, scope_id)
+        return self._to_expense_response(expense)
+
     async def create_cash_deposit(self, current_user: dict, payload: CashDepositCreateRequest) -> CashDepositResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         document = await self.cash_repository.create(
@@ -3386,6 +3391,8 @@ class RestaurantOperationsService(BaseService):
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=item["business_date"],
+                    source_kind="daily_record",
+                    source_entity_id=item["id"],
                     route=f"/(tabs)/home/daily-record-details?dataId={item['id']}",
                 )
             )
@@ -3398,12 +3405,25 @@ class RestaurantOperationsService(BaseService):
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=str(item.get("invoice_date") or ""),
+                    source_kind="invoice",
+                    source_entity_id=item["id"],
                     route=f"/(tabs)/documents/{item['id']}",
                 )
             )
         for item in self.serialize_list(expenses[:3]):
             expense_date = self._safe_parse_date(item.get("expense_date"))
             reference_date = expense_date.isoformat() if expense_date else ""
+            source_kind = str(item.get("source_kind") or "").lower()
+            source_inventory_item_id = str(item.get("source_inventory_item_id") or "").strip()
+            expense_route = f"/(tabs)/home/expense-details?id={item['id']}"
+            activity_source_kind = "expense"
+            activity_source_entity_id = item["id"]
+
+            if source_kind == "inventory" and source_inventory_item_id:
+                expense_route = f"/(tabs)/inventory/{source_inventory_item_id}"
+                activity_source_kind = "inventory"
+                activity_source_entity_id = source_inventory_item_id
+
             items.append(
                 ActivityItemResponse(
                     kind="expense",
@@ -3412,7 +3432,9 @@ class RestaurantOperationsService(BaseService):
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=reference_date,
-                    route=f"/(tabs)/home/daily-record-details?segment=date&referenceDate={reference_date}" if reference_date else "/(tabs)/home/expenses",
+                    source_kind=activity_source_kind,
+                    source_entity_id=activity_source_entity_id,
+                    route=expense_route,
                 )
             )
         for item in self.serialize_list(cash_deposits[:3]):
@@ -3424,6 +3446,8 @@ class RestaurantOperationsService(BaseService):
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=str(self._safe_parse_date(item.get("deposit_date")) or ""),
+                    source_kind="cash",
+                    source_entity_id=item["id"],
                     route=f"/(tabs)/home/cash-transaction-details?id={item['id']}",
                 )
             )
@@ -3436,6 +3460,8 @@ class RestaurantOperationsService(BaseService):
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=str(item.get("purchase_date") or ""),
+                    source_kind="inventory",
+                    source_entity_id=item["id"],
                     route=f"/(tabs)/inventory/{item['id']}",
                 )
             )

@@ -271,6 +271,11 @@ async def list_expenses(page: int = Query(default=1, ge=1), page_size: int = Que
     return await service.list_expenses(current_user, page=page, page_size=page_size)
 
 
+@router.get('/expenses/{expense_id}', response_model=ExpenseResponse, tags=['Restaurant Expenses'], summary='Expense Detail', description='Returns one saved manual expense record.')
+async def get_expense_detail(expense_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ExpenseResponse:
+    return await service.get_expense_detail(current_user, expense_id)
+
+
 @router.post('/cash/deposits', response_model=CashDepositResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Cash Management'], summary='Create Bank Deposit', description='Creates a cash deposit or bank drop record.')
 async def create_cash_deposit(payload: CashDepositCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> CashDepositResponse:
     return await service.create_cash_deposit(current_user, payload)
