@@ -51,6 +51,34 @@ class DashboardMetaResponse(BaseSchema):
     year: int
 
 
+class DashboardDailyDataRowResponse(BaseSchema):
+    id: str
+    restaurant_name: str
+    business_date: str
+    total_revenue: float
+    total_expenses: float
+    total_covers: int
+
+
+class DashboardCashRowResponse(BaseSchema):
+    id: str
+    restaurant_name: str
+    deposit_date: str
+    amount: float
+    bank_account: str | None = None
+    reference: str | None = None
+
+
+class DashboardInventoryRowResponse(BaseSchema):
+    id: str
+    restaurant_name: str
+    product_name: str
+    category: str
+    stock_quantity: float
+    unit_type: str
+    stock_status: str | None = None
+
+
 class DashboardSidebarItemResponse(BaseSchema):
     key: str
     label: str
@@ -124,6 +152,9 @@ class DashboardOverviewResponse(BaseSchema):
     summary: DashboardKpiResponse
     charts: DashboardChartsResponse
     meta: DashboardMetaResponse
+    recent_daily_data: list[DashboardDailyDataRowResponse] = Field(default_factory=list)
+    recent_cash_deposits: list[DashboardCashRowResponse] = Field(default_factory=list)
+    recent_inventory_items: list[DashboardInventoryRowResponse] = Field(default_factory=list)
 
 
 class DashboardUserMetricsResponse(BaseSchema):

@@ -50,7 +50,15 @@ async def get_onboarding_service(db=Depends(get_database)) -> OnboardingService:
 
 
 async def get_dashboard_service(db=Depends(get_database)) -> DashboardService:
-    return DashboardService(UserRepository(db), OnboardingProfileRepository(db), AuthCodeRepository(db), SubscriptionPlanRepository(db))
+    return DashboardService(
+        UserRepository(db),
+        OnboardingProfileRepository(db),
+        AuthCodeRepository(db),
+        SubscriptionPlanRepository(db),
+        RestaurantRecordRepository(db),
+        RestaurantCashDepositRepository(db),
+        RestaurantInventoryRepository(db),
+    )
 
 
 async def get_user_management_service(db=Depends(get_database)) -> UserManagementService:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -83,6 +84,27 @@ class UserRepository(BaseRepository[dict]):
 
     async def get_users_with_subscription_data(self) -> list[dict]:
         return await self.collection.find({"subscription_status": {"$ne": None}}).to_list(length=None)
+
+    async def get_restaurant_lookup(self) -> dict[str, str]:
+        rows = await self.collection.find(
+            {},
+            {
+                "_id": 1,
+                "organization_id": 1,
+                "restaurant_name": 1,
+            },
+        ).to_list(length=None)
+        lookup: dict[str, str] = {}
+        for row in rows:
+            restaurant_name = str(row.get("restaurant_name") or "").strip()
+            if not restaurant_name:
+                continue
+            owner_id = str(row.get("_id"))
+            lookup.setdefault(owner_id, restaurant_name)
+            organization_id = row.get("organization_id")
+            if organization_id is not None:
+                lookup.setdefault(str(organization_id), restaurant_name)
+        return lookup
 
     @staticmethod
     def _build_user_filters(

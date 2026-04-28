@@ -2,14 +2,23 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
 from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
+from app.repositories.restaurant_ops import (
+    RestaurantCashDepositRepository,
+    RestaurantInventoryRepository,
+    RestaurantRecordRepository,
+)
 from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 from app.schemas.dashboard import (
+    DashboardCashRowResponse,
     DashboardChartsResponse,
+    DashboardDailyDataRowResponse,
+    DashboardInventoryRowResponse,
     DashboardKpiResponse,
     DashboardMetaResponse,
     DashboardMonthlyPointResponse,
@@ -37,11 +46,17 @@ class DashboardService(BaseService):
         onboarding_repository: OnboardingProfileRepository,
         auth_code_repository: AuthCodeRepository,
         subscription_plan_repository: SubscriptionPlanRepository,
+        record_repository: RestaurantRecordRepository,
+        cash_repository: RestaurantCashDepositRepository,
+        inventory_repository: RestaurantInventoryRepository,
     ) -> None:
         self.user_repository = user_repository
         self.onboarding_repository = onboarding_repository
         self.auth_code_repository = auth_code_repository
         self.subscription_plan_repository = subscription_plan_repository
+        self.record_repository = record_repository
+        self.cash_repository = cash_repository
+        self.inventory_repository = inventory_repository
 
     async def get_user_metrics(self) -> DashboardUserMetricsResponse:
         role_counts = await self.user_repository.get_role_counts()
@@ -102,12 +117,97 @@ class DashboardService(BaseService):
             users_by_role=self._build_role_breakdown(role_counts),
             subscription_breakdown=self._build_subscription_breakdown(active_subscriptions, trial_users),
         )
+        restaurant_lookup = await self.user_repository.get_restaurant_lookup()
 
         return DashboardOverviewResponse(
             summary=summary,
             charts=charts,
             meta=DashboardMetaResponse(year=selected_year),
+            recent_daily_data=await self._get_recent_daily_data_rows(restaurant_lookup),
+            recent_cash_deposits=await self._get_recent_cash_rows(restaurant_lookup),
+            recent_inventory_items=await self._get_recent_inventory_rows(restaurant_lookup),
         )
+
+    async def _get_recent_daily_data_rows(self, restaurant_lookup: dict[str, str]) -> list[DashboardDailyDataRowResponse]:
+        rows = await self.record_repository.collection.find(
+            {"period_type": "day"},
+            {
+                "_id": 1,
+                "tenant_id": 1,
+                "business_date": 1,
+                "total_revenue": 1,
+                "total_expenses": 1,
+                "total_covers": 1,
+                "updated_at": 1,
+            },
+        ).sort([("business_date", -1), ("updated_at", -1)]).limit(6).to_list(length=6)
+        serialized_rows = self.serialize_list(rows)
+        return [
+            DashboardDailyDataRowResponse(
+                id=str(item["id"]),
+                restaurant_name=restaurant_lookup.get(str(item.get("tenant_id")), "Unknown restaurant"),
+                business_date=str(item.get("business_date") or ""),
+                total_revenue=float(item.get("total_revenue", 0.0) or 0.0),
+                total_expenses=float(item.get("total_expenses", 0.0) or 0.0),
+                total_covers=int(item.get("total_covers", 0) or 0),
+            )
+            for item in serialized_rows
+        ]
+
+    async def _get_recent_cash_rows(self, restaurant_lookup: dict[str, str]) -> list[DashboardCashRowResponse]:
+        rows = await self.cash_repository.collection.find(
+            {},
+            {
+                "_id": 1,
+                "tenant_id": 1,
+                "deposit_date": 1,
+                "amount": 1,
+                "bank_account": 1,
+                "reference": 1,
+                "created_at": 1,
+            },
+        ).sort([("deposit_date", -1), ("created_at", -1)]).limit(6).to_list(length=6)
+        serialized_rows = self.serialize_list(rows)
+        return [
+            DashboardCashRowResponse(
+                id=str(item["id"]),
+                restaurant_name=restaurant_lookup.get(str(item.get("tenant_id")), "Unknown restaurant"),
+                deposit_date=str(item.get("deposit_date") or ""),
+                amount=float(item.get("amount", 0.0) or 0.0),
+                bank_account=str(item.get("bank_account") or "") or None,
+                reference=str(item.get("reference") or "") or None,
+            )
+            for item in serialized_rows
+        ]
+
+    async def _get_recent_inventory_rows(self, restaurant_lookup: dict[str, str]) -> list[DashboardInventoryRowResponse]:
+        rows = await self.inventory_repository.collection.find(
+            {},
+            {
+                "_id": 1,
+                "tenant_id": 1,
+                "product_name": 1,
+                "category": 1,
+                "stock_quantity": 1,
+                "unit_type": 1,
+                "stock_status": 1,
+                "updated_at": 1,
+                "created_at": 1,
+            },
+        ).sort([("updated_at", -1), ("created_at", -1)]).limit(6).to_list(length=6)
+        serialized_rows = self.serialize_list(rows)
+        return [
+            DashboardInventoryRowResponse(
+                id=str(item["id"]),
+                restaurant_name=restaurant_lookup.get(str(item.get("tenant_id")), "Unknown restaurant"),
+                product_name=str(item.get("product_name") or ""),
+                category=str(item.get("category") or ""),
+                stock_quantity=float(item.get("stock_quantity", 0.0) or 0.0),
+                unit_type=str(item.get("unit_type") or ""),
+                stock_status=str(item.get("stock_status") or "") or None,
+            )
+            for item in serialized_rows
+        ]
 
     @staticmethod
     def _build_monthly_points(counts: list[int]) -> list[DashboardMonthlyPointResponse]:

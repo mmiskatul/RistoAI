@@ -3343,15 +3343,20 @@ class RestaurantOperationsService(BaseService):
     ) -> list[ActivityItemResponse]:
         items: list[ActivityItemResponse] = []
         for item in self.serialize_list(daily_records[:3]):
+            business_date = self._safe_parse_date(item.get("business_date"))
+            formatted_business_date = business_date.strftime("%d %b %Y") if business_date else str(item.get("business_date") or "Daily data")
+            total_revenue = float(item.get("total_revenue", 0) or 0)
+            total_covers = int(item.get("total_covers", 0) or 0)
+            average_per_cover = float(item.get("avg_revenue_per_cover", 0) or 0)
             items.append(
                 ActivityItemResponse(
                     kind="daily_record",
-                    title="Daily data saved",
-                    subtitle=item["business_date"],
+                    title=formatted_business_date,
+                    subtitle=f"Revenue EUR {total_revenue:,.2f} | Covers {total_covers} | Avg EUR {average_per_cover:,.2f}",
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=item["business_date"],
-                    route=f"/(tabs)/home/daily-record-details?recordId={item['id']}",
+                    route=f"/(tabs)/home/daily-record-details?dataId=date:{item['business_date']}",
                 )
             )
         for item in self.serialize_list(documents[:3]):
