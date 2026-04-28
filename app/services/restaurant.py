@@ -1434,26 +1434,38 @@ class RestaurantOperationsService(BaseService):
 
     async def list_daily_data(self, current_user: dict, *, page: int, page_size: int, view: str, reference_date: date | None) -> DailyDataListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        anchor_date = reference_date or datetime.now(UTC).date()
-        start_date, end_date = self._resolve_date_range(view=view, anchor_date=anchor_date)
+        if view == "week":
+            items, total = await self.weekly_record_repository.list_by_scope(
+                scope_id=scope_id,
+                page=page,
+                page_size=page_size,
+            )
+            serialized_items = self.serialize_list(items)
+            return DailyDataListResponse(
+                items=[self._to_daily_data_list_item_from_snapshot(item, view="week") for item in serialized_items],
+                **build_pagination_meta(total=total, page=page, page_size=page_size),
+            )
 
-        all_records, _ = await self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
-        serialized_records = self.serialize_list(all_records)
-        all_expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
-        serialized_expenses = self.serialize_list(all_expenses)
-        all_documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        if view == "month":
+            items, total = await self.monthly_record_repository.list_by_scope(
+                scope_id=scope_id,
+                page=page,
+                page_size=page_size,
+            )
+            serialized_items = self.serialize_list(items)
+            return DailyDataListResponse(
+                items=[self._to_daily_data_list_item_from_snapshot(item, view="month") for item in serialized_items],
+                **build_pagination_meta(total=total, page=page, page_size=page_size),
+            )
 
-        filtered_records = self._filter_daily_records_by_date_range(serialized_records, start_date=start_date, end_date=end_date)
-        filtered_expenses = self._filter_expenses_by_date_range(serialized_expenses, start_date=start_date, end_date=end_date) if (start_date or end_date) else serialized_expenses
-
-        filtered_documents = [item for item in self.serialize_list(all_documents) if item.get("status") == "processed"]
-        buckets = self._build_daily_data_buckets(filtered_records, filtered_expenses, filtered_documents, anchor_date=anchor_date)
-        total = len(buckets)
-        page_start = (page - 1) * page_size
-        page_end = page_start + page_size
-        page_items = buckets[page_start:page_end]
+        items, total = await self.record_repository.list_by_scope(
+            scope_id=scope_id,
+            page=page,
+            page_size=page_size,
+        )
+        serialized_items = self.serialize_list(items)
         return DailyDataListResponse(
-            items=[self._to_daily_data_bucket_item(item, anchor_date=anchor_date) for item in page_items],
+            items=[self._to_daily_data_list_item_from_snapshot(item, view="date") for item in serialized_items],
             **build_pagination_meta(total=total, page=page, page_size=page_size),
         )
 
@@ -4136,6 +4148,33 @@ class RestaurantOperationsService(BaseService):
             total_covers=int(bucket.get("total_covers", 0)),
             avg_revenue_per_cover=avg_value,
             created_at=str(bucket.get("created_at")),
+        )
+
+    def _to_daily_data_list_item_from_snapshot(self, snapshot: dict[str, Any], *, view: str) -> DailyDataListItemResponse:
+        business_date = str(
+            snapshot.get("business_date")
+            or snapshot.get("period_start_date")
+            or snapshot.get("week_start_date")
+            or snapshot.get("month_start_date")
+            or snapshot.get("period_key")
+            or ""
+        )
+        prefix = "date" if view == "date" else view
+        snapshot_id = f"{prefix}:{business_date}"
+        manual_entry_count = int(snapshot.get("manual_entry_count", 0) or 0)
+        manual_entry_id = snapshot.get("manual_entry_id")
+        return DailyDataListItemResponse(
+            id=snapshot_id,
+            record_id=str(manual_entry_id) if manual_entry_id and manual_entry_count == 1 else None,
+            business_date=business_date,
+            total_revenue=float(snapshot.get("total_revenue", 0.0) or 0.0),
+            operating_revenue=float(snapshot.get("total_revenue", 0.0) or 0.0),
+            total_expenses=float(snapshot.get("total_expenses", 0.0) or 0.0),
+            operating_expenses=float(snapshot.get("total_expenses", 0.0) or 0.0),
+            invoice_document_total=float(snapshot.get("uploaded_document_total", 0.0) or 0.0),
+            total_covers=int(snapshot.get("total_covers", 0) or 0),
+            avg_revenue_per_cover=float(snapshot.get("avg_revenue_per_cover", 0.0) or 0.0),
+            created_at=str(snapshot.get("updated_at") or snapshot.get("last_synced_at") or snapshot.get("created_at") or datetime.now(UTC).isoformat()),
         )
 
     def _to_daily_data_detail(

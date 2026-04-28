@@ -236,6 +236,14 @@ class RestaurantRecordRepository(ScopedRepository):
 class RestaurantWeeklyRecordRepository(ScopedRepository):
     collection_name = RestaurantCollections.FINANCE_SNAPSHOTS
 
+    async def list_by_scope(self, *, scope_id: str, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
+        return await self.get_multi(
+            filters=self.scope_filters(scope_id, {"period_type": "week"}),
+            page=page,
+            page_size=page_size,
+            sort=[("period_start_date", DESCENDING), ("updated_at", DESCENDING)],
+        )
+
     async def find_by_week_start_date(self, *, scope_id: str, week_start_date: date) -> dict[str, Any] | None:
         return await self.get_one(self.scope_filters(scope_id, {"period_type": "week", "period_key": week_start_date.isoformat()}))
 
@@ -259,6 +267,14 @@ class RestaurantWeeklyRecordRepository(ScopedRepository):
 
 class RestaurantMonthlyRecordRepository(ScopedRepository):
     collection_name = RestaurantCollections.FINANCE_SNAPSHOTS
+
+    async def list_by_scope(self, *, scope_id: str, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
+        return await self.get_multi(
+            filters=self.scope_filters(scope_id, {"period_type": "month"}),
+            page=page,
+            page_size=page_size,
+            sort=[("period_start_date", DESCENDING), ("updated_at", DESCENDING)],
+        )
 
     async def find_by_month_key(self, *, scope_id: str, month_key: str) -> dict[str, Any] | None:
         return await self.get_one(self.scope_filters(scope_id, {"period_type": "month", "period_key": month_key}))

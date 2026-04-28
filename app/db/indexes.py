@@ -157,10 +157,16 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
             IndexModel([("tenant_id", ASCENDING), ("bank_account", ASCENDING)], name="idx_restaurant_bank_accounts_tenant_account"),
         ],
     )
+    await _drop_indexes_by_name(
+        db[RestaurantCollections.MANUAL_ENTRIES],
+        [
+            "uq_restaurant_manual_entries_tenant_date",
+        ],
+    )
     await _create_indexes_safely(
         db[RestaurantCollections.MANUAL_ENTRIES],
         [
-            IndexModel([("tenant_id", ASCENDING), ("business_date", ASCENDING)], unique=True, name="uq_restaurant_manual_entries_tenant_date"),
+            IndexModel([("tenant_id", ASCENDING), ("business_date", DESCENDING)], name="idx_restaurant_manual_entries_tenant_business_date"),
             IndexModel([("tenant_id", ASCENDING), ("updated_at", DESCENDING)], name="idx_restaurant_manual_entries_tenant_updated"),
         ],
     )
