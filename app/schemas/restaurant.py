@@ -54,6 +54,9 @@ class ActivityItemResponse(BaseSchema):
     title: str
     subtitle: str
     timestamp: str
+    entity_id: str | None = None
+    reference_date: str | None = None
+    route: str | None = None
 
 
 class InsightSummaryResponse(BaseSchema):
@@ -300,6 +303,8 @@ class ExpenseResponse(BaseSchema):
     expense_date: str
     section: Literal["cash", "bank"] = "cash"
     notes: str | None = None
+    source_kind: str | None = None
+    source_inventory_item_id: str | None = None
     created_at: str
 
 
@@ -569,6 +574,7 @@ class DailyDataEntrySourceResponse(BaseSchema):
 
 class DailyDataListItemResponse(BaseSchema):
     id: str
+    record_id: str | None = None
     business_date: str
     total_revenue: float
     operating_revenue: float

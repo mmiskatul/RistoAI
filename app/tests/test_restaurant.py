@@ -1522,3 +1522,79 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert new_login_response.status_code == 200
 
 
+def test_weekly_revenue_trend_uses_latest_available_business_dates(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Trend Owner",
+            "email": "trend@example.com",
+            "password": "TrendPass123",
+            "phone": "+3900000012",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today = datetime.now(UTC).date()
+    latest_business_date = today - timedelta(days=8)
+    earlier_business_date = today - timedelta(days=9)
+
+    latest_business_date_iso = latest_business_date.isoformat()
+    earlier_business_date_iso = earlier_business_date.isoformat()
+
+    latest_entry_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "method_two": {
+                "business_date": latest_business_date_iso,
+                "pos_payments": 650,
+                "cash_payments": 250,
+                "bank_transfer_payments": 100,
+                "lunch_covers": 30,
+                "dinner_covers": 40,
+                "opening_cash": 120,
+                "closing_cash": 320,
+            },
+        },
+    )
+    assert latest_entry_response.status_code == 201
+
+    earlier_entry_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "method_two": {
+                "business_date": earlier_business_date_iso,
+                "pos_payments": 500,
+                "cash_payments": 150,
+                "bank_transfer_payments": 50,
+                "lunch_covers": 22,
+                "dinner_covers": 28,
+                "opening_cash": 100,
+                "closing_cash": 240,
+            },
+        },
+    )
+    assert earlier_entry_response.status_code == 201
+
+    home_revenue_response = client.get("/api/v1/restaurant/home/revenue?period=weekly", headers=headers)
+    assert home_revenue_response.status_code == 200
+    home_revenue_payload = home_revenue_response.json()
+    assert home_revenue_payload["period"] == "weekly"
+    assert len(home_revenue_payload["items"]) == 7
+    assert sum(item["value"] for item in home_revenue_payload["items"]) == 1700
+    assert any(item["value"] > 0 for item in home_revenue_payload["items"])
+
+    analytics_trend_response = client.get("/api/v1/restaurant/analytics/revenue-trend?period=weekly", headers=headers)
+    assert analytics_trend_response.status_code == 200
+    analytics_trend_payload = analytics_trend_response.json()
+    assert analytics_trend_payload["period"] == "weekly"
+    assert analytics_trend_payload["revenue_total"] == 1700
+    assert len(analytics_trend_payload["points"]) == 7
+    assert sum(item["value"] for item in analytics_trend_payload["points"]) == 1700
+    assert any(item["value"] > 0 for item in analytics_trend_payload["points"])
+
+

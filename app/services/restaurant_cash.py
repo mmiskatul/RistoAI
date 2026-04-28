@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
-SALE_TRANSACTION_TYPES = {"bank_collection", "cash_collection", "bank_deposit", "cash_deposit"}
+SALE_TRANSACTION_TYPES = {"bank_collection", "cash_collection"}
 
 
 @dataclass(frozen=True)
@@ -107,22 +107,19 @@ def calculate_cash_ledger(
         sum(float(item.get("amount", 0)) for item in transaction_items if str(item.get("transaction_type", "")).lower() == "cash_deposit"),
         2,
     )
-    bank_deposits_total = round(manual_bank_deposits_total + direct_bank_collection_total, 2)
-    deposits_collection_total = round(bank_deposits_total + cash_deposits_total, 2)
+    bank_deposits_total = round(
+        direct_bank_collection_total + manual_bank_deposits_total + cash_deposits_total,
+        2,
+    )
+    deposits_collection_total = bank_deposits_total
     cash_available = round(
         max(base_cash_available + document_cash_total - cash_expenses_total - document_expense_total - manual_bank_deposits_total - cash_deposits_total, 0.0),
         2,
     )
+    total_collected = round(cash_available + bank_deposits_total, 2)
 
     return CashLedgerSummary(
-        total_collected=round(
-            total_collected
-            + direct_bank_collection_total
-            + document_cash_total
-            + manual_bank_deposits_total
-            + cash_deposits_total,
-            2,
-        ),
+        total_collected=total_collected,
         base_cash_available=base_cash_available,
         cash_available=cash_available,
         withdrawals_total=withdrawals_total,

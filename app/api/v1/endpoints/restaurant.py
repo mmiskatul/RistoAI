@@ -276,6 +276,11 @@ async def create_cash_deposit(payload: CashDepositCreateRequest, current_user: d
     return await service.create_cash_deposit(current_user, payload)
 
 
+@router.get('/cash/deposits/{deposit_id}', response_model=CashDepositResponse, tags=['Restaurant Cash Management'], summary='Bank Deposit Detail', description='Returns one saved cash deposit or bank drop record.')
+async def get_cash_deposit(deposit_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> CashDepositResponse:
+    return await service.get_cash_deposit(current_user, deposit_id)
+
+
 @router.patch('/cash/deposits/{deposit_id}', response_model=CashDepositResponse, tags=['Restaurant Cash Management'], summary='Update Bank Deposit', description='Updates a saved cash deposit or bank drop record.')
 async def update_cash_deposit(deposit_id: str, payload: CashDepositUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> CashDepositResponse:
     return await service.update_cash_deposit(current_user, deposit_id, payload)
@@ -365,6 +370,16 @@ async def get_daily_data_by_month_business_date_detail(
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> DailyDataDetailResponse:
     return await service.get_daily_data_by_month_detail(current_user, reference_date=business_date)
+
+
+@router.delete('/daily-data/by-date', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Data Management'], summary='Delete Date Collection', description='Deletes all deletable source records collected under one business date.')
+async def delete_daily_data_by_date(
+    business_date: date = Query(...),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> Response:
+    await service.delete_daily_data_collection_by_date(current_user, business_date)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get('/daily-data/{record_id}', response_model=DailyDataResponse, tags=['Restaurant Data Management'], summary='Daily Record Detail', description='Returns one saved manual daily record in detail-screen shape.')

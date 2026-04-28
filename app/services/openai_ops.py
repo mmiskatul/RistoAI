@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
 import json
 import logging
+import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Awaitable, Callable, ClassVar
 
 import httpx
 
@@ -15,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAIOperationsService:
+    _CACHE_TTL_SECONDS: ClassVar[float] = 60.0
+    _generation_cache: ClassVar[dict[str, tuple[float, Any]]] = {}
+    _inflight_generations: ClassVar[dict[str, asyncio.Task[Any]]] = {}
+
     def __init__(self) -> None:
         self.settings = get_settings()
 
@@ -91,19 +98,36 @@ class OpenAIOperationsService:
                 },
             ],
         }
-        try:
-            response_payload = await self._responses_create(payload)
-            parsed = self._try_parse_json(response_payload.get("output_text", ""))
-            if isinstance(parsed, dict):
-                title = str(parsed.get("title") or "").strip()
-                subtitle = str(parsed.get("subtitle") or "").strip()
-                if title and subtitle:
-                    if not title.startswith("Optimization Tip:"):
-                        title = f"Optimization Tip: {title}"
-                    return {"title": title, "subtitle": subtitle}
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("OpenAI business insight generation failed", exc_info=exc)
-        return {"title": fallback_title, "subtitle": fallback_subtitle}
+        cache_key = self._generation_cache_key(
+            "business_insight",
+            {
+                "analytics_context": analytics_context,
+                "fallback_title": fallback_title,
+                "fallback_subtitle": fallback_subtitle,
+            },
+        )
+
+        async def _generate() -> dict[str, str]:
+            try:
+                response_payload = await self._responses_create(payload)
+                parsed = self._try_parse_json(response_payload.get("output_text", ""))
+                if isinstance(parsed, dict):
+                    title = str(parsed.get("title") or "").strip()
+                    subtitle = str(parsed.get("subtitle") or "").strip()
+                    if title and subtitle:
+                        if not title.startswith("Optimization Tip:"):
+                            title = f"Optimization Tip: {title}"
+                        return {"title": title, "subtitle": subtitle}
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 429:
+                    logger.warning("OpenAI business insight rate limited; using fallback insight.")
+                else:
+                    logger.exception("OpenAI business insight generation failed", exc_info=exc)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("OpenAI business insight generation failed", exc_info=exc)
+            return {"title": fallback_title, "subtitle": fallback_subtitle}
+
+        return await self._run_cached_generation(cache_key, _generate)
 
     async def generate_supplier_alerts(
         self,
@@ -146,25 +170,41 @@ class OpenAIOperationsService:
                 },
             ],
         }
-        try:
-            response_payload = await self._responses_create(payload)
-            parsed = self._try_parse_json(response_payload.get("output_text", ""))
-            if isinstance(parsed, dict):
-                alerts = parsed.get("alerts")
-                if isinstance(alerts, list):
-                    normalized: list[dict[str, str]] = []
-                    for item in alerts[:3]:
-                        if not isinstance(item, dict):
-                            continue
-                        title = str(item.get("title") or "").strip()
-                        subtitle = str(item.get("subtitle") or "").strip()
-                        if title and subtitle:
-                            normalized.append({"title": title, "subtitle": subtitle})
-                    if normalized:
-                        return normalized
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("OpenAI supplier alert generation failed", exc_info=exc)
-        return fallback_alerts
+        cache_key = self._generation_cache_key(
+            "supplier_alerts",
+            {
+                "analytics_context": analytics_context,
+                "fallback_alerts": fallback_alerts,
+            },
+        )
+
+        async def _generate() -> list[dict[str, str]]:
+            try:
+                response_payload = await self._responses_create(payload)
+                parsed = self._try_parse_json(response_payload.get("output_text", ""))
+                if isinstance(parsed, dict):
+                    alerts = parsed.get("alerts")
+                    if isinstance(alerts, list):
+                        normalized: list[dict[str, str]] = []
+                        for item in alerts[:3]:
+                            if not isinstance(item, dict):
+                                continue
+                            title = str(item.get("title") or "").strip()
+                            subtitle = str(item.get("subtitle") or "").strip()
+                            if title and subtitle:
+                                normalized.append({"title": title, "subtitle": subtitle})
+                        if normalized:
+                            return normalized
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 429:
+                    logger.warning("OpenAI supplier alerts rate limited; using fallback alerts.")
+                else:
+                    logger.exception("OpenAI supplier alert generation failed", exc_info=exc)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("OpenAI supplier alert generation failed", exc_info=exc)
+            return fallback_alerts
+
+        return await self._run_cached_generation(cache_key, _generate)
 
     async def generate_restaurant_insight(
         self,
@@ -211,14 +251,30 @@ class OpenAIOperationsService:
                 },
             ],
         }
-        try:
-            response_payload = await self._responses_create(payload)
-            parsed = self._try_parse_json(response_payload.get("output_text", ""))
-            if isinstance(parsed, dict):
-                return self._normalize_restaurant_insight(parsed, fallback_insight)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("OpenAI restaurant insight generation failed", exc_info=exc)
-        return fallback_insight
+        cache_key = self._generation_cache_key(
+            "restaurant_insight",
+            {
+                "metrics_context": metrics_context,
+                "fallback_insight": fallback_insight,
+            },
+        )
+
+        async def _generate() -> dict[str, Any]:
+            try:
+                response_payload = await self._responses_create(payload)
+                parsed = self._try_parse_json(response_payload.get("output_text", ""))
+                if isinstance(parsed, dict):
+                    return self._normalize_restaurant_insight(parsed, fallback_insight)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 429:
+                    logger.warning("OpenAI restaurant insight rate limited; using fallback insight.")
+                else:
+                    logger.exception("OpenAI restaurant insight generation failed", exc_info=exc)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("OpenAI restaurant insight generation failed", exc_info=exc)
+            return fallback_insight
+
+        return await self._run_cached_generation(cache_key, _generate)
 
     @staticmethod
     def _normalize_restaurant_insight(parsed: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
@@ -392,18 +448,60 @@ class OpenAIOperationsService:
 
     async def _responses_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=45.0) as client:
-            response = await client.post(
-                "/responses",
-                headers={
-                    "Authorization": f"Bearer {self.settings.openai_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            data["output_text"] = self._extract_output_text(data)
-            return data
+            headers = {
+                "Authorization": f"Bearer {self.settings.openai_api_key}",
+                "Content-Type": "application/json",
+            }
+            for attempt in range(3):
+                response = await client.post("/responses", headers=headers, json=payload)
+                if response.status_code != 429:
+                    response.raise_for_status()
+                    data = response.json()
+                    data["output_text"] = self._extract_output_text(data)
+                    return data
+
+                retry_after_header = response.headers.get("retry-after")
+                try:
+                    retry_after = float(retry_after_header) if retry_after_header else 0.0
+                except ValueError:
+                    retry_after = 0.0
+                if attempt == 2:
+                    response.raise_for_status()
+                await asyncio.sleep(max(retry_after, 0.5 * (attempt + 1)))
+
+            raise RuntimeError("OpenAI responses request retry loop exited unexpectedly")
+
+    @classmethod
+    def _generation_cache_key(cls, prefix: str, payload: dict[str, Any]) -> str:
+        normalized = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        return f"{prefix}:{digest}"
+
+    @classmethod
+    async def _run_cached_generation(
+        cls,
+        cache_key: str,
+        generator: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        now = time.monotonic()
+        cached = cls._generation_cache.get(cache_key)
+        if cached and cached[0] > now:
+            return cached[1]
+
+        inflight = cls._inflight_generations.get(cache_key)
+        if inflight is not None:
+            return await inflight
+
+        task = asyncio.create_task(generator())
+        cls._inflight_generations[cache_key] = task
+        try:
+            result = await task
+            cls._generation_cache[cache_key] = (time.monotonic() + cls._CACHE_TTL_SECONDS, result)
+            return result
+        finally:
+            current = cls._inflight_generations.get(cache_key)
+            if current is task:
+                cls._inflight_generations.pop(cache_key, None)
 
     async def _upload_file(self, *, file_name: str, file_bytes: bytes) -> str:
         async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=45.0) as client:
