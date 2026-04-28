@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from mimetypes import guess_extension, guess_type
@@ -17,7 +16,6 @@ IMAGE_CONTENT_TYPE_ALIASES = {
     "image/jpg": "image/jpeg",
     "image/x-icon": "image/vnd.microsoft.icon",
 }
-SAFE_IMAGE_EXTENSION_PATTERN = re.compile(r"^\.[a-z0-9]{1,16}$")
 SUPPORTED_IMAGE_EXTENSIONS = {
     ".apng",
     ".avif",
@@ -80,9 +78,6 @@ class ImageStorageService:
 
         if not normalized_content_type.startswith("image/"):
             normalized_content_type = "image/*"
-
-        if normalized_content_type.startswith("image/") and SAFE_IMAGE_EXTENSION_PATTERN.match(file_extension):
-            return normalized_content_type, file_extension
 
         if file_extension in SUPPORTED_IMAGE_EXTENSIONS:
             return normalized_content_type, file_extension
