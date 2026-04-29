@@ -363,6 +363,7 @@ class ExpenseListResponse(BaseSchema):
     today: ExpensePeriodResponse
     this_week: ExpensePeriodResponse
     this_month: ExpensePeriodResponse
+    this_year: ExpensePeriodResponse
 
 
 class BankAccountCreateRequest(BaseSchema):

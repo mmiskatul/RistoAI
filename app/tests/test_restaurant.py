@@ -1055,6 +1055,7 @@ def test_expenses_section_includes_uploaded_document_expenses(client, app):
     assert payload["today"]["total"] == 80.0
     assert payload["this_week"]["total"] == 80.0
     assert payload["this_month"]["total"] == 80.0
+    assert payload["this_year"]["total"] == 80.0
     assert any(
         item["category"] == "Expense"
         and item["amount"] == 80.0

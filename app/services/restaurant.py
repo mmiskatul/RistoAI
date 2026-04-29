@@ -1392,6 +1392,7 @@ class RestaurantOperationsService(BaseService):
         today = self._resolve_anchor_date(*(item.get("expense_date") for item in serialized_items))
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
+        year_start = today.replace(month=1, day=1)
 
         all_expense_items = sorted(
             serialized_items,
@@ -1427,11 +1428,13 @@ class RestaurantOperationsService(BaseService):
         today_items = [item for item in all_expense_items if item["expense_date"][:10] == today.isoformat()]
         week_items = [item for item in all_expense_items if week_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
         month_items = [item for item in all_expense_items if month_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
+        year_items = [item for item in all_expense_items if year_start.isoformat() <= item["expense_date"][:10] <= today.isoformat()]
 
         return ExpenseListResponse(
             today=build_period(today_items),
             this_week=build_period(week_items),
             this_month=build_period(month_items),
+            this_year=build_period(year_items),
         )
 
     async def get_expense_detail(self, current_user: dict, expense_id: str) -> ExpenseResponse:
