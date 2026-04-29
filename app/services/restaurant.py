@@ -1599,19 +1599,19 @@ class RestaurantOperationsService(BaseService):
 
     async def get_cash_management(self, current_user: dict) -> CashManagementSummaryResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        (deposits, _), (daily_records, _), (aggregate_records, _) = await asyncio.gather(
+        (deposits, _), (daily_records, _), (finance_transactions, _) = await asyncio.gather(
             self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200),
             self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200),
-            self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=200),
+            self.finance_transaction_repository.list_by_scope(scope_id=scope_id, page=1, page_size=1000),
         )
 
         serialized_deposits = self.serialize_list(deposits)
         serialized_daily = self.serialize_list(daily_records)
-        serialized_aggregate = self.serialize_list(aggregate_records)
+        serialized_transactions = self.serialize_list(finance_transactions)
         today = self._resolve_anchor_date(
             *(item.get("deposit_date") for item in serialized_deposits),
             *(item.get("business_date") for item in serialized_daily),
-            *(item.get("business_date") for item in serialized_aggregate),
+            *(item.get("business_date") for item in serialized_transactions),
         )
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
@@ -1626,9 +1626,16 @@ class RestaurantOperationsService(BaseService):
             return start <= value <= end
 
         def build_period(start: date, end: date, label: str) -> CashPeriodOverviewResponse:
-            aggregate_in_period = [item for item in serialized_aggregate if in_range(parse_iso_date(item.get("business_date")), start, end)]
             daily_in_period = [item for item in serialized_daily if in_range(parse_iso_date(item.get("business_date")), start, end)]
             deposits_in_period = [item for item in serialized_deposits if in_range(parse_iso_date(item.get("deposit_date")), start, end)]
+            transactions_in_period = [
+                item for item in serialized_transactions
+                if in_range(parse_iso_date(item.get("business_date")), start, end)
+            ]
+            live_snapshot = build_aggregate_snapshot(
+                manual_records=daily_in_period,
+                finance_transactions=transactions_in_period,
+            )
             period_status = CashPeriodStatusResponse(
                 total_collected=label,
                 cash_available="IN_SAFE",
@@ -1638,10 +1645,10 @@ class RestaurantOperationsService(BaseService):
                 deposits_collection=label,
             )
             period_summary = CashPeriodSummaryResponse(
-                total_collected=round(sum(float(item.get("cash_collected_total", 0)) for item in aggregate_in_period), 2),
-                cash_available=round(sum(float(item.get("cash_available", 0)) for item in aggregate_in_period), 2),
-                withdrawals_total=round(sum(float(item.get("withdrawals_total", 0)) for item in aggregate_in_period), 2),
-                bank_deposits=round(sum(float(item.get("bank_deposits_total", 0)) for item in aggregate_in_period), 2),
+                total_collected=round(float(live_snapshot.get("cash_collected_total", 0)), 2),
+                cash_available=round(float(live_snapshot.get("cash_available", 0)), 2),
+                withdrawals_total=round(float(live_snapshot.get("withdrawals_total", 0)), 2),
+                bank_deposits=round(float(live_snapshot.get("bank_deposits_total", 0)), 2),
             )
             recent_deposits = self._build_recent_deposit_items(deposits=deposits_in_period, daily_records=daily_in_period)
             return CashPeriodOverviewResponse(
