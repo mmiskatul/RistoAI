@@ -97,44 +97,6 @@ def build_restaurant_operations_service(db) -> RestaurantOperationsService:
         RestaurantFinanceTransactionRepository(db),
         RestaurantInventoryRepository(db),
         RestaurantChatRepository(db),
-
-
-async def get_user_management_service(db=Depends(get_database)) -> UserManagementService:
-    return UserManagementService(UserRepository(db), OnboardingProfileRepository(db), AuthCodeRepository(db))
-
-
-async def get_subscription_service(db=Depends(get_database)) -> SubscriptionService:
-    return SubscriptionService(UserRepository(db), SubscriptionPlanRepository(db), CouponRepository(db), UserSubscriptionRepository(db), StripeBillingService(get_settings()))
-
-
-async def get_support_service(db=Depends(get_database)) -> SupportService:
-    return SupportService(SupportTicketRepository(db))
-
-
-async def get_admin_settings_service(db=Depends(get_database)) -> AdminSettingsService:
-    settings = get_settings()
-    return AdminSettingsService(
-        AdminSettingsRepository(db),
-        UserRepository(db),
-        build_image_storage_service(settings),
-    )
-
-
-def build_restaurant_operations_service(db) -> RestaurantOperationsService:
-    settings = get_settings()
-    return RestaurantOperationsService(
-        UserRepository(db),
-        RestaurantDocumentRepository(db),
-        RestaurantExpenseRepository(db),
-        RestaurantCashDepositRepository(db),
-        RestaurantBankAccountRepository(db),
-        RestaurantDailyRecordRepository(db),
-        RestaurantRecordRepository(db),
-        RestaurantWeeklyRecordRepository(db),
-        RestaurantMonthlyRecordRepository(db),
-        RestaurantFinanceTransactionRepository(db),
-        RestaurantInventoryRepository(db),
-        RestaurantChatRepository(db),
         RestaurantInsightRepository(db),
         OpenAIOperationsService(),
         build_image_storage_service(settings),

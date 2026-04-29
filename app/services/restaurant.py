@@ -1130,7 +1130,9 @@ class RestaurantOperationsService(BaseService):
         file_name: str,
         content_type: str,
         file_bytes: bytes,
+        raw_file: Any | None = None,
     ) -> DocumentExtractionResponse:
+        del raw_file
         if not file_bytes:
             raise ValidationException("Uploaded file is empty")
         extraction = await self.openai_service.extract_invoice(file_name=file_name, content_type=content_type, file_bytes=file_bytes)
