@@ -20,14 +20,14 @@ async def get_onboarding_profile(
 
 @router.post("/profile", response_model=OnboardingProfileResponse, status_code=status.HTTP_200_OK)
 async def save_onboarding_profile(
-    restaurant_name: str = Form(..., min_length=2, max_length=120),
-    restaurant_type: str = Form(..., min_length=2, max_length=60),
-    city_location: str = Form(..., min_length=2, max_length=120),
+    restaurant_name: str = Form(..., min_length=1, max_length=120),
+    restaurant_type: str = Form(..., min_length=1, max_length=60),
+    city_location: str = Form(..., min_length=1, max_length=120),
     number_of_seats: int = Form(..., ge=1, le=10000),
     average_spend_per_customer: float = Form(..., ge=0, le=100000),
-    main_business_goal: str = Form(..., min_length=2, max_length=120),
-    biggest_problem: str = Form(..., min_length=10, max_length=1000),
-    improvement_focus: str = Form(..., min_length=5, max_length=1000),
+    main_business_goal: str = Form(..., min_length=1, max_length=120),
+    biggest_problem: str = Form(..., min_length=1, max_length=1000),
+    improvement_focus: str = Form(..., min_length=1, max_length=1000),
     interior_photo: UploadFile | None = File(default=None),
     exterior_photo: UploadFile | None = File(default=None),
     current_user: dict = Depends(get_current_user),
