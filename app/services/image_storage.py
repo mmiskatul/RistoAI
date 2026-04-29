@@ -74,8 +74,9 @@ class ImageStorageService:
             if not value
         ]
         if missing:
+            missing_label = ", ".join(missing)
             raise ValidationException(
-                "Cloudinary image upload settings are incomplete",
+                f"Cloudinary image upload settings are incomplete: {missing_label}",
                 {"missing_fields": missing},
             )
 
