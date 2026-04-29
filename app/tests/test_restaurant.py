@@ -1328,6 +1328,83 @@ def test_home_recent_activity_includes_all_core_operations(client, app):
     assert {"daily_record", "invoice", "expense", "cash", "inventory"}.issubset(kinds)
 
 
+def test_home_metrics_include_uploaded_document_expenses_like_inventory(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Home Metrics Owner",
+            "email": "home-metrics-owner@example.com",
+            "password": "HomeMetrics123",
+            "phone": "+1555000313",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+
+    inventory_response = client.post(
+        "/api/v1/restaurant/inventory",
+        headers=headers,
+        json={
+            "product_name": "Salmon",
+            "category": "Food Supplies",
+            "stock_quantity": 5,
+            "unit_type": "kg",
+            "supplier_name": "Ocean Fresh",
+            "unit_price": 20.0,
+            "alert_threshold": 1,
+            "purchase_date": today_iso,
+        },
+    )
+    assert inventory_response.status_code == 201
+
+    document_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
+        headers=headers,
+        json={
+            "document_type": "expense",
+            "document_label": "Expense",
+            "supplier_name": "Fresh Produce Co",
+            "invoice_number": "INV-HOME-1",
+            "invoice_date": today_iso,
+            "total_amount": 88.0,
+            "currency": "EUR",
+            "expense_amount": 88.0,
+            "cash_amount": 0.0,
+            "revenue_amount": 0.0,
+            "profit_amount": 0.0,
+            "line_items": [],
+            "source_file_name": "home-metrics-invoice.pdf",
+            "ai_provider": "fallback",
+            "ai_summary": "Home metrics coverage",
+        },
+    )
+    assert document_response.status_code == 201
+
+    home_metrics_response = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
+    assert home_metrics_response.status_code == 200
+    home_metrics_payload = home_metrics_response.json()
+    expense_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Expenses")
+    profit_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Profit")
+    assert expense_metric["value"] == 188.0
+    assert profit_metric["value"] == -188.0
+
+    home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
+    assert home_response.status_code == 200
+    weekly_expense_metric = next(item for item in home_response.json()["weekly"]["metrics"] if item["label"] == "Expenses")
+    assert weekly_expense_metric["value"] == 188.0
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    restaurant_record = asyncio.run(
+        db["restaurant_finance_snapshots"].find_one({"period_type": "day", "business_date": today_iso})
+    )
+    assert restaurant_record is not None
+    assert restaurant_record["uploaded_document_total"] == 88.0
+    assert restaurant_record["manual_expense_total"] == 100.0
+    assert restaurant_record["total_expenses"] == 188.0
+
+
 def test_restaurant_cash_api_contracts_remain_stable(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(
