@@ -2471,9 +2471,25 @@ class RestaurantOperationsService(BaseService):
         file_name: str,
         content_type: str,
         file_bytes: bytes,
+        raw_file: Any | None = None,
     ) -> ChatConversationResponse:
         if not file_bytes:
             raise ValidationException("Uploaded chat attachment is empty")
+
+        final_attachment_source = payload.attachment_source
+        if raw_file and content_type.startswith("image/") and self.image_storage_service:
+            try:
+                raw_file.file.seek(0)
+                uploaded = await self.image_storage_service.upload_file(
+                    file=raw_file,
+                    prefix=f"restaurant/chat/{current_user['_id']}",
+                )
+                final_attachment_source = uploaded.url
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to upload image attachment: {e}")
+
         attachment_context = await self.openai_service.summarize_chat_attachment(
             file_name=file_name,
             content_type=content_type,
@@ -2483,7 +2499,7 @@ class RestaurantOperationsService(BaseService):
             current_user=current_user,
             payload=payload,
             attachment_name=file_name,
-            attachment_source=payload.attachment_source,
+            attachment_source=final_attachment_source,
             attachment_summary=attachment_context.get("summary"),
             attachment_context=attachment_context,
         )

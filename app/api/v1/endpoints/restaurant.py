@@ -226,6 +226,7 @@ async def upload_and_extract_document(
         file_name=file.filename or 'upload-file',
         content_type=content_type,
         file_bytes=file_bytes,
+        raw_file=file,
     )
 
 
@@ -609,6 +610,7 @@ async def create_chat_message_with_attachment(
         file_name=file.filename or 'chat-attachment',
         content_type=content_type,
         file_bytes=file_bytes,
+        raw_file=file,
     )
 
 
