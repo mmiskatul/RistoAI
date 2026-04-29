@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from io import BytesIO
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import sleep
 from mimetypes import guess_extension, guess_type
 from pathlib import Path
 from uuid import uuid4
@@ -35,6 +37,20 @@ SUPPORTED_IMAGE_EXTENSIONS = {
     ".tiff",
     ".webp",
 }
+MAX_UPLOAD_ATTEMPTS = 3
+RETRYABLE_UPLOAD_ERROR_MESSAGES = (
+    "timeout",
+    "tempor",
+    "connection",
+    "network",
+    "reset",
+    "unavailable",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+)
 
 
 @dataclass(slots=True)
@@ -97,7 +113,30 @@ class ImageStorageService:
             return value
         return self._build_public_url(value)
 
-    def _upload_sync(self, *, content_type: str, extension: str, file_bytes: bytes, prefix: str) -> UploadedImage:
+    @staticmethod
+    def _is_retryable_upload_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(marker in message for marker in RETRYABLE_UPLOAD_ERROR_MESSAGES)
+
+    @staticmethod
+    def _resolve_uploaded_url(upload_result: dict) -> str:
+        secure_url = str(upload_result.get("secure_url") or "").strip()
+        if secure_url:
+            return secure_url
+        fallback_url = str(upload_result.get("url") or "").strip()
+        if fallback_url:
+            return fallback_url
+        raise ValidationException("Cloudinary upload did not return a public URL")
+
+    def _upload_sync(
+        self,
+        *,
+        content_type: str,
+        extension: str,
+        file_bytes: bytes,
+        prefix: str,
+        original_file_name: str | None,
+    ) -> UploadedImage:
         self._validate_config()
         try:
             import cloudinary
@@ -110,6 +149,7 @@ class ImageStorageService:
         folder_root = self.settings.cloudinary_folder.strip("/").replace(" ", "-")
         asset_folder = "/".join(part for part in [folder_root, safe_prefix] if part)
         public_id = f"{timestamp}-{uuid4().hex}"
+        upload_name = Path(original_file_name or f"upload{extension}").name
 
         cloudinary.config(
             cloud_name=self.settings.cloudinary_cloud_name,
@@ -118,20 +158,44 @@ class ImageStorageService:
             secure=True,
         )
 
-        upload_result = cloudinary.uploader.upload(
-            file_bytes,
-            folder=asset_folder or None,
-            public_id=public_id,
-            resource_type="image",
-            format=extension.lstrip("."),
-        )
-        uploaded_public_id = str(upload_result.get("public_id") or "").strip()
-        secure_url = str(upload_result.get("secure_url") or "").strip()
+        upload_stream = BytesIO(file_bytes)
+        upload_stream.name = upload_name
 
-        if not uploaded_public_id or not secure_url:
+        upload_result: dict | None = None
+        last_error: Exception | None = None
+        for attempt in range(1, MAX_UPLOAD_ATTEMPTS + 1):
+            try:
+                upload_stream.seek(0)
+                upload_result = cloudinary.uploader.upload(
+                    upload_stream,
+                    folder=asset_folder or None,
+                    public_id=public_id,
+                    resource_type="image",
+                    filename=upload_name,
+                    use_filename=False,
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt >= MAX_UPLOAD_ATTEMPTS or not self._is_retryable_upload_error(exc):
+                    raise ValidationException(
+                        "Image upload failed",
+                        {"provider": "cloudinary", "reason": str(exc)},
+                    ) from exc
+                sleep(0.5 * attempt)
+
+        if upload_result is None:
+            raise ValidationException(
+                "Image upload failed",
+                {"provider": "cloudinary", "reason": str(last_error) if last_error else "unknown"},
+            )
+
+        uploaded_public_id = str(upload_result.get("public_id") or "").strip()
+        uploaded_url = self._resolve_uploaded_url(upload_result)
+        if not uploaded_public_id or not uploaded_url:
             raise ValidationException("Cloudinary upload did not return a valid asset reference")
 
-        return UploadedImage(url=secure_url, key=uploaded_public_id)
+        return UploadedImage(url=uploaded_url, key=uploaded_public_id)
 
     async def upload_file(self, *, file: UploadFile, prefix: str) -> UploadedImage:
         content_type, extension = self._resolve_image_metadata(
@@ -147,6 +211,7 @@ class ImageStorageService:
             extension=extension,
             file_bytes=file_bytes,
             prefix=prefix,
+            original_file_name=file.filename,
         )
 
 
