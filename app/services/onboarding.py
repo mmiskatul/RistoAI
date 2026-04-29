@@ -64,7 +64,7 @@ class OnboardingService(BaseService):
             file=file,
             prefix=f"onboarding/{current_user['_id']}/{field_name}",
         )
-        return uploaded.key
+        return uploaded.url
 
     async def _save_profile(
         self,

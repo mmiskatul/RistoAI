@@ -292,6 +292,7 @@ class AuthService(BaseService):
             email=serialized['email'],
             full_name=serialized['full_name'],
             avatar_url=serialized.get('avatar_url'),
+            profile_image_url=serialized.get('profile_image_url'),
             phone=serialized.get('phone'),
             role=serialized['role'],
             preferred_language=serialized.get('preferred_language', AppLanguage.ENGLISH),
