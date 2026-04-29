@@ -12,7 +12,7 @@ class UploadImageResponse(BaseModel):
     url: str
     key: str
 
-@router.post('/image', response_model=UploadImageResponse, status_code=status.HTTP_201_CREATED, summary="Upload Image", description="Uploads an image to S3 and returns the public URL.")
+@router.post('/image', response_model=UploadImageResponse, status_code=status.HTTP_201_CREATED, summary="Upload Image", description="Uploads an image to Cloudinary and returns the public URL.")
 async def upload_image(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),

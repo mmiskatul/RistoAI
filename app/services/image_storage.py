@@ -51,16 +51,15 @@ class ImageStorageService:
         missing = [
             name
             for name, value in {
-                "AWS_ACCESS_KEY_ID": self.settings.aws_access_key_id,
-                "AWS_SECRET_ACCESS_KEY": self.settings.aws_secret_access_key,
-                "AWS_REGION": self.settings.aws_region,
-                "AWS_S3_BUCKET_NAME": self.settings.aws_s3_bucket_name,
+                "CLOUDINARY_CLOUD_NAME": self.settings.cloudinary_cloud_name,
+                "CLOUDINARY_API_KEY": self.settings.cloudinary_api_key,
+                "CLOUDINARY_API_SECRET": self.settings.cloudinary_api_secret,
             }.items()
             if not value
         ]
         if missing:
             raise ValidationException(
-                "AWS image upload settings are incomplete",
+                "Cloudinary image upload settings are incomplete",
                 {"missing_fields": missing},
             )
 
@@ -88,13 +87,8 @@ class ImageStorageService:
         return normalized_content_type, extension if extension in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
 
     def _build_public_url(self, key: str) -> str:
-        if self.settings.aws_s3_public_base_url:
-            return f"{self.settings.aws_s3_public_base_url.rstrip('/')}/{key}"
-        region = self.settings.aws_region or "us-east-1"
-        bucket = self.settings.aws_s3_bucket_name or ""
-        if region == "us-east-1":
-            return f"https://{bucket}.s3.amazonaws.com/{key}"
-        return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+        cloud_name = self.settings.cloudinary_cloud_name or ""
+        return f"https://res.cloudinary.com/{cloud_name}/image/upload/{key.lstrip('/')}"
 
     def resolve_public_url(self, value: str | None) -> str | None:
         if not value:
@@ -106,27 +100,38 @@ class ImageStorageService:
     def _upload_sync(self, *, content_type: str, extension: str, file_bytes: bytes, prefix: str) -> UploadedImage:
         self._validate_config()
         try:
-            import boto3
+            import cloudinary
+            import cloudinary.uploader
         except ImportError as exc:  # pragma: no cover - dependency issue
-            raise ValidationException("boto3 is required for AWS image uploads") from exc
+            raise ValidationException("cloudinary is required for image uploads") from exc
 
         safe_prefix = prefix.strip("/").replace(" ", "-")
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        key = f"{safe_prefix}/{timestamp}-{uuid4().hex}{extension}"
+        folder_root = self.settings.cloudinary_folder.strip("/").replace(" ", "-")
+        asset_folder = "/".join(part for part in [folder_root, safe_prefix] if part)
+        public_id = f"{timestamp}-{uuid4().hex}"
 
-        client = boto3.client(
-            "s3",
-            aws_access_key_id=self.settings.aws_access_key_id,
-            aws_secret_access_key=self.settings.aws_secret_access_key,
-            region_name=self.settings.aws_region,
+        cloudinary.config(
+            cloud_name=self.settings.cloudinary_cloud_name,
+            api_key=self.settings.cloudinary_api_key,
+            api_secret=self.settings.cloudinary_api_secret,
+            secure=True,
         )
-        client.put_object(
-            Bucket=self.settings.aws_s3_bucket_name,
-            Key=key,
-            Body=file_bytes,
-            ContentType=content_type,
+
+        upload_result = cloudinary.uploader.upload(
+            file_bytes,
+            folder=asset_folder or None,
+            public_id=public_id,
+            resource_type="image",
+            format=extension.lstrip("."),
         )
-        return UploadedImage(url=self._build_public_url(key), key=key)
+        uploaded_public_id = str(upload_result.get("public_id") or "").strip()
+        secure_url = str(upload_result.get("secure_url") or "").strip()
+
+        if not uploaded_public_id or not secure_url:
+            raise ValidationException("Cloudinary upload did not return a valid asset reference")
+
+        return UploadedImage(url=secure_url, key=uploaded_public_id)
 
     async def upload_file(self, *, file: UploadFile, prefix: str) -> UploadedImage:
         content_type, extension = self._resolve_image_metadata(
