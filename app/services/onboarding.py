@@ -64,7 +64,7 @@ class OnboardingService(BaseService):
             file=file,
             prefix=f"onboarding/{current_user['_id']}/{field_name}",
         )
-        return uploaded.url
+        return uploaded.key
 
     async def _save_profile(
         self,
@@ -74,6 +74,12 @@ class OnboardingService(BaseService):
         restaurant_name: str,
         city_location: str,
     ) -> OnboardingProfileResponse:
+        next_profile_image = (
+            payload.get("interior_photo_url")
+            or payload.get("exterior_photo_url")
+            or current_user.get("profile_image_url")
+            or current_user.get("avatar_url")
+        )
         profile = await self.onboarding_repository.upsert_by_user_id(
             str(current_user["_id"]),
             {
@@ -85,7 +91,16 @@ class OnboardingService(BaseService):
             current_user["_id"],
             {
                 "restaurant_name": restaurant_name,
+                "restaurant_type": payload.get("restaurant_type"),
+                "city_location": city_location,
                 "location": city_location,
+                "number_of_seats": payload.get("number_of_seats"),
+                "average_spend_per_customer": payload.get("average_spend_per_customer"),
+                "main_business_goal": payload.get("main_business_goal"),
+                "biggest_problem": payload.get("biggest_problem"),
+                "improvement_focus": payload.get("improvement_focus"),
+                "profile_image_url": next_profile_image,
+                "avatar_url": next_profile_image,
             },
         )
         return self._to_response(profile)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from mimetypes import guess_type
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
@@ -183,14 +184,33 @@ ALLOWED_DOCUMENT_CONTENT_TYPES = {
     'application/pdf',
     'text/csv',
     'application/csv',
-    'image/png',
-    'image/jpeg',
-    'image/jpg',
-    'image/webp',
 }
 
 
 ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES = ALLOWED_DOCUMENT_CONTENT_TYPES | {'text/plain'}
+
+
+UPLOAD_CONTENT_TYPE_ALIASES = {
+    'application/x-pdf': 'application/pdf',
+    'image/jpg': 'image/jpeg',
+    'image/pjpeg': 'image/jpeg',
+    'text/comma-separated-values': 'text/csv',
+    'text/x-csv': 'text/csv',
+}
+
+
+def _resolve_supported_upload_content_type(file: UploadFile, *, allow_text: bool = False) -> str:
+    content_type = UPLOAD_CONTENT_TYPE_ALIASES.get((file.content_type or '').lower(), (file.content_type or '').lower())
+    if not content_type or content_type == 'application/octet-stream':
+        guessed_content_type = guess_type(file.filename or '')[0] or ''
+        content_type = UPLOAD_CONTENT_TYPE_ALIASES.get(guessed_content_type.lower(), guessed_content_type.lower())
+
+    allowed_content_types = ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES if allow_text else ALLOWED_DOCUMENT_CONTENT_TYPES
+    if content_type in allowed_content_types or content_type.startswith('image/'):
+        return content_type
+
+    supported_label = 'PDF, CSV, TXT, and image files' if allow_text else 'PDF, CSV, and image files'
+    raise ValidationException(f'Only {supported_label} are supported')
 
 
 @router.post('/documents/upload-extract', response_model=DocumentExtractionResponse, status_code=status.HTTP_200_OK, tags=['Restaurant Invoice AI'], summary='Upload And Extract Invoice', description='Uploads an invoice file and returns extracted preview JSON without saving to the database.')
@@ -199,9 +219,7 @@ async def upload_and_extract_document(
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> DocumentExtractionResponse:
-    content_type = (file.content_type or '').lower()
-    if content_type not in ALLOWED_DOCUMENT_CONTENT_TYPES:
-        raise ValidationException('Only PDF, CSV, PNG, JPG, JPEG, and WEBP files are supported')
+    content_type = _resolve_supported_upload_content_type(file)
     file_bytes = await file.read()
     return await service.upload_and_extract_document(
         current_user,
@@ -274,6 +292,12 @@ async def list_expenses(page: int = Query(default=1, ge=1), page_size: int = Que
 @router.get('/expenses/{expense_id}', response_model=ExpenseResponse, tags=['Restaurant Expenses'], summary='Expense Detail', description='Returns one saved manual expense record.')
 async def get_expense_detail(expense_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ExpenseResponse:
     return await service.get_expense_detail(current_user, expense_id)
+
+
+@router.delete('/expenses/{expense_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Expenses'], summary='Delete Expense', description='Deletes a direct manual expense. Source-generated expenses must be deleted from their source record.')
+async def delete_expense(expense_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
+    await service.delete_expense(current_user, expense_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post('/cash/deposits', response_model=CashDepositResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Cash Management'], summary='Create Bank Deposit', description='Creates a cash deposit or bank drop record.')
@@ -577,9 +601,7 @@ async def create_chat_message_with_attachment(
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> ChatConversationResponse:
-    content_type = (file.content_type or '').lower()
-    if content_type not in ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES:
-        raise ValidationException('Only PDF, CSV, TXT, PNG, JPG, JPEG, and WEBP files are supported for chat attachments')
+    content_type = _resolve_supported_upload_content_type(file, allow_text=True)
     file_bytes = await file.read()
     return await service.create_chat_message_with_attachment(
         current_user,
@@ -604,6 +626,10 @@ async def update_profile(
     location: str | None = Form(default=None, max_length=120),
     city_location: str | None = Form(default=None, max_length=120),
     number_of_seats: int | None = Form(default=None, ge=0),
+    average_spend_per_customer: float | None = Form(default=None, ge=0),
+    main_business_goal: str | None = Form(default=None, max_length=120),
+    biggest_problem: str | None = Form(default=None, max_length=1000),
+    improvement_focus: str | None = Form(default=None, max_length=1000),
     profile_image: UploadFile | None = File(default=None),
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
@@ -616,6 +642,10 @@ async def update_profile(
         location=location,
         city_location=city_location,
         number_of_seats=number_of_seats,
+        average_spend_per_customer=average_spend_per_customer,
+        main_business_goal=main_business_goal,
+        biggest_problem=biggest_problem,
+        improvement_focus=improvement_focus,
     )
     return await service.update_profile_with_image(current_user, payload, profile_image=profile_image)
 

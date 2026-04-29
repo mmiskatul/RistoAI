@@ -76,10 +76,17 @@ class RestaurantDocumentRepository(ScopedRepository):
                                 "invoice_date": 1,
                                 "upload_date": 1,
                                 "total_amount": 1,
+                                "currency": 1,
+                                "expense_amount": 1,
+                                "cash_amount": 1,
+                                "revenue_amount": 1,
+                                "profit_amount": 1,
                                 "status": 1,
                                 "created_by_user_id": 1,
                                 "last_edited_by_user_id": 1,
                                 "confirmed_at": 1,
+                                "created_at": 1,
+                                "updated_at": 1,
                                 "line_item_count": {
                                     "$size": {"$ifNull": ["$line_items", []]},
                                 },
@@ -131,12 +138,83 @@ class RestaurantExpenseRepository(ScopedRepository):
             )
         )
 
+    async def find_source_linked_expense(self, *, scope_id: str, source_kind: str, source_id: str) -> dict[str, Any] | None:
+        return await self.get_one(
+            self.scope_filters(
+                scope_id,
+                {
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                },
+            )
+        )
+
+    async def delete_source_linked_expenses(self, *, scope_id: str, source_kind: str, source_id: str) -> None:
+        await self.collection.delete_many(
+            self.scope_filters(
+                scope_id,
+                {
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                },
+            )
+        )
+
 
 class RestaurantCashDepositRepository(ScopedRepository):
     collection_name = RestaurantCollections.CASH_DEPOSITS
 
     async def list_by_scope(self, *, scope_id: str, page: int = 1, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
         return await self.get_multi(filters=self.scope_filters(scope_id), page=page, page_size=page_size)
+
+    async def find_source_linked_deposit(
+        self,
+        *,
+        scope_id: str,
+        source_kind: str,
+        source_id: str,
+        source_subtype: str,
+    ) -> dict[str, Any] | None:
+        return await self.get_one(
+            self.scope_filters(
+                scope_id,
+                {
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                    "source_subtype": source_subtype,
+                },
+            )
+        )
+
+    async def delete_source_linked_deposits(self, *, scope_id: str, source_kind: str, source_id: str) -> None:
+        await self.collection.delete_many(
+            self.scope_filters(
+                scope_id,
+                {
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                },
+            )
+        )
+
+    async def delete_source_linked_deposit(
+        self,
+        *,
+        scope_id: str,
+        source_kind: str,
+        source_id: str,
+        source_subtype: str,
+    ) -> None:
+        await self.collection.delete_many(
+            self.scope_filters(
+                scope_id,
+                {
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                    "source_subtype": source_subtype,
+                },
+            )
+        )
 
 
 class RestaurantBankAccountRepository(ScopedRepository):

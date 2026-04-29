@@ -14,9 +14,10 @@
 
 ### Raw Source Collections
 
-- `restaurant_invoices`
-  - One document per confirmed uploaded invoice.
-  - Source of truth for AI/manual invoice extraction results.
+- `restaurant_documents`
+  - One document per confirmed uploaded document or invoice.
+  - Source of truth for AI/manual document extraction results.
+  - Replaces the legacy `restaurant_invoices` collection name.
   - Tenant scoped by `tenant_id`.
 
 - `restaurant_manual_entries`
@@ -25,14 +26,16 @@
   - Tenant scoped by `tenant_id`.
 
 - `restaurant_expenses`
-  - Manual expense entries.
-  - Kept separate from invoices so invoice ingestion does not mutate expense rows automatically.
+  - Direct manual expense entries plus source-linked display rows from daily data, documents, and inventory purchases.
+  - Source-linked rows keep `source_kind` and `source_id`; they must be changed by editing or deleting their source record.
 
 - `restaurant_cash_deposits`
-  - Bank deposit and cash-drop records.
+  - Bank deposit and cash-drop records plus source-linked POS, cash-in, bank transfer, withdrawal, cash-out, and cash-expense rows from daily data/documents.
+  - Source-linked rows have their own collection `_id` plus `source_kind`, `source_id`, and `source_subtype`; delete or edit them from the source record.
 
 - `restaurant_inventory_items`
   - Current stock state and stock history.
+  - Inventory is stored separately from expenses; purchase costs create source-linked expense rows for reporting.
 
 - `restaurant_chat_messages`
   - Restaurant AI chat conversation history.

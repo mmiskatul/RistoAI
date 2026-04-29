@@ -138,6 +138,17 @@ from app.utils.pagination import build_pagination_meta
 class RestaurantOperationsService(BaseService):
     VAT_RATE = 0.1
     SUPPORTED_DOCUMENT_TYPES = {"expense", "cash", "revenue", "profit", "unknown"}
+    CASH_TRANSACTION_TYPES = {
+        "bank_deposit",
+        "cash_deposit",
+        "pos_payment",
+        "cash_in",
+        "bank_transfer_payment",
+        "cash_withdrawal",
+        "cash_out",
+        "cash_expense",
+    }
+    CASH_OUTFLOW_TRANSACTION_TYPES = {"cash_withdrawal", "cash_out", "cash_expense"}
 
     def __init__(
         self,
@@ -295,6 +306,7 @@ class RestaurantOperationsService(BaseService):
             "section": section,
             "notes": product_name,
             "source_kind": "inventory",
+            "source_id": inventory_item_id,
             "source_inventory_item_id": inventory_item_id,
         }
         if existing is None:
@@ -339,6 +351,352 @@ class RestaurantOperationsService(BaseService):
         )
         await self.expense_repository.delete(existing["_id"])
         return existing_expense_date
+
+    async def _upsert_source_linked_expense(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        source_kind: str,
+        source_id: str,
+        category: str,
+        amount: float,
+        expense_date: date,
+        section: str = "cash",
+        notes: str | None = None,
+    ) -> dict[str, Any] | None:
+        existing = await self.expense_repository.find_source_linked_expense(
+            scope_id=scope_id,
+            source_kind=source_kind,
+            source_id=source_id,
+        )
+        resolved_amount = round(max(float(amount or 0), 0.0), 2)
+        if resolved_amount <= 0:
+            if existing is not None:
+                await self.expense_repository.delete(existing["_id"])
+            return None
+
+        payload = {
+            "category": category.strip() or "Expense",
+            "amount": resolved_amount,
+            "expense_date": datetime.combine(expense_date, datetime.min.time(), tzinfo=UTC),
+            "section": section if section in {"cash", "bank"} else "cash",
+            "notes": notes,
+            "source_kind": source_kind,
+            "source_id": source_id,
+        }
+        if existing is None:
+            return await self.expense_repository.create(
+                {
+                    "tenant_id": scope_id,
+                    **payload,
+                    "created_by_user_id": str(current_user["_id"]),
+                }
+            )
+        return await self.expense_repository.update(existing["_id"], payload)
+
+    async def _delete_source_linked_expense(self, *, scope_id: str, source_kind: str, source_id: str) -> None:
+        await self.expense_repository.delete_source_linked_expenses(
+            scope_id=scope_id,
+            source_kind=source_kind,
+            source_id=source_id,
+        )
+
+    async def _sync_document_linked_expense(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        document: dict[str, Any],
+    ) -> None:
+        source_id = str(document.get("id") or document.get("_id") or "")
+        if not source_id:
+            return
+        document_type = str(document.get("document_type") or "").lower()
+        raw_invoice_date = document.get("invoice_date")
+        if document.get("status") != "processed" or document_type != "expense" or not raw_invoice_date:
+            await self._delete_source_linked_expense(scope_id=scope_id, source_kind="document", source_id=source_id)
+            return
+        invoice_date = self._safe_parse_date(raw_invoice_date)
+        amount = self._safe_float(document.get("expense_amount"), default=self._safe_float(document.get("total_amount")))
+        await self._upsert_source_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            source_kind="document",
+            source_id=source_id,
+            category=str(document.get("document_label") or "Expense"),
+            amount=amount,
+            expense_date=invoice_date,
+            section="cash",
+            notes=str(document.get("counterparty_name") or document.get("supplier_name") or "Uploaded document"),
+        )
+
+    async def _sync_daily_record_linked_expense(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        record: dict[str, Any],
+    ) -> None:
+        source_id = str(record.get("id") or record.get("_id") or "")
+        raw_business_date = record.get("business_date")
+        if not source_id or not raw_business_date:
+            return
+        business_date = self._safe_parse_date(raw_business_date)
+        await self._upsert_source_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            source_kind="manual_entry",
+            source_id=source_id,
+            category="Expenses in Cash",
+            amount=self._safe_float(record.get("expenses_in_cash")),
+            expense_date=business_date,
+            section="cash",
+            notes=str(record.get("notes") or "Entered from daily data"),
+        )
+
+    async def _upsert_source_linked_cash_deposit(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        source_kind: str,
+        source_id: str,
+        source_subtype: str,
+        deposit_date: date,
+        amount: float,
+        deposit_type: str,
+        bank_account: str,
+        notes: str | None = None,
+    ) -> dict[str, Any] | None:
+        existing = await self.cash_repository.find_source_linked_deposit(
+            scope_id=scope_id,
+            source_kind=source_kind,
+            source_id=source_id,
+            source_subtype=source_subtype,
+        )
+        resolved_amount = round(max(float(amount or 0), 0.0), 2)
+        if resolved_amount <= 0:
+            if existing is not None:
+                await self.cash_repository.delete(existing["_id"])
+            return None
+
+        resolved_deposit_type = str(deposit_type or "").strip().lower()
+        if resolved_deposit_type not in self.CASH_TRANSACTION_TYPES:
+            resolved_deposit_type = "cash_deposit"
+
+        payload = {
+            "deposit_date": datetime.combine(deposit_date, datetime.min.time(), tzinfo=UTC),
+            "amount": resolved_amount,
+            "type": resolved_deposit_type,
+            "bank_account": bank_account.strip() or "Cash",
+            "notes": notes,
+            "source_kind": source_kind,
+            "source_id": source_id,
+            "source_subtype": source_subtype,
+        }
+        if existing is None:
+            return await self.cash_repository.create(
+                {
+                    "tenant_id": scope_id,
+                    **payload,
+                    "created_by_user_id": str(current_user["_id"]),
+                }
+            )
+        return await self.cash_repository.update(existing["_id"], payload)
+
+    async def _delete_source_linked_cash_deposits(self, *, scope_id: str, source_kind: str, source_id: str) -> None:
+        await self.cash_repository.delete_source_linked_deposits(
+            scope_id=scope_id,
+            source_kind=source_kind,
+            source_id=source_id,
+        )
+
+    async def _sync_document_linked_cash_deposit(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        document: dict[str, Any],
+    ) -> None:
+        source_id = str(document.get("id") or document.get("_id") or "")
+        if not source_id:
+            return
+        document_type = str(document.get("document_type") or "").lower()
+        raw_invoice_date = document.get("invoice_date")
+        if document.get("status") != "processed" or document_type not in {"cash", "revenue"} or not raw_invoice_date:
+            await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="document", source_id=source_id)
+            return
+
+        invoice_date = self._safe_parse_date(raw_invoice_date)
+        if document_type == "cash":
+            await self.cash_repository.delete_source_linked_deposit(
+                scope_id=scope_id,
+                source_kind="document",
+                source_id=source_id,
+                source_subtype="revenue_amount",
+            )
+            await self._upsert_source_linked_cash_deposit(
+                scope_id=scope_id,
+                current_user=current_user,
+                source_kind="document",
+                source_id=source_id,
+                source_subtype="cash_amount",
+                deposit_date=invoice_date,
+                amount=self._safe_float(document.get("cash_amount"), default=self._safe_float(document.get("total_amount"))),
+                deposit_type="cash_deposit",
+                bank_account=str(document.get("document_label") or "Cash Collection"),
+                notes=str(document.get("counterparty_name") or document.get("supplier_name") or "Uploaded cash document"),
+            )
+            return
+
+        await self.cash_repository.delete_source_linked_deposit(
+            scope_id=scope_id,
+            source_kind="document",
+            source_id=source_id,
+            source_subtype="cash_amount",
+        )
+        await self._upsert_source_linked_cash_deposit(
+            scope_id=scope_id,
+            current_user=current_user,
+            source_kind="document",
+            source_id=source_id,
+            source_subtype="revenue_amount",
+            deposit_date=invoice_date,
+            amount=self._safe_float(document.get("revenue_amount"), default=self._safe_float(document.get("total_amount"))),
+            deposit_type="bank_deposit",
+            bank_account=str(document.get("counterparty_name") or document.get("supplier_name") or "Bank Revenue"),
+            notes=str(document.get("document_label") or "Uploaded revenue document"),
+        )
+
+    async def _sync_daily_record_linked_cash_deposits(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        record: dict[str, Any],
+    ) -> None:
+        source_id = str(record.get("id") or record.get("_id") or "")
+        raw_business_date = record.get("business_date")
+        if not source_id or not raw_business_date:
+            return
+        business_date = self._safe_parse_date(raw_business_date)
+        method = str(record.get("method") or "")
+
+        await self._upsert_source_linked_cash_deposit(
+            scope_id=scope_id,
+            current_user=current_user,
+            source_kind="manual_entry",
+            source_id=source_id,
+            source_subtype="pos_payments",
+            deposit_date=business_date,
+            amount=self._safe_float(record.get("pos_payments")),
+            deposit_type="pos_payment",
+            bank_account="POS Settlement",
+            notes="Entered from daily data",
+        )
+
+        if method == "method_2":
+            await self._upsert_source_linked_cash_deposit(
+                scope_id=scope_id,
+                current_user=current_user,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype="cash_payments",
+                deposit_date=business_date,
+                amount=self._safe_float(record.get("cash_payments")),
+                deposit_type="cash_in",
+                bank_account="Cash Payments",
+                notes="Entered from daily data",
+            )
+            await self._upsert_source_linked_cash_deposit(
+                scope_id=scope_id,
+                current_user=current_user,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype="bank_transfer_payments",
+                deposit_date=business_date,
+                amount=self._safe_float(record.get("bank_transfer_payments")),
+                deposit_type="bank_transfer_payment",
+                bank_account="Bank Transfer Collection",
+                notes="Entered from daily data",
+            )
+            await self._upsert_source_linked_cash_deposit(
+                scope_id=scope_id,
+                current_user=current_user,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype="cash_out",
+                deposit_date=business_date,
+                amount=self._safe_float(record.get("cash_out")),
+                deposit_type="cash_out",
+                bank_account="Register Cash Out",
+                notes="Entered from daily data",
+            )
+            for stale_subtype in ("cash_in", "cash_withdrawals", "expenses_in_cash"):
+                await self.cash_repository.delete_source_linked_deposit(
+                    scope_id=scope_id,
+                    source_kind="manual_entry",
+                    source_id=source_id,
+                    source_subtype=stale_subtype,
+                )
+            return
+
+        await self._upsert_source_linked_cash_deposit(
+            scope_id=scope_id,
+            current_user=current_user,
+            source_kind="manual_entry",
+            source_id=source_id,
+            source_subtype="cash_in",
+            deposit_date=business_date,
+            amount=self._safe_float(record.get("cash_in")),
+            deposit_type="cash_in",
+            bank_account="Cash In",
+            notes=str(record.get("notes") or "Entered from daily data"),
+        )
+        await self._upsert_source_linked_cash_deposit(
+            scope_id=scope_id,
+            current_user=current_user,
+            source_kind="manual_entry",
+            source_id=source_id,
+            source_subtype="cash_withdrawals",
+            deposit_date=business_date,
+            amount=self._safe_float(record.get("cash_withdrawals")),
+            deposit_type="cash_withdrawal",
+            bank_account="Cash Withdrawals",
+            notes=str(record.get("notes") or "Entered from daily data"),
+        )
+        await self._upsert_source_linked_cash_deposit(
+            scope_id=scope_id,
+            current_user=current_user,
+            source_kind="manual_entry",
+            source_id=source_id,
+            source_subtype="cash_out",
+            deposit_date=business_date,
+            amount=self._safe_float(record.get("cash_out")),
+            deposit_type="cash_out",
+            bank_account="Cash Out",
+            notes=str(record.get("notes") or "Entered from daily data"),
+        )
+        await self._upsert_source_linked_cash_deposit(
+            scope_id=scope_id,
+            current_user=current_user,
+            source_kind="manual_entry",
+            source_id=source_id,
+            source_subtype="expenses_in_cash",
+            deposit_date=business_date,
+            amount=self._safe_float(record.get("expenses_in_cash")),
+            deposit_type="cash_expense",
+            bank_account="Expenses in Cash",
+            notes=str(record.get("notes") or "Entered from daily data"),
+        )
+        for stale_subtype in ("cash_payments", "bank_transfer_payments"):
+            await self.cash_repository.delete_source_linked_deposit(
+                scope_id=scope_id,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype=stale_subtype,
+            )
 
     def _build_cash_deposit_transactions(self, deposit: dict[str, Any]) -> list[dict[str, Any]]:
         deposit_date = self._safe_parse_date(deposit.get("deposit_date"))
@@ -835,6 +1193,16 @@ class RestaurantOperationsService(BaseService):
             source_id=serialized_document["id"],
             transactions=self._build_document_transactions(serialized_document),
         )
+        await self._sync_document_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            document=serialized_document,
+        )
+        await self._sync_document_linked_cash_deposit(
+            scope_id=scope_id,
+            current_user=current_user,
+            document=serialized_document,
+        )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=resolved_invoice_date, current_user=current_user)
         return self._to_document_confirm_save(document)
 
@@ -855,6 +1223,16 @@ class RestaurantOperationsService(BaseService):
             source_kind="document",
             source_id=serialized_updated["id"],
             transactions=self._build_document_transactions(serialized_updated),
+        )
+        await self._sync_document_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            document=serialized_updated,
+        )
+        await self._sync_document_linked_cash_deposit(
+            scope_id=scope_id,
+            current_user=current_user,
+            document=serialized_updated,
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=effective_invoice_date, current_user=current_user)
         return self._to_document_detail(updated)
@@ -947,12 +1325,24 @@ class RestaurantOperationsService(BaseService):
                 source_id=serialized_updated["id"],
                 transactions=self._build_document_transactions(serialized_updated),
             )
+            await self._sync_document_linked_expense(
+                scope_id=scope_id,
+                current_user=current_user,
+                document=serialized_updated,
+            )
+            await self._sync_document_linked_cash_deposit(
+                scope_id=scope_id,
+                current_user=current_user,
+                document=serialized_updated,
+            )
             old_invoice_date_value = document.get("invoice_date")
             if old_invoice_date_value:
                 await self._sync_restaurant_record(scope_id=scope_id, business_date=datetime.fromisoformat(str(old_invoice_date_value)).date(), current_user=current_user)
             await self._sync_restaurant_record(scope_id=scope_id, business_date=effective_invoice_date, current_user=current_user)
         else:
             await self._delete_transactions_for_source(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
+            await self._delete_source_linked_expense(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
+            await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
         return self._to_document_detail(updated)
 
     async def delete_document(self, current_user: dict, document_id: str) -> None:
@@ -960,6 +1350,8 @@ class RestaurantOperationsService(BaseService):
         document = await self.document_repository.get_scoped_by_id(document_id, scope_id)
         invoice_date = datetime.fromisoformat(str(document["invoice_date"])).date() if document.get("invoice_date") else None
         await self._delete_transactions_for_source(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
+        await self._delete_source_linked_expense(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
+        await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
         await self.document_repository.delete(document["_id"])
         if invoice_date:
             await self._sync_restaurant_record(scope_id=scope_id, business_date=invoice_date, current_user=current_user)
@@ -989,66 +1381,18 @@ class RestaurantOperationsService(BaseService):
 
     async def list_expenses(self, current_user: dict, *, page: int, page_size: int) -> ExpenseListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        (items, _), (daily_records, _), (documents, _) = await asyncio.gather(
-            self.expense_repository.list_by_scope(
-                scope_id=scope_id,
-                page=1,
-                page_size=max(page_size, 500),
-            ),
-            self.daily_record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500),
-            self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500),
+        items, _ = await self.expense_repository.list_by_scope(
+            scope_id=scope_id,
+            page=1,
+            page_size=max(page_size, 500),
         )
         serialized_items = self.serialize_list(items)
-        serialized_daily_records = self.serialize_list(daily_records)
-        serialized_documents = self.serialize_list(documents)
-        today = datetime.now(UTC).date()
+        today = self._resolve_anchor_date(*(item.get("expense_date") for item in serialized_items))
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
 
-        daily_entry_expenses: list[dict[str, Any]] = []
-        for record in serialized_daily_records:
-            amount = float(record.get("total_expenses", 0) or 0)
-            if amount <= 0:
-                continue
-            business_date = str(record.get("business_date") or "")
-            if not business_date:
-                continue
-            daily_entry_expenses.append(
-                {
-                    "id": f"daily-entry-expense:{record['id']}",
-                    "category": "Daily Data Expense",
-                    "amount": amount,
-                    "expense_date": f"{business_date}T00:00:00+00:00",
-                    "section": "cash",
-                    "notes": "Imported from daily data",
-                    "created_at": record.get("created_at", datetime.now(UTC).isoformat()),
-                }
-            )
-
-        uploaded_document_expenses: list[dict[str, Any]] = []
-        for document in serialized_documents:
-            if str(document.get("status", "")).lower() != "processed":
-                continue
-            amount = float(document.get("expense_amount", document.get("total_amount", 0)) or 0)
-            if amount <= 0:
-                continue
-            invoice_date = str(document.get("invoice_date") or "")
-            if not invoice_date:
-                continue
-            uploaded_document_expenses.append(
-                {
-                    "id": f"uploaded-document-expense:{document['id']}",
-                    "category": "Uploaded Document Expense",
-                    "amount": amount,
-                    "expense_date": f"{invoice_date}T00:00:00+00:00",
-                    "section": "cash",
-                    "notes": str(document.get("counterparty_name") or document.get("supplier_name") or "Imported document"),
-                    "created_at": document.get("created_at", datetime.now(UTC).isoformat()),
-                }
-            )
-
         all_expense_items = sorted(
-            [*serialized_items, *daily_entry_expenses, *uploaded_document_expenses],
+            serialized_items,
             key=lambda item: (
                 str(item.get("expense_date") or ""),
                 str(item.get("created_at") or ""),
@@ -1093,6 +1437,17 @@ class RestaurantOperationsService(BaseService):
         expense = await self.expense_repository.get_scoped_by_id(expense_id, scope_id)
         return self._to_expense_response(expense)
 
+    async def delete_expense(self, current_user: dict, expense_id: str) -> None:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        expense = await self.expense_repository.get_scoped_by_id(expense_id, scope_id)
+        if expense.get("source_kind"):
+            raise ValidationException("Generated expenses must be deleted from their source record.")
+        expense_date = self._safe_parse_date(expense.get("expense_date"))
+        await self._delete_transactions_for_source(scope_id=scope_id, source_kind="expense", source_id=str(expense["_id"]))
+        await self.expense_repository.delete(expense["_id"])
+        if expense_date is not None:
+            await self._sync_restaurant_record(scope_id=scope_id, business_date=expense_date, current_user=current_user)
+
     async def create_cash_deposit(self, current_user: dict, payload: CashDepositCreateRequest) -> CashDepositResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         document = await self.cash_repository.create(
@@ -1124,6 +1479,8 @@ class RestaurantOperationsService(BaseService):
     async def update_cash_deposit(self, current_user: dict, deposit_id: str, payload: CashDepositUpdateRequest) -> CashDepositResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         deposit = await self.cash_repository.get_scoped_by_id(deposit_id, scope_id)
+        if deposit.get("source_kind"):
+            raise ValidationException("Generated cash transactions must be edited from their source record.")
         previous_deposit_date = self._safe_parse_date(deposit.get("deposit_date")) or payload.deposit_date
         updated = await self.cash_repository.update(
             deposit["_id"],
@@ -1150,6 +1507,8 @@ class RestaurantOperationsService(BaseService):
     async def delete_cash_deposit(self, current_user: dict, deposit_id: str) -> None:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         deposit = await self.cash_repository.get_scoped_by_id(deposit_id, scope_id)
+        if deposit.get("source_kind"):
+            raise ValidationException("Generated cash transactions must be deleted from their source record.")
         previous_deposit_date = self._safe_parse_date(deposit.get("deposit_date"))
         await self._delete_transactions_for_source(scope_id=scope_id, source_kind="deposit", source_id=str(deposit["_id"]))
         await self.cash_repository.delete(deposit["_id"])
@@ -1244,7 +1603,11 @@ class RestaurantOperationsService(BaseService):
         serialized_deposits = self.serialize_list(deposits)
         serialized_daily = self.serialize_list(daily_records)
         serialized_aggregate = self.serialize_list(aggregate_records)
-        today = datetime.now(UTC).date()
+        today = self._resolve_anchor_date(
+            *(item.get("deposit_date") for item in serialized_deposits),
+            *(item.get("business_date") for item in serialized_daily),
+            *(item.get("business_date") for item in serialized_aggregate),
+        )
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
 
@@ -1383,6 +1746,16 @@ class RestaurantOperationsService(BaseService):
             source_id=serialized_document["id"],
             transactions=self._build_daily_record_transactions(serialized_document),
         )
+        await self._sync_daily_record_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            record=serialized_document,
+        )
+        await self._sync_daily_record_linked_cash_deposits(
+            scope_id=scope_id,
+            current_user=current_user,
+            record=serialized_document,
+        )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=business_date, current_user=current_user)
         return self._to_daily_data_response(document)
 
@@ -1443,6 +1816,16 @@ class RestaurantOperationsService(BaseService):
             source_kind="manual_entry",
             source_id=serialized_updated["id"],
             transactions=self._build_daily_record_transactions(serialized_updated),
+        )
+        await self._sync_daily_record_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            record=serialized_updated,
+        )
+        await self._sync_daily_record_linked_cash_deposits(
+            scope_id=scope_id,
+            current_user=current_user,
+            record=serialized_updated,
         )
         old_business_date = existing_record.get("business_date")
         if old_business_date and str(old_business_date) != business_date.isoformat():
@@ -1683,6 +2066,8 @@ class RestaurantOperationsService(BaseService):
         record = await self.daily_record_repository.get_scoped_by_id(record_id, scope_id)
         business_date = record.get("business_date")
         await self._delete_transactions_for_source(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
+        await self._delete_source_linked_expense(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
+        await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
         await self.daily_record_repository.delete(record["_id"])
         if business_date:
             await self._sync_restaurant_record(scope_id=scope_id, business_date=business_date, current_user=current_user)
@@ -1713,6 +2098,8 @@ class RestaurantOperationsService(BaseService):
         deleted_any = False
         for record in self.serialize_list(daily_records):
             await self._delete_transactions_for_source(scope_id=scope_id, source_kind="manual_entry", source_id=record["id"])
+            await self._delete_source_linked_expense(scope_id=scope_id, source_kind="manual_entry", source_id=record["id"])
+            await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="manual_entry", source_id=record["id"])
             await self.daily_record_repository.delete(record["id"])
             deleted_any = True
 
@@ -1722,6 +2109,8 @@ class RestaurantOperationsService(BaseService):
                 deleted_any = True
 
         for expense in self.serialize_list(expenses):
+            if str(expense.get("source_kind") or "").lower() in {"manual_entry", "document"}:
+                continue
             inventory_item_id = expense.get("source_inventory_item_id")
             if str(expense.get("source_kind") or "").lower() == "inventory" and inventory_item_id:
                 await self.delete_inventory_item(current_user, str(inventory_item_id))
@@ -2177,14 +2566,22 @@ class RestaurantOperationsService(BaseService):
             location=serialized.get("location"),
             city_location=location,
             number_of_seats=serialized.get("number_of_seats"),
+            average_spend_per_customer=serialized.get("average_spend_per_customer"),
+            main_business_goal=serialized.get("main_business_goal"),
+            biggest_problem=serialized.get("biggest_problem"),
+            improvement_focus=serialized.get("improvement_focus"),
             preferred_language=preferred_language,
-            profile_image_url=self._resolve_profile_image_url(serialized.get("profile_image_url")),
+            profile_image_url=self._resolve_profile_image_url(
+                serialized.get("profile_image_url") or serialized.get("avatar_url")
+            ),
         )
 
     async def update_profile(self, current_user: dict, payload: RestaurantProfileUpdateRequest) -> RestaurantProfileResponse:
         updates = payload.model_dump(exclude_none=True)
         if "city_location" in updates and "location" not in updates:
             updates["location"] = updates["city_location"]
+        if "location" in updates and "city_location" not in updates:
+            updates["city_location"] = updates["location"]
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
         return await self.get_profile(user)
 
@@ -2198,8 +2595,12 @@ class RestaurantOperationsService(BaseService):
         updates = payload.model_dump(exclude_none=True)
         if "city_location" in updates and "location" not in updates:
             updates["location"] = updates["city_location"]
+        if "location" in updates and "city_location" not in updates:
+            updates["city_location"] = updates["location"]
         if profile_image:
-            updates["profile_image_url"] = await self._upload_profile_image(current_user, profile_image)
+            uploaded_image = await self._upload_profile_image(current_user, profile_image)
+            updates["profile_image_url"] = uploaded_image
+            updates["avatar_url"] = uploaded_image
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
         return await self.get_profile(user)
 
@@ -2477,6 +2878,7 @@ class RestaurantOperationsService(BaseService):
             item
             for item in serialized_expenses
             if datetime.fromisoformat(item["expense_date"].replace("Z", "+00:00")).date().isoformat() == target_date
+            and str(item.get("source_kind") or "").lower() not in {"manual_entry", "document"}
         ]
         uploaded_documents = [
             item
@@ -2595,7 +2997,10 @@ class RestaurantOperationsService(BaseService):
             item for item in serialized_daily_records if week_start <= datetime.fromisoformat(str(item["business_date"])).date() <= week_end
         ]
         weekly_expenses = [
-            item for item in serialized_expenses if week_start <= datetime.fromisoformat(item["expense_date"].replace("Z", "+00:00")).date() <= week_end
+            item
+            for item in serialized_expenses
+            if week_start <= datetime.fromisoformat(item["expense_date"].replace("Z", "+00:00")).date() <= week_end
+            and str(item.get("source_kind") or "").lower() not in {"manual_entry", "document"}
         ]
         weekly_documents = [
             item
@@ -2684,7 +3089,10 @@ class RestaurantOperationsService(BaseService):
             item for item in serialized_daily_records if month_start <= datetime.fromisoformat(str(item["business_date"])).date() <= month_end
         ]
         monthly_expenses = [
-            item for item in serialized_expenses if month_start <= datetime.fromisoformat(item["expense_date"].replace("Z", "+00:00")).date() <= month_end
+            item
+            for item in serialized_expenses
+            if month_start <= datetime.fromisoformat(item["expense_date"].replace("Z", "+00:00")).date() <= month_end
+            and str(item.get("source_kind") or "").lower() not in {"manual_entry", "document"}
         ]
         monthly_documents = [
             item
@@ -3183,43 +3591,101 @@ class RestaurantOperationsService(BaseService):
 
     def _build_recent_deposit_items(self, *, deposits: list[dict[str, Any]], daily_records: list[dict[str, Any]], limit: int = 10) -> list[CashDepositResponse]:
         serialized_manual = [self._to_cash_deposit_response(item) for item in deposits]
-        derived = self._build_derived_bank_collection_deposits(daily_records)
+        existing_source_keys = {
+            (
+                str(item.get("source_kind") or ""),
+                str(item.get("source_id") or ""),
+                str(item.get("source_subtype") or ""),
+            )
+            for item in deposits
+            if item.get("source_kind") and item.get("source_id") and item.get("source_subtype")
+        }
+        derived = self._build_derived_cash_management_transactions(daily_records, existing_source_keys=existing_source_keys)
         combined = serialized_manual + derived
         combined.sort(key=lambda item: (item.created_at, item.deposit_date), reverse=True)
         return combined[:limit]
 
-    def _build_derived_bank_collection_deposits(self, daily_records: list[dict[str, Any]]) -> list[CashDepositResponse]:
+    def _build_derived_cash_management_transactions(
+        self,
+        daily_records: list[dict[str, Any]],
+        *,
+        existing_source_keys: set[tuple[str, str, str]] | None = None,
+    ) -> list[CashDepositResponse]:
+        existing_source_keys = existing_source_keys or set()
         derived: list[CashDepositResponse] = []
         for item in daily_records:
             business_date = str(item.get("business_date") or "")
             created_at = str(item.get("created_at") or datetime.now(UTC).isoformat())
-            pos_amount = float(item.get("pos_payments", 0) or 0)
-            bank_transfer_amount = float(item.get("bank_transfer_payments", 0) or 0)
-            if pos_amount > 0:
-                derived.append(
-                    CashDepositResponse(
-                        id=f"auto-pos-{item.get('id', business_date)}",
-                        deposit_date=business_date,
-                        amount=round(pos_amount, 2),
-                        type="bank_deposit",
-                        bank_account="POS Settlement",
-                        notes="Auto-generated from daily POS payments",
-                        created_at=created_at,
-                    )
+            source_id = str(item.get("id") or item.get("_id") or business_date)
+            transaction_configs = [
+                ("pos_payments", "pos_payment", "POS Settlement", "Auto-generated from daily POS payments", "auto-pos"),
+            ]
+            method = str(item.get("method") or "")
+            has_method_two_fields = (
+                self._safe_float(item.get("cash_payments")) > 0
+                or self._safe_float(item.get("bank_transfer_payments")) > 0
+            )
+            if method == "method_2" or (not method and has_method_two_fields):
+                transaction_configs.extend(
+                    [
+                        ("cash_payments", "cash_in", "Cash Payments", "Auto-generated from daily cash payments", "auto-cash-payments"),
+                        (
+                            "bank_transfer_payments",
+                            "bank_transfer_payment",
+                            "Bank Transfer Collection",
+                            "Auto-generated from daily bank transfer payments",
+                            "auto-transfer",
+                        ),
+                        ("cash_out", "cash_out", "Register Cash Out", "Auto-generated from daily register cash out", "auto-cash-out"),
+                    ]
                 )
-            if bank_transfer_amount > 0:
+            else:
+                transaction_configs.extend(
+                    [
+                        ("cash_in", "cash_in", "Cash In", "Auto-generated from daily cash in", "auto-cash-in"),
+                        (
+                            "cash_withdrawals",
+                            "cash_withdrawal",
+                            "Cash Withdrawals",
+                            "Auto-generated from daily cash withdrawals",
+                            "auto-withdrawal",
+                        ),
+                        ("cash_out", "cash_out", "Cash Out", "Auto-generated from daily cash out", "auto-cash-out"),
+                        (
+                            "expenses_in_cash",
+                            "cash_expense",
+                            "Expenses in Cash",
+                            "Auto-generated from daily cash expenses",
+                            "auto-cash-expense",
+                        ),
+                    ]
+                )
+
+            for source_subtype, transaction_type, bank_account, notes, auto_prefix in transaction_configs:
+                amount = self._safe_float(item.get(source_subtype))
+                if amount <= 0 or ("manual_entry", source_id, source_subtype) in existing_source_keys:
+                    continue
                 derived.append(
                     CashDepositResponse(
-                        id=f"auto-transfer-{item.get('id', business_date)}",
+                        id=f"{auto_prefix}-{source_id}",
                         deposit_date=business_date,
-                        amount=round(bank_transfer_amount, 2),
-                        type="bank_deposit",
-                        bank_account="Bank Transfer Collection",
-                        notes="Auto-generated from daily bank transfer payments",
+                        amount=self._cash_transaction_response_amount(transaction_type, amount),
+                        type=transaction_type,
+                        bank_account=bank_account,
+                        notes=notes,
+                        source_kind="manual_entry",
+                        source_id=source_id,
+                        source_subtype=source_subtype,
                         created_at=created_at,
                     )
                 )
         return derived
+
+    def _cash_transaction_response_amount(self, transaction_type: str, amount: float) -> float:
+        resolved_amount = round(abs(float(amount or 0)), 2)
+        if transaction_type in self.CASH_OUTFLOW_TRANSACTION_TYPES:
+            return -resolved_amount
+        return resolved_amount
 
     @staticmethod
     def _resolve_home_date_range(
@@ -3253,6 +3719,35 @@ class RestaurantOperationsService(BaseService):
             return date.fromisoformat(candidate)
         except ValueError:
             return datetime.now(UTC).date()
+
+    @staticmethod
+    def _parse_optional_date(value: Any) -> date | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            candidate = value.strip()
+            if not candidate:
+                return None
+            try:
+                return datetime.fromisoformat(candidate.replace("Z", "+00:00")).date()
+            except ValueError:
+                try:
+                    return date.fromisoformat(candidate[:10])
+                except ValueError:
+                    return None
+        return None
+
+    def _resolve_anchor_date(self, *values: Any) -> date:
+        anchor = datetime.now(UTC).date()
+        for value in values:
+            parsed = self._parse_optional_date(value)
+            if parsed is not None and parsed > anchor:
+                anchor = parsed
+        return anchor
 
     def _resolve_latest_business_date(self, records: list[dict]) -> date | None:
         latest: date | None = None
@@ -3410,38 +3905,62 @@ class RestaurantOperationsService(BaseService):
                     route=f"/(tabs)/documents/{item['id']}",
                 )
             )
-        for item in self.serialize_list(expenses[:3]):
+        recent_expenses = sorted(
+            self.serialize_list(expenses),
+            key=lambda item: (
+                str(item.get("created_at") or ""),
+                str(item.get("expense_date") or ""),
+            ),
+            reverse=True,
+        )[:3]
+        for item in recent_expenses:
             expense_date = self._safe_parse_date(item.get("expense_date"))
             reference_date = expense_date.isoformat() if expense_date else ""
             source_kind = str(item.get("source_kind") or "").lower()
-            source_inventory_item_id = str(item.get("source_inventory_item_id") or "").strip()
             expense_route = f"/(tabs)/home/expense-details?id={item['id']}"
-            activity_source_kind = "expense"
-            activity_source_entity_id = item["id"]
-
-            if source_kind == "inventory" and source_inventory_item_id:
-                expense_route = f"/(tabs)/inventory/{source_inventory_item_id}"
-                activity_source_kind = "inventory"
-                activity_source_entity_id = source_inventory_item_id
+            expense_title = {
+                "manual_entry": "Daily data expense",
+                "document": "Document expense",
+                "inventory": "Inventory expense",
+            }.get(source_kind, "Expense added")
 
             items.append(
                 ActivityItemResponse(
                     kind="expense",
-                    title="Expense added",
+                    title=expense_title,
                     subtitle=item["category"],
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=reference_date,
-                    source_kind=activity_source_kind,
-                    source_entity_id=activity_source_entity_id,
+                    source_kind="expense",
+                    source_entity_id=item["id"],
                     route=expense_route,
                 )
             )
-        for item in self.serialize_list(cash_deposits[:3]):
+        serialized_cash_deposits = sorted(
+            self.serialize_list(cash_deposits),
+            key=lambda item: (
+                str(item.get("created_at") or ""),
+                str(item.get("deposit_date") or ""),
+            ),
+            reverse=True,
+        )
+        for item in serialized_cash_deposits[:3]:
+            transaction_type = str(item.get("type") or "bank_deposit")
+            cash_title = {
+                "bank_deposit": "Bank deposit logged",
+                "cash_deposit": "Cash deposit logged",
+                "pos_payment": "POS payment recorded",
+                "cash_in": "Cash in recorded",
+                "bank_transfer_payment": "Bank transfer recorded",
+                "cash_withdrawal": "Cash withdrawal recorded",
+                "cash_out": "Cash out recorded",
+                "cash_expense": "Cash expense recorded",
+            }.get(transaction_type, "Cash transaction recorded")
             items.append(
                 ActivityItemResponse(
                     kind="cash",
-                    title="Bank deposit logged" if item.get("type", "bank_deposit") == "bank_deposit" else "Cash deposit logged",
+                    title=cash_title,
                     subtitle=item.get("bank_account") or item.get("deposit_type", ""),
                     timestamp=item["created_at"],
                     entity_id=item["id"],
@@ -3467,7 +3986,25 @@ class RestaurantOperationsService(BaseService):
             )
         for item in items:
             item.timestamp = str(item.timestamp)
-        return sorted(items, key=lambda value: value.timestamp, reverse=True)[:6]
+        sorted_items = sorted(items, key=lambda value: value.timestamp, reverse=True)
+        selected: list[ActivityItemResponse] = []
+        selected_ids: set[str] = set()
+        selected_kinds: set[str] = set()
+        for item in sorted_items:
+            if item.kind in selected_kinds:
+                continue
+            selected.append(item)
+            selected_ids.add(item.entity_id)
+            selected_kinds.add(item.kind)
+            if len(selected) >= 6:
+                return selected
+        for item in sorted_items:
+            if item.entity_id in selected_ids:
+                continue
+            selected.append(item)
+            if len(selected) >= 6:
+                break
+        return selected
 
     @staticmethod
     def _top_category(items: list[dict[str, Any]]) -> str | None:
@@ -3528,9 +4065,13 @@ class RestaurantOperationsService(BaseService):
 
     @staticmethod
     def _summarize_daily_bucket_document(document: dict[str, Any]) -> dict[str, float]:
+        document_type = str(document.get("document_type") or "").lower()
+        expense_amount = float(document.get("expense_amount", 0) or 0)
+        if expense_amount <= 0 and document_type == "expense":
+            expense_amount = float(document.get("total_amount", 0) or 0)
         return {
             "revenue": round(float(document.get("cash_amount", 0) or 0) + float(document.get("revenue_amount", 0) or 0), 2),
-            "invoice_total": round(float(document.get("total_amount", 0) or 0), 2),
+            "invoice_total": round(expense_amount if document_type == "expense" else 0.0, 2),
         }
 
     def _build_daily_data_buckets(self, records: list[dict[str, Any]], expenses: list[dict[str, Any]], documents: list[dict[str, Any]], *, anchor_date: date) -> list[dict[str, Any]]:
@@ -3560,6 +4101,8 @@ class RestaurantOperationsService(BaseService):
 
         expense_groups: dict[str, dict[str, Any]] = {}
         for expense in expenses:
+            if str(expense.get("source_kind") or "").lower() in {"manual_entry", "document"}:
+                continue
             expense_date = datetime.fromisoformat(expense["expense_date"].replace("Z", "+00:00")).date().isoformat()
             group = expense_groups.setdefault(expense_date, {"uploaded_document": {"count": 0, "total": 0.0, "endpoint": None}, "manual_expense": {"count": 0, "total": 0.0, "endpoint": "/api/v1/restaurant/expenses"}})
             group["manual_expense"]["count"] += 1
@@ -3591,9 +4134,10 @@ class RestaurantOperationsService(BaseService):
                 continue
             document_totals = self._summarize_daily_bucket_document(document)
             group = expense_groups.setdefault(invoice_date, {"uploaded_document": {"count": 0, "total": 0.0, "endpoint": None}, "manual_expense": {"count": 0, "total": 0.0, "endpoint": "/api/v1/restaurant/expenses"}})
-            group["uploaded_document"]["count"] += 1
-            group["uploaded_document"]["total"] += document_totals["invoice_total"]
-            group["uploaded_document"]["endpoint"] = f"/api/v1/restaurant/daily-data/by-date?business_date={invoice_date}"
+            if document_totals["invoice_total"] > 0:
+                group["uploaded_document"]["count"] += 1
+                group["uploaded_document"]["total"] += document_totals["invoice_total"]
+                group["uploaded_document"]["endpoint"] = f"/api/v1/restaurant/daily-data/by-date?business_date={invoice_date}"
             bucket = buckets.setdefault(
                 invoice_date,
                 {
@@ -3845,19 +4389,26 @@ class RestaurantOperationsService(BaseService):
             section=str(serialized.get("section", "cash")).lower(),
             notes=serialized.get("notes"),
             source_kind=serialized.get("source_kind"),
+            source_id=serialized.get("source_id"),
             source_inventory_item_id=serialized.get("source_inventory_item_id"),
             created_at=serialized["created_at"],
         )
 
     def _to_cash_deposit_response(self, deposit: dict) -> CashDepositResponse:
         serialized = self.serialize(deposit)
+        transaction_type = str(serialized.get("type", "bank_deposit"))
+        if transaction_type not in self.CASH_TRANSACTION_TYPES:
+            transaction_type = "cash_deposit"
         return CashDepositResponse(
             id=serialized["id"],
             deposit_date=serialized["deposit_date"],
-            amount=float(serialized["amount"]),
-            type=str(serialized.get("type", "bank_deposit")),
+            amount=self._cash_transaction_response_amount(transaction_type, self._safe_float(serialized.get("amount"))),
+            type=transaction_type,
             bank_account=serialized.get("bank_account") or serialized.get("deposit_type", ""),
             notes=serialized.get("notes"),
+            source_kind=serialized.get("source_kind"),
+            source_id=serialized.get("source_id"),
+            source_subtype=serialized.get("source_subtype"),
             created_at=serialized["created_at"],
         )
 
@@ -4055,9 +4606,18 @@ class RestaurantOperationsService(BaseService):
         bucket: dict[str, Any],
     ) -> list[DailyDataSectionResponse]:
         pos_total = round(sum(float(item.get("pos_payments", 0) or 0) for item in records), 2)
-        cash_in_total = round(sum(float(item.get("cash_in", 0) or 0) for item in records), 2)
-        cash_payments_total = round(sum(float(item.get("cash_payments", 0) or 0) for item in records), 2)
-        bank_transfer_total = round(sum(float(item.get("bank_transfer_payments", 0) or 0) for item in records), 2)
+        cash_in_total = round(
+            sum(float(item.get("cash_in", 0) or 0) for item in records if item.get("method") != "method_2"),
+            2,
+        )
+        cash_payments_total = round(
+            sum(float(item.get("cash_payments", 0) or 0) for item in records if item.get("method") == "method_2"),
+            2,
+        )
+        bank_transfer_total = round(
+            sum(float(item.get("bank_transfer_payments", 0) or 0) for item in records if item.get("method") == "method_2"),
+            2,
+        )
         daily_cash_expense_total = round(sum(float(item.get("expenses_in_cash", 0) or 0) for item in records), 2)
         cash_withdrawals_total = round(sum(float(item.get("cash_withdrawals", 0) or 0) for item in records), 2)
         cash_out_total = round(sum(float(item.get("cash_out", 0) or 0) for item in records), 2)
@@ -4066,10 +4626,17 @@ class RestaurantOperationsService(BaseService):
         lunch_covers_total = sum(int(item.get("lunch_covers", 0) or 0) for item in records)
         dinner_covers_total = sum(int(item.get("dinner_covers", 0) or 0) for item in records)
         additional_manual_expenses_total = round(
-            sum(float(item.get("amount", 0) or 0) for item in expenses if str(item.get("category", "")) != "Daily Data Expense"),
+            sum(
+                float(item.get("amount", 0) or 0)
+                for item in expenses
+                if str(item.get("source_kind") or "").lower() not in {"manual_entry", "document"}
+            ),
             2,
         )
-        uploaded_document_total = round(sum(float(item.get("total_amount", 0) or 0) for item in documents), 2)
+        uploaded_document_total = round(
+            sum(self._summarize_daily_bucket_document(item)["invoice_total"] for item in documents),
+            2,
+        )
 
         sections = [
             DailyDataSectionResponse(

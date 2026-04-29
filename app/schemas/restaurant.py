@@ -10,6 +10,18 @@ from app.schemas.auth import validate_password_strength
 from app.schemas.common import BaseSchema
 
 
+CashTransactionType = Literal[
+    "bank_deposit",
+    "cash_deposit",
+    "pos_payment",
+    "cash_in",
+    "bank_transfer_payment",
+    "cash_withdrawal",
+    "cash_out",
+    "cash_expense",
+]
+
+
 def _parse_flexible_date(value: object) -> object:
     if value is None or isinstance(value, date):
         return value
@@ -23,6 +35,13 @@ def _parse_flexible_date(value: object) -> object:
             return datetime.strptime(candidate, fmt).date()
         except ValueError:
             continue
+    return value
+
+
+def _blank_to_none(value: object) -> object:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
     return value
 
 
@@ -208,11 +227,16 @@ class DocumentConfirmSaveResponse(BaseSchema):
 
 
 class DocumentConfirmRequest(BaseSchema):
-    supplier_name: str | None = Field(default=None, min_length=2, max_length=120)
-    invoice_number: str | None = Field(default=None, min_length=2, max_length=80)
+    supplier_name: str | None = Field(default=None, min_length=1, max_length=120)
+    invoice_number: str | None = Field(default=None, min_length=1, max_length=80)
     invoice_date: date | None = None
     total_amount: float | None = Field(default=None, ge=0)
     line_items: list[DocumentLineItemSchema] | None = None
+
+    @field_validator("supplier_name", "invoice_number", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: object) -> object:
+        return _blank_to_none(value)
 
     @field_validator("invoice_date", mode="before")
     @classmethod
@@ -222,10 +246,10 @@ class DocumentConfirmRequest(BaseSchema):
 
 class DocumentSaveRequest(BaseSchema):
     document_type: Literal["expense", "cash", "revenue", "profit", "unknown"] = "unknown"
-    document_label: str | None = Field(default=None, min_length=2, max_length=80)
-    counterparty_name: str | None = Field(default=None, min_length=2, max_length=120)
-    supplier_name: str = Field(min_length=2, max_length=120)
-    invoice_number: str | None = Field(default=None, min_length=2, max_length=80)
+    document_label: str | None = Field(default=None, min_length=1, max_length=80)
+    counterparty_name: str | None = Field(default=None, min_length=1, max_length=120)
+    supplier_name: str | None = Field(default=None, min_length=1, max_length=120)
+    invoice_number: str | None = Field(default=None, min_length=1, max_length=80)
     invoice_date: date | None = None
     total_amount: float = Field(ge=0)
     currency: str = Field(default="EUR", min_length=3, max_length=10)
@@ -237,6 +261,11 @@ class DocumentSaveRequest(BaseSchema):
     source_file_name: str = Field(min_length=1, max_length=255)
     ai_provider: str = Field(min_length=2, max_length=50)
     ai_summary: str = Field(default='', max_length=2000)
+
+    @field_validator("document_label", "counterparty_name", "supplier_name", "invoice_number", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: object) -> object:
+        return _blank_to_none(value)
 
     @field_validator("invoice_date", mode="before")
     @classmethod
@@ -306,6 +335,7 @@ class ExpenseResponse(BaseSchema):
     section: Literal["cash", "bank"] = "cash"
     notes: str | None = None
     source_kind: str | None = None
+    source_id: str | None = None
     source_inventory_item_id: str | None = None
     created_at: str
 
@@ -391,15 +421,18 @@ class CashDepositResponse(BaseSchema):
     id: str
     deposit_date: str
     amount: float
-    type: Literal["bank_deposit", "cash_deposit"] = "bank_deposit"
+    type: CashTransactionType = "bank_deposit"
     bank_account: str
     notes: str | None = None
+    source_kind: str | None = None
+    source_id: str | None = None
+    source_subtype: str | None = None
     created_at: str
 
     @computed_field
     @property
     def amount_formatted(self) -> str:
-        return f"${self.amount:,.2f}"
+        return f"${self.amount:,.2f}" if self.amount >= 0 else f"-${abs(self.amount):,.2f}"
 
     @computed_field
     @property
@@ -858,6 +891,10 @@ class RestaurantProfileResponse(BaseSchema):
     location: str | None = None
     city_location: str | None = None
     number_of_seats: int | None = None
+    average_spend_per_customer: float | None = None
+    main_business_goal: str | None = None
+    biggest_problem: str | None = None
+    improvement_focus: str | None = None
     preferred_language: str
     profile_image_url: str | None = None
 
@@ -870,6 +907,10 @@ class RestaurantProfileUpdateRequest(BaseSchema):
     location: str | None = Field(default=None, max_length=120)
     city_location: str | None = Field(default=None, max_length=120)
     number_of_seats: int | None = Field(default=None, ge=0)
+    average_spend_per_customer: float | None = Field(default=None, ge=0)
+    main_business_goal: str | None = Field(default=None, max_length=120)
+    biggest_problem: str | None = Field(default=None, max_length=1000)
+    improvement_focus: str | None = Field(default=None, max_length=1000)
 
 
 class RestaurantSettingsSubscriptionResponse(BaseSchema):

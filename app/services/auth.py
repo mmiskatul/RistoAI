@@ -65,6 +65,7 @@ class AuthService(BaseService):
                     'full_name': payload.owner_full_name,
                     'hashed_password': password_manager.hash_password(payload.password),
                     'role': UserRole.RESTAURANT_OWNER,
+                    'restaurant_name': payload.restaurant_name,
                     'preferred_language': user.get('preferred_language', AppLanguage.ENGLISH),
                     'is_active': True,
                     'email_verified': False,

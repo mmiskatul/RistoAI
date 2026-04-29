@@ -41,9 +41,9 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     stored_profile = asyncio.run(db['onboarding_profiles'].find_one({'user_id': body['user_id']}))
-    assert stored_profile['interior_photo_url'].startswith('https://')
+    assert not stored_profile['interior_photo_url'].startswith('https://')
     assert '/onboarding/' in stored_profile['interior_photo_url']
-    assert stored_profile['exterior_photo_url'].startswith('https://')
+    assert not stored_profile['exterior_photo_url'].startswith('https://')
     assert '/onboarding/' in stored_profile['exterior_photo_url']
 
     get_response = client.get('/api/v1/onboarding/profile', headers=headers)
@@ -54,3 +54,27 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
     assert me_response.status_code == 200
     assert me_response.json()['restaurant_name'] == payload['restaurant_name']
     assert me_response.json()['location'] == payload['city_location']
+
+    profile_response = client.get('/api/v1/restaurant/settings/profile', headers=headers)
+    assert profile_response.status_code == 200
+    profile_body = profile_response.json()
+    assert profile_body['restaurant_name'] == payload['restaurant_name']
+    assert profile_body['restaurant_type'] == payload['restaurant_type']
+    assert profile_body['city_location'] == payload['city_location']
+    assert profile_body['number_of_seats'] == payload['number_of_seats']
+    assert profile_body['average_spend_per_customer'] == payload['average_spend_per_customer']
+    assert profile_body['main_business_goal'] == payload['main_business_goal']
+    assert profile_body['biggest_problem'] == payload['biggest_problem']
+    assert profile_body['improvement_focus'] == payload['improvement_focus']
+    assert profile_body['profile_image_url'].startswith('https://')
+    assert '/onboarding/' in profile_body['profile_image_url']
+
+    stored_user = asyncio.run(db['users'].find_one({'email': owner_credentials['email'].lower()}))
+    assert stored_user['restaurant_name'] == payload['restaurant_name']
+    assert stored_user['restaurant_type'] == payload['restaurant_type']
+    assert stored_user['city_location'] == payload['city_location']
+    assert stored_user['location'] == payload['city_location']
+    assert stored_user['number_of_seats'] == payload['number_of_seats']
+    assert stored_user['average_spend_per_customer'] == payload['average_spend_per_customer']
+    assert stored_user['profile_image_url'] == stored_profile['interior_photo_url']
+    assert stored_user['avatar_url'] == stored_profile['interior_photo_url']

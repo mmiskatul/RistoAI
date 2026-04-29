@@ -108,7 +108,7 @@ def calculate_cash_ledger(
         2,
     )
     bank_deposits_total = round(
-        direct_bank_collection_total + manual_bank_deposits_total + cash_deposits_total,
+        direct_bank_collection_total + manual_bank_deposits_total + cash_deposits_total + document_revenue_total,
         2,
     )
     deposits_collection_total = bank_deposits_total

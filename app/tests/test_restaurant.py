@@ -145,11 +145,8 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert date_data_response.status_code == 200
     date_payload = date_data_response.json()
     assert set(date_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
-    assert date_payload["items"][0]["business_date"] == today_iso
-    assert date_payload["items"][0]["total_expenses"] == 0.0
-    assert date_payload["items"][0]["total_revenue"] == 0.0
-    assert date_payload["items"][0]["operating_revenue"] == 0.0
-    assert date_payload["items"][0]["invoice_document_total"] == 425.0
+    assert date_payload["total"] == 0
+    assert date_payload["items"] == []
 
     week_data_response = client.get(f"/api/v1/restaurant/daily-data?view=week&reference_date={today_iso}", headers=headers)
     assert week_data_response.status_code == 200
@@ -262,7 +259,7 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert month_data_response.status_code == 200
     month_data_payload = month_data_response.json()
     assert month_data_payload["total"] >= 1
-    assert month_data_payload["items"][0]["total_expenses"] == 0.0
+    assert month_data_payload["items"][0]["total_expenses"] == 425.0
 
     analytics_response = client.get("/api/v1/restaurant/analytics/overview?period=weekly", headers=headers)
     assert analytics_response.status_code == 200
@@ -270,6 +267,51 @@ def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     assert "estimated_profit" not in analytics_payload
     assert len(analytics_payload["supplier_price_alerts"]) >= 1
     assert "Bakery Goods Co" in analytics_payload["supplier_price_alerts"][0]["title"] or analytics_payload["supplier_price_alerts"][0]["title"]
+
+
+def test_restaurant_document_upload_accepts_common_image_formats_and_short_invoice_number(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Image Owner",
+            "email": "image-owner@example.com",
+            "password": "ImagePass123",
+            "phone": "+3900000099",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    upload_response = client.post(
+        "/api/v1/restaurant/documents/upload-extract",
+        headers=headers,
+        files={"file": ("receipt.heic", b"fake-heic-image", "image/heic")},
+    )
+    assert upload_response.status_code == 200
+    upload_payload = upload_response.json()
+
+    confirm_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
+        headers=headers,
+        json={
+            "document_type": upload_payload["document_type"],
+            "document_label": "R",
+            "counterparty_name": "A",
+            "supplier_name": "A",
+            "invoice_number": "7",
+            "total_amount": upload_payload["total_amount"],
+            "currency": upload_payload["currency"],
+            "line_items": upload_payload["line_items"],
+            "source_file_name": upload_payload["source_file_name"],
+            "ai_provider": upload_payload["ai_provider"],
+            "ai_summary": upload_payload["ai_summary"],
+        },
+    )
+
+    assert confirm_response.status_code == 201
+    payload = confirm_response.json()
+    assert payload["document_number"] == "7"
+    assert payload["counterparty_name"] == "A"
 
 
 def test_restaurant_data_migration_unifies_legacy_finance_collections(app):
@@ -491,12 +533,13 @@ def test_restaurant_document_confirm_save_supports_revenue_classification(client
     assert confirm_payload["revenue_amount"] == 920.0
     assert confirm_payload["expense_amount"] == 0.0
 
-    date_data_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={business_date}", headers=headers)
+    date_data_response = client.get(f"/api/v1/restaurant/daily-data/by-date?business_date={business_date}", headers=headers)
     assert date_data_response.status_code == 200
     date_payload = date_data_response.json()
-    assert date_payload["items"][0]["business_date"] == business_date
-    assert date_payload["items"][0]["total_revenue"] == 920.0
-    assert date_payload["items"][0]["total_expenses"] == 0.0
+    assert date_payload["business_date"] == business_date
+    assert date_payload["total_revenue"] == 920.0
+    assert date_payload["total_expenses"] == 0.0
+    assert date_payload["invoice_document_total"] == 0.0
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     restaurant_record = asyncio.run(
@@ -558,6 +601,21 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     )
     assert inventory_response.status_code == 201
     inventory_id = inventory_response.json()["id"]
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    inventory_expense = asyncio.run(
+        db["restaurant_expenses"].find_one(
+            {
+                "source_kind": "inventory",
+                "source_id": inventory_id,
+                "source_inventory_item_id": inventory_id,
+            }
+        )
+    )
+    assert inventory_expense is not None
+    assert inventory_expense["amount"] == 54.0
+
+    inventory_expense_delete_response = client.delete(f"/api/v1/restaurant/expenses/{inventory_expense['_id']}", headers=headers_user_one)
+    assert inventory_expense_delete_response.status_code == 422
 
     expenses_user_two = client.get("/api/v1/restaurant/expenses", headers=headers_user_two)
     assert expenses_user_two.status_code == 200
@@ -741,28 +799,47 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
     assert cash_overview_response.status_code == 200
     cash_overview_payload = cash_overview_response.json()
-    assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 1150.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 825.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 500.0
-    assert {item["display_title"] for item in cash_overview_payload["periods"]["today"]["recent_deposits"]} >= {"Chase Bank - Main", "POS Settlement"}
+    assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 1050.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 850.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 200.0
+    assert {item["display_title"] for item in cash_overview_payload["periods"]["today"]["recent_deposits"]} >= {
+        "Cash Payments",
+        "Chase Bank - Main",
+        "POS Settlement",
+    }
+    assert any(
+        item["source_kind"] == "manual_entry" and item["source_subtype"] == "cash_payments"
+        and item["type"] == "cash_in"
+        for item in cash_overview_payload["periods"]["today"]["recent_deposits"]
+    )
 
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
     weekly_cash_cards = {item["label"]: item["amount"] for item in home_response.json()["weekly"]["cash_management"]}
-    assert weekly_cash_cards["Total Cash Collected"] == 1150.0
-    assert weekly_cash_cards["Cash Deposited"] == 850.0
-    assert weekly_cash_cards["Cash Available"] == 500.0
+    assert weekly_cash_cards["Total Collection"] == 1050.0
+    assert weekly_cash_cards["Cash Deposit"] == 850.0
+    assert weekly_cash_cards["Cash Available"] == 200.0
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     daily_aggregate = asyncio.run(
         db["restaurant_finance_snapshots"].find_one({"period_type": "day", "business_date": today_iso})
     )
     assert daily_aggregate is not None
-    assert daily_aggregate["bank_deposits_total"] == 825.0
+    assert daily_aggregate["bank_deposits_total"] == 850.0
     assert daily_aggregate["cash_deposits_total"] == 25.0
     assert daily_aggregate["deposits_collection_total"] == 850.0
-    assert daily_aggregate["cash_collected_total"] == 1150.0
-    assert daily_aggregate["cash_available"] == 500.0
+    assert daily_aggregate["cash_collected_total"] == 1050.0
+    assert daily_aggregate["cash_available"] == 200.0
+
+    linked_cash_rows = asyncio.run(
+        db["restaurant_cash_deposits"].find({"source_kind": "manual_entry", "source_id": daily_response.json()["id"]}).to_list(length=None)
+    )
+    assert {(item["source_subtype"], item["type"], item["amount"]) for item in linked_cash_rows} == {
+        ("cash_payments", "cash_in", 300.0),
+        ("pos_payments", "pos_payment", 700.0),
+    }
+    generated_delete_response = client.delete(f"/api/v1/restaurant/cash/deposits/{linked_cash_rows[0]['_id']}", headers=headers)
+    assert generated_delete_response.status_code == 422
 
     month_aggregate = asyncio.run(
         db["restaurant_finance_snapshots"].find_one(
@@ -770,10 +847,10 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
         )
     )
     assert month_aggregate is not None
-    assert month_aggregate["bank_deposits_total"] == 825.0
+    assert month_aggregate["bank_deposits_total"] == 850.0
     assert month_aggregate["cash_deposits_total"] == 25.0
     assert month_aggregate["deposits_collection_total"] == 850.0
-    assert month_aggregate["cash_available"] == 500.0
+    assert month_aggregate["cash_available"] == 200.0
 
 
 def test_expenses_section_includes_daily_data_expenses(client, app):
@@ -822,8 +899,116 @@ def test_expenses_section_includes_daily_data_expenses(client, app):
     assert payload["this_week"]["total"] == 75.0
     assert payload["this_month"]["total"] == 75.0
     assert payload["today"]["top_category"] == "Staff Costs"
-    assert {item["category"] for item in payload["today"]["items"]} == {"Staff Costs", "Daily Data Expense"}
-    assert any(item["category"] == "Daily Data Expense" and item["amount"] == 35.0 for item in payload["today"]["items"])
+    assert {item["category"] for item in payload["today"]["items"]} == {"Staff Costs", "Expenses in Cash"}
+    assert any(
+        item["category"] == "Expenses in Cash"
+        and item["amount"] == 35.0
+        and item["source_kind"] == "manual_entry"
+        for item in payload["today"]["items"]
+    )
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    stored_expense = asyncio.run(
+        db["restaurant_expenses"].find_one(
+            {
+                "source_kind": "manual_entry",
+                "source_id": daily_response.json()["id"],
+            }
+        )
+    )
+    assert stored_expense is not None
+    assert stored_expense["amount"] == 35.0
+
+    generated_delete_response = client.delete(f"/api/v1/restaurant/expenses/{stored_expense['_id']}", headers=headers)
+    assert generated_delete_response.status_code == 422
+    assert "source record" in generated_delete_response.json()["error"]["message"]
+
+    manual_delete_response = client.delete(f"/api/v1/restaurant/expenses/{expense_response.json()['id']}", headers=headers)
+    assert manual_delete_response.status_code == 204
+
+    after_delete_response = client.get("/api/v1/restaurant/expenses", headers=headers)
+    assert after_delete_response.status_code == 200
+    assert after_delete_response.json()["today"]["total"] == 35.0
+
+
+def test_deleting_daily_data_removes_linked_expense_cash_rows_and_recalculates(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Daily Delete Owner",
+            "email": "daily-delete@example.com",
+            "password": "DailyDelete123",
+            "phone": "+1555000211",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+
+    daily_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_1",
+            "method_one": {
+                "business_date": today_iso,
+                "pos_payments": 300,
+                "cash_in": 150,
+                "cash_withdrawals": 20,
+                "cash_out": 10,
+                "expenses_in_cash": 35,
+            },
+        },
+    )
+    assert daily_response.status_code == 201
+    record_id = daily_response.json()["id"]
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    assert asyncio.run(db["restaurant_expenses"].count_documents({"source_kind": "manual_entry", "source_id": record_id})) == 1
+    linked_cash_rows = asyncio.run(
+        db["restaurant_cash_deposits"].find({"source_kind": "manual_entry", "source_id": record_id}).to_list(length=None)
+    )
+    assert {(item["source_subtype"], item["type"], item["amount"]) for item in linked_cash_rows} == {
+        ("pos_payments", "pos_payment", 300.0),
+        ("cash_in", "cash_in", 150.0),
+        ("cash_withdrawals", "cash_withdrawal", 20.0),
+        ("cash_out", "cash_out", 10.0),
+        ("expenses_in_cash", "cash_expense", 35.0),
+    }
+    assert asyncio.run(db["restaurant_finance_snapshots"].find_one({"period_type": "day", "business_date": today_iso})) is not None
+
+    cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
+    assert cash_overview_response.status_code == 200
+    recent_by_subtype = {
+        item["source_subtype"]: item
+        for item in cash_overview_response.json()["periods"]["today"]["recent_deposits"]
+        if item["source_id"] == record_id
+    }
+    assert recent_by_subtype["pos_payments"]["amount"] == 300.0
+    assert recent_by_subtype["cash_in"]["amount"] == 150.0
+    assert recent_by_subtype["cash_withdrawals"]["amount"] == -20.0
+    assert recent_by_subtype["cash_out"]["amount"] == -10.0
+    assert recent_by_subtype["expenses_in_cash"]["amount"] == -35.0
+
+    generated_delete_response = client.delete(f"/api/v1/restaurant/cash/deposits/{linked_cash_rows[0]['_id']}", headers=headers)
+    assert generated_delete_response.status_code == 422
+
+    delete_response = client.delete(f"/api/v1/restaurant/daily-data/{record_id}", headers=headers)
+    assert delete_response.status_code == 204
+
+    assert asyncio.run(db["restaurant_expenses"].count_documents({"source_kind": "manual_entry", "source_id": record_id})) == 0
+    assert asyncio.run(db["restaurant_cash_deposits"].count_documents({"source_kind": "manual_entry", "source_id": record_id})) == 0
+    assert asyncio.run(db["restaurant_finance_transactions"].count_documents({"source_kind": "manual_entry", "source_id": record_id})) == 0
+    assert asyncio.run(db["restaurant_finance_snapshots"].find_one({"period_type": "day", "business_date": today_iso})) is None
+
+    expenses_response = client.get("/api/v1/restaurant/expenses", headers=headers)
+    assert expenses_response.status_code == 200
+    assert expenses_response.json()["today"]["total"] == 0
+
+    cash_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
+    assert cash_response.status_code == 200
+    assert cash_response.json()["periods"]["today"]["summary"]["total_collected"] == 0
 
 
 def test_expenses_section_includes_uploaded_document_expenses(client, app):
@@ -870,7 +1055,145 @@ def test_expenses_section_includes_uploaded_document_expenses(client, app):
     assert payload["today"]["total"] == 80.0
     assert payload["this_week"]["total"] == 80.0
     assert payload["this_month"]["total"] == 80.0
-    assert any(item["category"] == "Uploaded Document Expense" and item["amount"] == 80.0 for item in payload["today"]["items"])
+    assert any(
+        item["category"] == "Expense"
+        and item["amount"] == 80.0
+        and item["source_kind"] == "document"
+        for item in payload["today"]["items"]
+    )
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    stored_expense = asyncio.run(
+        db["restaurant_expenses"].find_one(
+            {
+                "source_kind": "document",
+                "source_id": confirm_response.json()["id"],
+            }
+        )
+    )
+    assert stored_expense is not None
+    assert stored_expense["amount"] == 80.0
+
+
+def test_expenses_section_today_uses_latest_business_day_across_sources(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Expense Day Anchor Owner",
+            "email": "expense-day-anchor@example.com",
+            "password": "ExpenseDayAnchor123",
+            "phone": "+1555000311",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    local_today_iso = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+
+    manual_expense_response = client.post(
+        "/api/v1/restaurant/expenses",
+        headers=headers,
+        json={
+            "category": "Staff Costs",
+            "amount": 40.0,
+            "expense_date": local_today_iso,
+            "section": "cash",
+            "notes": "Shift meal",
+        },
+    )
+    assert manual_expense_response.status_code == 201
+
+    inventory_response = client.post(
+        "/api/v1/restaurant/inventory",
+        headers=headers,
+        json={
+            "product_name": "Tomato",
+            "category": "Vegetable",
+            "stock_quantity": 20,
+            "unit_type": "kg",
+            "supplier_name": "Fresh Farm",
+            "unit_price": 5.0,
+            "alert_threshold": 3,
+            "purchase_date": local_today_iso,
+        },
+    )
+    assert inventory_response.status_code == 201
+
+    document_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
+        headers=headers,
+        json={
+            "document_type": "expense",
+            "document_label": "Expense",
+            "supplier_name": "Fresh Foods Ltd",
+            "counterparty_name": "Fresh Foods Ltd",
+            "invoice_number": "INV-EXP-ANCHOR-001",
+            "invoice_date": local_today_iso,
+            "total_amount": 80.0,
+            "expense_amount": 80.0,
+            "currency": "EUR",
+            "line_items": [
+                {"product_name": "Rice", "quantity": 2, "unit_price": 40.0, "total_price": 80.0}
+            ],
+            "source_file_name": "invoice-anchor.png",
+            "ai_provider": "fallback",
+            "ai_summary": "Imported invoice",
+        },
+    )
+    assert document_response.status_code == 201
+
+    expenses_response = client.get("/api/v1/restaurant/expenses", headers=headers)
+    assert expenses_response.status_code == 200
+    today_items = expenses_response.json()["today"]["items"]
+    assert {item["source_kind"] for item in today_items if item.get("source_kind")} >= {"inventory", "document"}
+    assert any(item["category"] == "Staff Costs" and item.get("source_kind") is None for item in today_items)
+
+
+def test_cash_management_today_uses_latest_business_day_for_local_entries(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Cash Day Anchor Owner",
+            "email": "cash-day-anchor@example.com",
+            "password": "CashDayAnchor123",
+            "phone": "+1555000312",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    local_today_iso = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
+
+    daily_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_1",
+            "method_one": {
+                "business_date": local_today_iso,
+                "pos_payments": 300,
+                "cash_in": 150,
+                "cash_withdrawals": 20,
+                "cash_out": 10,
+                "expenses_in_cash": 35,
+            },
+        },
+    )
+    assert daily_response.status_code == 201
+    record_id = daily_response.json()["id"]
+
+    cash_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
+    assert cash_response.status_code == 200
+    recent_by_subtype = {
+        item["source_subtype"]: item
+        for item in cash_response.json()["periods"]["today"]["recent_deposits"]
+        if item["source_id"] == record_id
+    }
+    assert recent_by_subtype["pos_payments"]["amount"] == 300.0
+    assert recent_by_subtype["cash_in"]["amount"] == 150.0
+    assert recent_by_subtype["cash_withdrawals"]["amount"] == -20.0
+    assert recent_by_subtype["cash_out"]["amount"] == -10.0
+    assert recent_by_subtype["expenses_in_cash"]["amount"] == -35.0
 
 
 def test_home_revenue_uses_deposit_sales_when_no_manual_revenue_exists(client, app):
@@ -1031,7 +1354,18 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
         },
     )
     assert expense_response.status_code == 201
-    assert set(expense_response.json().keys()) == {"id", "category", "amount", "expense_date", "section", "notes", "created_at"}
+    assert set(expense_response.json().keys()) == {
+        "id",
+        "category",
+        "amount",
+        "expense_date",
+        "section",
+        "notes",
+        "source_kind",
+        "source_id",
+        "source_inventory_item_id",
+        "created_at",
+    }
 
     deposit_response = client.post(
         "/api/v1/restaurant/cash/deposits",
@@ -1052,6 +1386,9 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
         "type",
         "bank_account",
         "notes",
+        "source_kind",
+        "source_id",
+        "source_subtype",
         "created_at",
         "amount_formatted",
         "deposit_date_formatted",
@@ -1149,9 +1486,9 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert home_cash_response.status_code == 200
     assert home_cash_response.json()["period"] == "weekly"
     assert {item["label"] for item in home_cash_response.json()["items"]} == {
-        "Total Cash Collected",
+        "Total Collection",
         "Cash Available",
-        "Cash Deposited",
+        "Cash Deposit",
     }
 
     home_vat_balance_response = client.get("/api/v1/restaurant/home/vat-balance", headers=headers)
@@ -1214,7 +1551,20 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     daily_list_payload = daily_list_response.json()
     assert set(daily_list_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
     assert daily_list_payload["items"][0]["business_date"] == today_iso
-    assert set(daily_list_payload["items"][0].keys()) == {"id", "business_date", "total_revenue", "operating_revenue", "total_expenses", "operating_expenses", "invoice_document_total", "total_covers", "avg_revenue_per_cover", "created_at"}
+    assert set(daily_list_payload["items"][0].keys()) == {
+        "id",
+        "record_id",
+        "business_date",
+        "total_revenue",
+        "operating_revenue",
+        "total_expenses",
+        "operating_expenses",
+        "invoice_document_total",
+        "total_covers",
+        "avg_revenue_per_cover",
+        "created_at",
+    }
+    assert daily_list_payload["items"][0]["record_id"] == second_daily_response.json()["id"]
     assert daily_list_payload["items"][0]["total_covers"] == 38
     assert daily_list_payload["items"][0]["total_expenses"] == 0.0
     assert daily_list_payload["items"][0]["avg_revenue_per_cover"] == 24.21
@@ -1224,7 +1574,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     week_list_response = client.get(f"/api/v1/restaurant/daily-data?view=week&reference_date={today_iso}", headers=headers)
     assert week_list_response.status_code == 200
     week_payload = week_list_response.json()
-    assert week_payload["total"] == 2
+    assert week_payload["total"] == 1
     assert set(week_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
 
     detail_id = daily_list_payload["items"][0]["id"]
@@ -1239,13 +1589,11 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert detail_payload["register_summary"]["total_cash_on_hand"] == 420
     assert [section["key"] for section in detail_payload["method_sections"]] == [
         "deposit_section",
-        "expense_section",
-        "cash_movement_section",
-        "register_section",
         "covers_section",
+        "register_section",
     ]
     assert detail_payload["method_sections"][0]["fields"][1]["value"] == 200.0
-    assert detail_payload["method_sections"][4]["fields"][2]["value"] == 38
+    assert detail_payload["method_sections"][1]["fields"][2]["value"] == 38
 
     date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-date?business_date={today_iso}", headers=headers)
     assert date_detail_response.status_code == 200
@@ -1285,7 +1633,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     month_list_response = client.get(f"/api/v1/restaurant/daily-data?view=month&reference_date={today_iso}", headers=headers)
     assert month_list_response.status_code == 200
     month_payload = month_list_response.json()
-    assert month_payload["total"] == 2
+    assert month_payload["total"] == 1
     assert set(month_payload.keys()) == {"total", "page", "page_size", "pages", "items"}
 
     month_business_date_detail_response = client.get(f"/api/v1/restaurant/daily-data/by-month-business-date?business_date={today_iso}", headers=headers)
@@ -1308,7 +1656,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert delete_response.status_code == 204
     after_delete_response = client.get(f"/api/v1/restaurant/daily-data?view=date&reference_date={today_iso}", headers=headers)
     assert after_delete_response.status_code == 200
-    assert after_delete_response.json()["total"] == 1
+    assert after_delete_response.json()["total"] == 0
 
     business_insight_response = client.get("/api/v1/restaurant/analytics/business-insight", headers=headers)
     assert business_insight_response.status_code == 200
@@ -1319,14 +1667,14 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200
     analytics_payload = analytics_response.json()
-    assert analytics_payload["revenue_total"] == 1750
-    assert analytics_payload["operating_revenue_total"] == 1750
+    assert analytics_payload["revenue_total"] == 1300
+    assert analytics_payload["operating_revenue_total"] == 1300
     assert analytics_payload["invoice_document_total"] == 0.0
     assert analytics_payload["insight_banner"]["title"] == business_insight_payload["title"]
     assert analytics_payload["metric_tiles"][0]["label"] == "Estimated Profit"
     assert analytics_payload["metric_tiles"][1]["label"] == "Peak Hour"
     assert analytics_payload["summary_stats"][0]["label"] == "Revenue"
-    assert analytics_payload["summary_stats"][0]["value"] == 1750
+    assert analytics_payload["summary_stats"][0]["value"] == 1300
     assert analytics_payload["revenue_comparison"][0]["label"] == "This Week Revenue"
     assert analytics_payload["covers_activity"][0]["label"] == "Lunch"
     assert analytics_payload["cost_breakdown"][0]["label"] == "Food Cost"
@@ -1428,6 +1776,10 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
         "location",
         "city_location",
         "number_of_seats",
+        "average_spend_per_customer",
+        "main_business_goal",
+        "biggest_problem",
+        "improvement_focus",
         "preferred_language",
         "profile_image_url",
     }
