@@ -162,6 +162,49 @@ class RestaurantOperationsService(BaseService):
             return "Ciao! Posso aiutarti ad analizzare i dati del tuo ristorante. Cosa vuoi sapere?"
         return "Hello! I can help you analyze your restaurant data. What would you like to know?"
 
+    @staticmethod
+    def _build_fallback_restaurant_insight(context: dict[str, float | int], *, language: str) -> dict[str, Any]:
+        percent = abs(float(context["food_cost_change_percent"]))
+        increased = float(context["food_cost_change_percent"]) >= 0
+        if language == "it":
+            return {
+                "title": "Costo del cibo in aumento" if increased else "Costo del cibo migliorato",
+                "summary": (
+                    f"Il costo del cibo e cambiato del {percent:.1f}% rispetto alla settimana precedente. "
+                    "Controlla i prezzi dei fornitori e gli sprechi in preparazione."
+                ),
+                "priority": "high" if percent >= 10 else "medium",
+                "metric_value": f"{percent:.0f}%",
+                "metric_caption": "variazione questa settimana",
+                "root_causes": [
+                    "Aumento dei prezzi dei fornitori sui prodotti principali",
+                    "Maggiore utilizzo degli ingredienti nei piatti principali",
+                    "Aumento degli sprechi nella preparazione",
+                ],
+                "recommended_actions": [
+                    {"title": "Controlla i prezzi dei fornitori", "description": "Confronta i principali fornitori e rinegozia questa settimana."},
+                    {"title": "Ottimizza le porzioni", "description": "Verifica guarnizioni e pesi di preparazione sui piatti piu lenti."},
+                    {"title": "Monitora gli sprechi", "description": "Esegui una checklist giornaliera degli sprechi per i prossimi 7 giorni."},
+                ],
+            }
+        return {
+            "title": "Food Cost Increased" if increased else "Food Cost Improved",
+            "summary": f"Food cost changed by {percent:.1f}% compared with the previous week. Review supplier pricing and prep waste.",
+            "priority": "high" if percent >= 10 else "medium",
+            "metric_value": f"{percent:.0f}%",
+            "metric_caption": "change this week",
+            "root_causes": [
+                "Supplier price increase on core items",
+                "Higher ingredient usage in main courses",
+                "Prep station waste increased",
+            ],
+            "recommended_actions": [
+                {"title": "Review supplier prices", "description": "Compare top suppliers and renegotiate this week."},
+                {"title": "Optimize portion sizes", "description": "Audit garnish and prep weights on the slowest dishes."},
+                {"title": "Monitor ingredient waste", "description": "Run a daily waste checklist for the next 7 days."},
+            ],
+        }
+
     def __init__(
         self,
         user_repository: UserRepository,
@@ -931,7 +974,12 @@ class RestaurantOperationsService(BaseService):
         scope_id, daily_records, expenses, _, _, _ = await self._load_home_dependencies(current_user)
         filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
         filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
-        insights = await self._get_or_generate_insights(scope_id=scope_id, daily_records=filtered_daily_records, expenses=filtered_expenses)
+        insights = await self._get_or_generate_insights(
+            current_user=current_user,
+            scope_id=scope_id,
+            daily_records=filtered_daily_records,
+            expenses=filtered_expenses,
+        )
         return RestaurantHomeInsightResponse(period=period, insight=insights[0] if insights else None)
 
     async def get_home_recent_activity(self, current_user: dict) -> RestaurantHomeRecentActivityResponse:
@@ -1051,7 +1099,12 @@ class RestaurantOperationsService(BaseService):
         )
 
         insights = (
-            await self._get_or_generate_insights(scope_id=scope_id, daily_records=filtered_daily_records, expenses=filtered_expenses)
+            await self._get_or_generate_insights(
+                current_user=current_user,
+                scope_id=scope_id,
+                daily_records=filtered_daily_records,
+                expenses=filtered_expenses,
+            )
             if include_featured_insight
             else []
         )
@@ -1138,6 +1191,7 @@ class RestaurantOperationsService(BaseService):
         inventory_items, _ = await self.inventory_repository.list_by_scope(scope_id=scope_id, page=1, page_size=100)
         transactions, _ = await self.finance_transaction_repository.list_by_scope(scope_id=scope_id, page=1, page_size=250)
         insights = await self._get_or_generate_insights(
+            current_user=current_user,
             scope_id=scope_id,
             daily_records=daily_records,
             expenses=expenses,
@@ -2317,6 +2371,7 @@ class RestaurantOperationsService(BaseService):
         daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
         expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
         return await self._build_analytics_insight_banner(
+            current_user=current_user,
             serialized_records=self.serialize_list(daily_records),
             serialized_expenses=self.serialize_list(expenses),
         )
@@ -2410,11 +2465,19 @@ class RestaurantOperationsService(BaseService):
         staff_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "staff" in str(item.get("category", "")).lower()), 2)
         supplier_alerts = [
             AnalyticsSupplierAlertResponse(**item)
-            for item in await self._build_supplier_alerts(serialized_expenses=serialized_expenses, serialized_documents=filtered_documents)
+            for item in await self._build_supplier_alerts(
+                current_user=current_user,
+                serialized_expenses=serialized_expenses,
+                serialized_documents=filtered_documents,
+            )
         ]
 
         return {
-            "insight_banner": await self._build_analytics_insight_banner(serialized_records=serialized_records, serialized_expenses=serialized_expenses),
+            "insight_banner": await self._build_analytics_insight_banner(
+                current_user=current_user,
+                serialized_records=serialized_records,
+                serialized_expenses=serialized_expenses,
+            ),
             "revenue_total": float(context["revenue_total"]),
             "invoice_document_total": round(sum(float(item.get("total_amount", 0)) for item in filtered_documents), 2),
             "revenue_change_percent": float(context["revenue_change_percent"]),
@@ -2722,6 +2785,7 @@ class RestaurantOperationsService(BaseService):
     async def _get_or_generate_insights(
         self,
         *,
+        current_user: dict,
         scope_id: str,
         daily_records: list[dict],
         expenses: list[dict],
@@ -2732,25 +2796,10 @@ class RestaurantOperationsService(BaseService):
     ) -> list[InsightSummaryResponse]:
         insights = await self.insight_repository.list_by_scope(scope_id=scope_id, limit=10)
         context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
+        insight_language = self._resolve_chat_language(current_user)
         percent = abs(context["food_cost_change_percent"])
         trend = self._build_weekly_revenue_chart(daily_records)
-        fallback_insight = {
-            "title": "Food Cost Increased" if context["food_cost_change_percent"] >= 0 else "Food Cost Improved",
-            "summary": f"Food cost changed by {percent:.1f}% compared with the previous week. Review supplier pricing and prep waste.",
-            "priority": "high" if percent >= 10 else "medium",
-            "metric_value": f"{percent:.0f}%",
-            "metric_caption": "change this week",
-            "root_causes": [
-                "Supplier price increase on core items",
-                "Higher ingredient usage in main courses",
-                "Prep station waste increased",
-            ],
-            "recommended_actions": [
-                {"title": "Review supplier prices", "description": "Compare top suppliers and renegotiate this week."},
-                {"title": "Optimize portion sizes", "description": "Audit garnish and prep weights on the slowest dishes."},
-                {"title": "Monitor ingredient waste", "description": "Run a daily waste checklist for the next 7 days."},
-            ],
-        }
+        fallback_insight = self._build_fallback_restaurant_insight(context, language=insight_language)
         insight_payload = await self.openai_service.generate_restaurant_insight(
             metrics_context=self._build_realtime_insight_context(
                 metrics_context=context,
@@ -2763,14 +2812,25 @@ class RestaurantOperationsService(BaseService):
                 trend=trend,
             ),
             fallback_insight=fallback_insight,
+            language=insight_language,
         )
         insight_payload.update(
             {
                 "tenant_id": scope_id,
                 "trend": [item.model_dump(mode="json") for item in trend],
                 "related_metrics": [
-                    {"label": "Profit", "value": context["profit_total"], "change_percent": context["profit_change_percent"], "currency": "EUR"},
-                    {"label": "Expenses", "value": context["expenses_total"], "change_percent": context["expense_change_percent"], "currency": "EUR"},
+                    {
+                        "label": "Profitto" if insight_language == "it" else "Profit",
+                        "value": context["profit_total"],
+                        "change_percent": context["profit_change_percent"],
+                        "currency": "EUR",
+                    },
+                    {
+                        "label": "Spese" if insight_language == "it" else "Expenses",
+                        "value": context["expenses_total"],
+                        "change_percent": context["expense_change_percent"],
+                        "currency": "EUR",
+                    },
                 ],
                 "ai_provider": "openai" if self.openai_service.enabled else "fallback",
                 "generated_at": datetime.now(UTC).isoformat(),
@@ -3243,10 +3303,13 @@ class RestaurantOperationsService(BaseService):
     async def _build_analytics_insight_banner(
         self,
         *,
+        current_user: dict,
         serialized_records: list[dict[str, Any]],
         serialized_expenses: list[dict[str, Any]],
     ) -> AnalyticsInsightBannerResponse:
+        insight_language = self._resolve_chat_language(current_user)
         weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        weekday_names_it = ["Lunedi", "Martedi", "Mercoledi", "Giovedi", "Venerdi", "Sabato", "Domenica"]
         revenue_by_weekday: dict[int, float] = {}
         for item in serialized_records:
             try:
@@ -3298,18 +3361,35 @@ class RestaurantOperationsService(BaseService):
 
         if best_group is not None and best_weekday is not None and best_lift is not None and best_lift > 0:
             percent = max(1, round(best_lift))
-            group_label = {"staff": "Staffing costs", "food": "Food costs", "operations": "Operating costs"}.get(best_group, "Costs")
-            subtitle = {
-                "staff": "Review labor scheduling against demand patterns.",
-                "food": "Review purchasing and menu mix for this day.",
-                "operations": "Review overhead allocations and shift planning.",
-            }.get(best_group, "Review cost drivers for this day.")
-            fallback_title = f"Optimization Tip: {group_label} are {percent}% higher on {weekday_names[best_weekday]}s relative to revenue."
+            weekday_name = weekday_names_it[best_weekday] if insight_language == "it" else weekday_names[best_weekday]
+            group_label = (
+                {"staff": "Costi del personale", "food": "Costi del cibo", "operations": "Costi operativi"}.get(best_group, "Costi")
+                if insight_language == "it"
+                else {"staff": "Staffing costs", "food": "Food costs", "operations": "Operating costs"}.get(best_group, "Costs")
+            )
+            subtitle = (
+                {
+                    "staff": "Controlla la pianificazione del personale rispetto alla domanda.",
+                    "food": "Controlla acquisti e mix del menu per questo giorno.",
+                    "operations": "Controlla costi generali e pianificazione dei turni.",
+                }.get(best_group, "Controlla i principali costi di questa giornata.")
+                if insight_language == "it"
+                else {
+                    "staff": "Review labor scheduling against demand patterns.",
+                    "food": "Review purchasing and menu mix for this day.",
+                    "operations": "Review overhead allocations and shift planning.",
+                }.get(best_group, "Review cost drivers for this day.")
+            )
+            fallback_title = (
+                f"Suggerimento di ottimizzazione: {group_label} sono superiori del {percent}% di {weekday_name} rispetto ai ricavi."
+                if insight_language == "it"
+                else f"Optimization Tip: {group_label} are {percent}% higher on {weekday_name}s relative to revenue."
+            )
             fallback_subtitle = subtitle
             generated = await self.openai_service.generate_business_insight(
                 analytics_context={
                     "insight_type": best_group,
-                    "weekday": weekday_names[best_weekday],
+                    "weekday": weekday_name,
                     "lift_percent": percent,
                     "ratio": round(best_ratio * 100, 2),
                     "revenue_by_weekday": revenue_by_weekday,
@@ -3317,14 +3397,23 @@ class RestaurantOperationsService(BaseService):
                 },
                 fallback_title=fallback_title,
                 fallback_subtitle=fallback_subtitle,
+                language=insight_language,
             )
             return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
 
         if serialized_expenses:
             top_expense = max(serialized_expenses, key=lambda item: float(item.get("amount", 0)))
             category_name = str(top_expense.get("category", "operating"))
-            fallback_title = f"Optimization Tip: {category_name} is your largest recent cost driver."
-            fallback_subtitle = "Review the largest expense category against revenue trend."
+            fallback_title = (
+                f"Suggerimento di ottimizzazione: {category_name} e il principale costo recente."
+                if insight_language == "it"
+                else f"Optimization Tip: {category_name} is your largest recent cost driver."
+            )
+            fallback_subtitle = (
+                "Controlla la categoria di spesa piu alta rispetto all'andamento dei ricavi."
+                if insight_language == "it"
+                else "Review the largest expense category against revenue trend."
+            )
             generated = await self.openai_service.generate_business_insight(
                 analytics_context={
                     "insight_type": "largest_expense",
@@ -3333,22 +3422,34 @@ class RestaurantOperationsService(BaseService):
                 },
                 fallback_title=fallback_title,
                 fallback_subtitle=fallback_subtitle,
+                language=insight_language,
             )
             return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
 
         generated = await self.openai_service.generate_business_insight(
             analytics_context={"insight_type": "insufficient_data"},
-            fallback_title="Optimization Tip: Add more daily data to unlock pattern-based insights.",
-            fallback_subtitle="We need a bit more revenue and cost history to generate stronger recommendations.",
+            fallback_title=(
+                "Suggerimento di ottimizzazione: aggiungi piu dati giornalieri per sbloccare insight utili."
+                if insight_language == "it"
+                else "Optimization Tip: Add more daily data to unlock pattern-based insights."
+            ),
+            fallback_subtitle=(
+                "Servono piu dati su ricavi e costi per generare raccomandazioni piu forti."
+                if insight_language == "it"
+                else "We need a bit more revenue and cost history to generate stronger recommendations."
+            ),
+            language=insight_language,
         )
         return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
 
     async def _build_supplier_alerts(
         self,
         *,
+        current_user: dict,
         serialized_expenses: list[dict[str, Any]],
         serialized_documents: list[dict[str, Any]],
     ) -> list[dict[str, str]]:
+        alert_language = self._resolve_chat_language(current_user)
         category_totals: dict[str, float] = {}
 
         for expense in serialized_expenses:
@@ -3370,8 +3471,16 @@ class RestaurantOperationsService(BaseService):
             impact = round(amount * 0.1, 2)
             fallback_alerts.append(
                 {
-                    "title": f"{category} prices increased by {max(5, int(round(share / 2)))}%",
-                    "subtitle": f"Impact: +{self._format_currency(impact)} monthly cost pressure",
+                    "title": (
+                        f"I prezzi di {category} sono aumentati del {max(5, int(round(share / 2)))}%"
+                        if alert_language == "it"
+                        else f"{category} prices increased by {max(5, int(round(share / 2)))}%"
+                    ),
+                    "subtitle": (
+                        f"Impatto: +{self._format_currency(impact)} di pressione mensile sui costi"
+                        if alert_language == "it"
+                        else f"Impact: +{self._format_currency(impact)} monthly cost pressure"
+                    ),
                 }
             )
 
@@ -3386,6 +3495,7 @@ class RestaurantOperationsService(BaseService):
                 ],
             },
             fallback_alerts=fallback_alerts,
+            language=alert_language,
         )
         return generated_alerts
 

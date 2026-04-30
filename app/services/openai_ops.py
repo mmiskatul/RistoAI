@@ -105,7 +105,9 @@ class OpenAIOperationsService:
         analytics_context: dict[str, Any],
         fallback_title: str,
         fallback_subtitle: str,
+        language: str = "en",
     ) -> dict[str, str]:
+        resolved_language = self._resolve_language(language)
         if not self.enabled:
             return {"title": fallback_title, "subtitle": fallback_subtitle}
 
@@ -120,8 +122,9 @@ class OpenAIOperationsService:
                             "text": (
                                 "You generate one concise restaurant analytics banner from structured business metrics. "
                                 "Return only valid JSON with keys title and subtitle. "
-                                "The title must start with 'Optimization Tip:'. "
-                                "Be specific, numeric when possible, and grounded only in the supplied data."
+                                f"The title must start with {'Optimization Tip:' if resolved_language == 'en' else 'Suggerimento di ottimizzazione:'}. "
+                                "Be specific, numeric when possible, and grounded only in the supplied data. "
+                                f"Return both fields in {'Italian' if resolved_language == 'it' else 'English'}."
                             ),
                         }
                     ],
@@ -159,8 +162,9 @@ class OpenAIOperationsService:
                     title = str(parsed.get("title") or "").strip()
                     subtitle = str(parsed.get("subtitle") or "").strip()
                     if title and subtitle:
-                        if not title.startswith("Optimization Tip:"):
-                            title = f"Optimization Tip: {title}"
+                        required_prefix = "Suggerimento di ottimizzazione:" if resolved_language == "it" else "Optimization Tip:"
+                        if not title.startswith(required_prefix):
+                            title = f"{required_prefix} {title}"
                         return {"title": title, "subtitle": subtitle}
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 429:
@@ -178,7 +182,9 @@ class OpenAIOperationsService:
         *,
         analytics_context: dict[str, Any],
         fallback_alerts: list[dict[str, str]],
+        language: str = "en",
     ) -> list[dict[str, str]]:
+        resolved_language = self._resolve_language(language)
         if not self.enabled:
             return fallback_alerts
 
@@ -194,7 +200,8 @@ class OpenAIOperationsService:
                                 "You generate concise supplier price alerts for a restaurant analytics dashboard from structured metrics. "
                                 "Return only valid JSON with key alerts. "
                                 "alerts must be an array of 1 to 3 objects, each with title and subtitle. "
-                                "Keep each alert short, numeric when possible, and grounded only in the supplied data."
+                                "Keep each alert short, numeric when possible, and grounded only in the supplied data. "
+                                f"Return all alert text in {'Italian' if resolved_language == 'it' else 'English'}."
                             ),
                         }
                     ],
@@ -255,7 +262,9 @@ class OpenAIOperationsService:
         *,
         metrics_context: dict[str, Any],
         fallback_insight: dict[str, Any],
+        language: str = "en",
     ) -> dict[str, Any]:
+        resolved_language = self._resolve_language(language)
         if not self.enabled:
             return fallback_insight
 
@@ -274,7 +283,8 @@ class OpenAIOperationsService:
                                 "priority must be one of high, medium, low. "
                                 "root_causes must be exactly 3 short strings. "
                                 "recommended_actions must be exactly 3 objects with title and description. "
-                                "Be specific, practical, and grounded only in the supplied metrics."
+                                "Be specific, practical, and grounded only in the supplied metrics. "
+                                f"Return every field in {'Italian' if resolved_language == 'it' else 'English'}."
                             ),
                         }
                     ],

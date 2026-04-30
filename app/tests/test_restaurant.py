@@ -1661,6 +1661,22 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert len(insights_response.json()["root_causes"]) == 3
     assert len(insights_response.json()["recommended_actions"]) == 3
 
+    language_update_response = client.put(
+        "/api/v1/auth/preferences/language",
+        headers=headers,
+        json={"preferred_language": "it"},
+    )
+    assert language_update_response.status_code == 200
+
+    italian_insights_response = client.get("/api/v1/restaurant/home/insight", headers=headers)
+    assert italian_insights_response.status_code == 200
+    italian_insight = italian_insights_response.json()["insight"]
+    assert italian_insight["title"]
+    assert any(
+        phrase in italian_insight["summary"].lower()
+        for phrase in ("il costo del cibo", "controlla i prezzi", "sprechi")
+    )
+
     second_daily_response = client.post(
         "/api/v1/restaurant/manual-entry",
         headers=headers,
@@ -1797,6 +1813,15 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     business_insight_payload = business_insight_response.json()
     assert business_insight_payload["title"]
     assert business_insight_payload["subtitle"]
+
+    italian_business_insight_response = client.get("/api/v1/restaurant/analytics/business-insight", headers=headers)
+    assert italian_business_insight_response.status_code == 200
+    italian_business_insight_payload = italian_business_insight_response.json()
+    assert italian_business_insight_payload["title"]
+    assert any(
+        phrase in italian_business_insight_payload["title"].lower() or phrase in italian_business_insight_payload["subtitle"].lower()
+        for phrase in ("suggerimento di ottimizzazione", "controlla", "ricavi", "costi")
+    )
 
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200
