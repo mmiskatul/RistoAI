@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from app.tests.helpers import register_and_login, seed_subscription_plan
 
@@ -81,7 +82,14 @@ def test_aws_upload_verify_reports_missing_configuration(client, app):
         },
     )
 
-    response = client.post("/api/v1/upload/aws/verify", headers=headers)
+    with patch("app.api.v1.endpoints.upload.get_settings") as mocked_settings:
+        mocked_settings.return_value = SimpleNamespace(
+            aws_access_key_id=None,
+            aws_secret_access_key=None,
+            aws_s3_bucket=None,
+            aws_region="eu-south-1",
+        )
+        response = client.post("/api/v1/upload/aws/verify", headers=headers)
     assert response.status_code == 200
     payload = response.json()
     assert payload["provider"] == "aws_s3"

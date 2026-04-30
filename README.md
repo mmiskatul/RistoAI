@@ -162,7 +162,7 @@ See [`requirements.txt`](./requirements.txt).
 6. Start the API; indexes are created automatically during startup.
 
 ## 10. AWS S3 Upload Setup
-If you want the image upload endpoint to run on AWS S3 instead of Cloudinary, set all four of these environment variables on the backend:
+The backend image upload endpoint now uses AWS S3 only. Set all four of these environment variables on the backend:
 
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
@@ -170,8 +170,8 @@ If you want the image upload endpoint to run on AWS S3 instead of Cloudinary, se
 - `AWS_REGION`
 
 Behavior:
-- If all AWS S3 variables are present, `POST /api/v1/upload/image` writes images to S3.
-- If AWS S3 is not fully configured, the backend falls back to Cloudinary for image storage.
+- `POST /api/v1/upload/image` writes images to S3.
+- If AWS S3 is not fully configured, image upload endpoints fail with a configuration error until the backend is fixed.
 - `GET /api/v1/upload/aws/config-status` shows whether the S3 config is complete.
 - `POST /api/v1/upload/aws/image/precheck` validates the file before upload.
 - `POST /api/v1/upload/aws/verify` checks SDK availability, bucket access, and a safe write/delete cycle.

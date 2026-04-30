@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 from app.config.settings import Settings
 from app.services.image_storage import (
-    CloudinaryImageStorageService,
-    S3ImageStorageService,
+    DummyImageStorageService,
+    ImageStorageService,
     build_image_storage_service,
 )
 
@@ -13,14 +13,11 @@ from app.services.image_storage import (
 def _build_settings(**overrides) -> Settings:
     base = {
         "_env_file": None,
-        "TESTING": False,
+        "testing": False,
         "AWS_ACCESS_KEY_ID": None,
         "AWS_SECRET_ACCESS_KEY": None,
         "AWS_S3_BUCKET": None,
         "AWS_REGION": None,
-        "CLOUDINARY_CLOUD_NAME": None,
-        "CLOUDINARY_API_KEY": None,
-        "CLOUDINARY_API_SECRET": None,
     }
     base.update(overrides)
     return Settings(**base)
@@ -36,23 +33,16 @@ def test_build_image_storage_service_prefers_s3_when_aws_is_configured():
         )
     )
 
-    assert isinstance(service, S3ImageStorageService)
+    assert isinstance(service, ImageStorageService)
 
 
-def test_build_image_storage_service_falls_back_to_cloudinary_when_aws_is_not_configured():
-    service = build_image_storage_service(
-        _build_settings(
-            CLOUDINARY_CLOUD_NAME="demo",
-            CLOUDINARY_API_KEY="key",
-            CLOUDINARY_API_SECRET="secret",
-        )
-    )
-
-    assert isinstance(service, CloudinaryImageStorageService)
+def test_build_image_storage_service_uses_dummy_service_in_tests():
+    service = build_image_storage_service(_build_settings(testing=True))
+    assert isinstance(service, DummyImageStorageService)
 
 
 def test_s3_service_upload_and_status_use_bucket_urls(monkeypatch):
-    service = S3ImageStorageService(
+    service = ImageStorageService(
         _build_settings(
             AWS_ACCESS_KEY_ID="access-key",
             AWS_SECRET_ACCESS_KEY="secret-key",
@@ -96,7 +86,7 @@ def test_s3_service_upload_and_status_use_bucket_urls(monkeypatch):
 
 
 def test_s3_service_status_returns_missing_when_object_does_not_exist(monkeypatch):
-    service = S3ImageStorageService(
+    service = ImageStorageService(
         _build_settings(
             AWS_ACCESS_KEY_ID="access-key",
             AWS_SECRET_ACCESS_KEY="secret-key",
