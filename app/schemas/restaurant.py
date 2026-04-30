@@ -835,10 +835,12 @@ class AnalyticsSupplierAlertsResponse(BaseSchema):
 class ChatMessageCreateRequest(BaseSchema):
     message: str = Field(min_length=2, max_length=1000)
     attachment_source: str | None = Field(default=None, max_length=40)
+    language: str | None = Field(default=None, max_length=20)
 
 
 class ChatMessageUpdateRequest(BaseSchema):
     message: str = Field(min_length=2, max_length=1000)
+    language: str | None = Field(default=None, max_length=20)
 
 
 class ChatAttachmentOptionResponse(BaseSchema):

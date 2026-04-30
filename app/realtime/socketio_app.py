@@ -78,7 +78,11 @@ class RestaurantChatSocketGateway:
         @self.sio.on("chat:message", namespace=self.namespace)
         async def chat_message(sid: str, data: dict[str, Any] | None):
             session = await self._require_session(sid)
-            payload = ChatMessageCreateRequest(message=str((data or {}).get("message") or "").strip(), attachment_source=(data or {}).get("attachment_source"))
+            payload = ChatMessageCreateRequest(
+                message=str((data or {}).get("message") or "").strip(),
+                attachment_source=(data or {}).get("attachment_source"),
+                language=(data or {}).get("language"),
+            )
             conversation = await self._service().create_chat_message(session["user"], payload)
             return await self._broadcast_conversation(session["room"], conversation)
 
@@ -87,7 +91,10 @@ class RestaurantChatSocketGateway:
             session = await self._require_session(sid)
             resolved = data or {}
             message_id = str(resolved.get("message_id") or "").strip()
-            payload = ChatMessageUpdateRequest(message=str(resolved.get("message") or "").strip())
+            payload = ChatMessageUpdateRequest(
+                message=str(resolved.get("message") or "").strip(),
+                language=resolved.get("language"),
+            )
             conversation = await self._service().update_chat_message(session["user"], message_id, payload)
             return await self._broadcast_conversation(session["room"], conversation)
 
@@ -105,7 +112,11 @@ class RestaurantChatSocketGateway:
                 file_bytes = base64.b64decode(encoded, validate=True)
             except Exception as exc:  # noqa: BLE001
                 raise ValidationException("Invalid base64 attachment payload") from exc
-            payload = ChatMessageCreateRequest(message=message, attachment_source=resolved.get("attachment_source"))
+            payload = ChatMessageCreateRequest(
+                message=message,
+                attachment_source=resolved.get("attachment_source"),
+                language=resolved.get("language"),
+            )
             conversation = await self._service().create_chat_message_with_attachment(
                 session["user"],
                 payload=payload,

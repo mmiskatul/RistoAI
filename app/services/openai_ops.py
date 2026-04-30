@@ -326,14 +326,22 @@ class OpenAIOperationsService:
         self,
         *,
         prompt: str,
+        language: str = "en",
         metrics_context: dict[str, Any],
         recent_messages: Sequence[dict[str, Any]],
         attachment_context: dict[str, Any] | None = None,
     ) -> str:
+        resolved_language = "it" if str(language or "").lower().startswith("it") else "en"
         if not self.enabled:
             revenue = metrics_context.get("revenue_total", 0.0)
             expenses = metrics_context.get("expenses_total", 0.0)
             attachment_note = f" Attached file summary: {attachment_context.get('summary')}" if attachment_context else ""
+            if resolved_language == "it":
+                return (
+                    f"I ricavi attuali sono EUR {revenue:,.2f} e le spese sono EUR {expenses:,.2f}. "
+                    f"Concentrati sulla spesa dei fornitori, sulla riconciliazione giornaliera della cassa e sul giorno feriale piu debole."
+                    f"{attachment_note}"
+                )
             return (
                 f"Current revenue is EUR {revenue:,.2f} and expenses are EUR {expenses:,.2f}. "
                 f"Focus on supplier spend, daily cash reconciliation, and the weakest weekday trend."
@@ -350,8 +358,9 @@ class OpenAIOperationsService:
                         {
                             "type": "input_text",
                             "text": (
-                                "You are an operations copilot for a restaurant back office app. "
-                                "Keep replies concise, practical, and grounded in the supplied metrics."
+                            "You are an operations copilot for a restaurant back office app. "
+                                "Keep replies concise, practical, and grounded in the supplied metrics. "
+                                f"Always answer in {'Italian' if resolved_language == 'it' else 'English'}."
                             ),
                         }
                     ],
@@ -380,6 +389,12 @@ class OpenAIOperationsService:
             revenue = metrics_context.get("revenue_total", 0.0)
             expenses = metrics_context.get("expenses_total", 0.0)
             attachment_note = f" Attached file summary: {attachment_context.get('summary')}" if attachment_context else ""
+            if resolved_language == "it":
+                return (
+                    f"I ricavi attuali sono EUR {revenue:,.2f} e le spese sono EUR {expenses:,.2f}. "
+                    f"Concentrati sulla spesa dei fornitori, sulla riconciliazione giornaliera della cassa e sul giorno feriale piu debole."
+                    f"{attachment_note}"
+                )
             return (
                 f"Current revenue is EUR {revenue:,.2f} and expenses are EUR {expenses:,.2f}. "
                 f"Focus on supplier spend, daily cash reconciliation, and the weakest weekday trend."

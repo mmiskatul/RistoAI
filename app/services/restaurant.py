@@ -151,6 +151,11 @@ class RestaurantOperationsService(BaseService):
     }
     CASH_OUTFLOW_TRANSACTION_TYPES = {"cash_withdrawal", "cash_out", "cash_expense"}
 
+    @staticmethod
+    def _resolve_chat_language(current_user: dict, requested_language: str | None = None) -> str:
+        candidate = str(requested_language or current_user.get("preferred_language") or "en").strip().lower()
+        return "it" if candidate.startswith("it") else "en"
+
     def __init__(
         self,
         user_repository: UserRepository,
@@ -2472,6 +2477,7 @@ class RestaurantOperationsService(BaseService):
 
     async def update_chat_message(self, current_user: dict, message_id: str, payload: ChatMessageUpdateRequest) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
+        chat_language = self._resolve_chat_language(current_user, payload.language)
         if not message_id:
             raise ValidationException("message_id is required")
         existing = await self.chat_repository.get_by_scope_and_id(scope_id=scope_id, message_id=message_id)
@@ -2490,6 +2496,7 @@ class RestaurantOperationsService(BaseService):
         recent, metrics_context = await self._load_chat_generation_context(scope_id=scope_id)
         assistant_text = await self.openai_service.generate_chat_reply(
             prompt=payload.message,
+            language=chat_language,
             metrics_context=metrics_context,
             recent_messages=[self.serialize(item) for item in recent],
         )
@@ -2557,6 +2564,7 @@ class RestaurantOperationsService(BaseService):
         attachment_context: dict[str, Any] | None = None,
     ) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
+        chat_language = self._resolve_chat_language(current_user, payload.language)
         user_message_payload = {
             "tenant_id": scope_id,
             "role": "user",
@@ -2571,6 +2579,7 @@ class RestaurantOperationsService(BaseService):
         recent, metrics_context = await self._load_chat_generation_context(scope_id=scope_id)
         assistant_text = await self.openai_service.generate_chat_reply(
             prompt=payload.message,
+            language=chat_language,
             metrics_context=metrics_context,
             recent_messages=[self.serialize(item) for item in recent],
             attachment_context=attachment_context,

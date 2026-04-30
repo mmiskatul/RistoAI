@@ -1869,6 +1869,16 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     user_message = next(message for message in messages if message["role"] == "user" and message["message"] == "How can I improve profit?")
     assert messages[-1]["reply_to_message_id"] == user_message["id"]
 
+    italian_chat_response = client.post(
+        "/api/v1/restaurant/chat/messages",
+        headers=headers,
+        json={"message": "Come posso migliorare il profitto?", "language": "it"},
+    )
+    assert italian_chat_response.status_code == 201
+    italian_messages = italian_chat_response.json()["messages"]
+    assert italian_messages[-1]["role"] == "assistant"
+    assert "ricavi attuali" in italian_messages[-1]["message"].lower()
+
     edited_chat_response = client.patch(
         f"/api/v1/restaurant/chat/messages/{user_message['id']}",
         headers=headers,

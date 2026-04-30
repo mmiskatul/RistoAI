@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from mimetypes import guess_type
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Response, UploadFile, status
 
 from app.core.exceptions import ValidationException
 from app.dependencies.auth import get_current_user, get_current_user_allow_inactive
@@ -607,6 +607,8 @@ async def update_chat_message(message_id: str, payload: ChatMessageUpdateRequest
 async def create_chat_message_with_attachment(
     message: str = Form(...),
     attachment_source: str | None = Form(default=None),
+    language: str | None = Form(default=None),
+    accept_language: str | None = Header(default=None, alias='Accept-Language'),
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
@@ -615,7 +617,11 @@ async def create_chat_message_with_attachment(
     file_bytes = await file.read()
     return await service.create_chat_message_with_attachment(
         current_user,
-        payload=ChatMessageCreateRequest(message=message, attachment_source=attachment_source),
+        payload=ChatMessageCreateRequest(
+            message=message,
+            attachment_source=attachment_source,
+            language=language or accept_language,
+        ),
         file_name=file.filename or 'chat-attachment',
         content_type=content_type,
         file_bytes=file_bytes,
