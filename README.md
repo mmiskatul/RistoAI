@@ -161,7 +161,29 @@ See [`requirements.txt`](./requirements.txt).
 5. Set `DATABASE_NAME` to the target logical database, for example `ristoai`.
 6. Start the API; indexes are created automatically during startup.
 
-## 10. Sample API Request/Response Examples
+## 10. AWS S3 Upload Setup
+If you want the image upload endpoint to run on AWS S3 instead of Cloudinary, set all four of these environment variables on the backend:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_S3_BUCKET`
+- `AWS_REGION`
+
+Behavior:
+- If all AWS S3 variables are present, `POST /api/v1/upload/image` writes images to S3.
+- If AWS S3 is not fully configured, the backend falls back to Cloudinary for image storage.
+- `GET /api/v1/upload/aws/config-status` shows whether the S3 config is complete.
+- `POST /api/v1/upload/aws/image/precheck` validates the file before upload.
+- `POST /api/v1/upload/aws/verify` checks SDK availability, bucket access, and a safe write/delete cycle.
+
+Recommended deployment check after the server is live:
+1. Open `GET /health` and confirm it returns `{"status":"ok",...}`.
+2. Authenticate with a real user.
+3. Call `POST /api/v1/upload/aws/verify`.
+4. Confirm `configured`, `bucket_accessible`, and `write_test_passed` are all `true`.
+5. Upload a real image through `POST /api/v1/upload/image`.
+
+## 11. Sample API Request/Response Examples
 ### Register
 Request:
 ```json

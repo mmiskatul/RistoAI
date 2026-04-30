@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     cloudinary_api_secret: str | None = Field(default=None, alias="CLOUDINARY_API_SECRET")
     cloudinary_folder: str = Field(default="ristoai", alias="CLOUDINARY_FOLDER")
 
+    aws_access_key_id: str | None = Field(default=None, alias="AWS_ACCESS_KEY_ID")
+    aws_secret_access_key: str | None = Field(default=None, alias="AWS_SECRET_ACCESS_KEY")
+    aws_s3_bucket: str | None = Field(default=None, alias="AWS_S3_BUCKET")
+    aws_region: str | None = Field(default=None, alias="AWS_REGION")
+
     stripe_secret_key: str | None = Field(default=None, alias="STRIPE_SECRET_KEY")
     stripe_publishable_key: str | None = Field(default=None, alias="STRIPE_PUBLISHABLE_KEY")
     stripe_webhook_secret: str | None = Field(default=None, alias="STRIPE_WEBHOOK_SECRET")
