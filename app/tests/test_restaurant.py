@@ -1328,6 +1328,62 @@ def test_home_recent_activity_includes_all_core_operations(client, app):
     assert {"daily_record", "invoice", "expense", "cash", "inventory"}.issubset(kinds)
 
 
+def test_notification_feed_includes_business_change_messages(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Notification Feed Owner",
+            "email": "notification-feed@example.com",
+            "password": "NotificationFeed123",
+            "phone": "+1555000399",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+
+    manual_entry_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_1",
+            "method_one": {
+                "business_date": today_iso,
+                "pos_payments": 120,
+                "cash_in": 80,
+                "cash_withdrawals": 10,
+                "cash_out": 5,
+                "expenses_in_cash": 15,
+                "notes": "Feed seed",
+            },
+        },
+    )
+    assert manual_entry_response.status_code == 201
+
+    expense_response = client.post(
+        "/api/v1/restaurant/expenses",
+        headers=headers,
+        json={"category": "Utilities", "amount": 25.0, "expense_date": today_iso, "section": "cash", "notes": "Water"},
+    )
+    assert expense_response.status_code == 201
+
+    deposit_response = client.post(
+        "/api/v1/restaurant/cash/deposits",
+        headers=headers,
+        json={"deposit_date": today_iso, "amount": 60.0, "type": "bank_deposit", "bank_account": "Primary Bank", "notes": "Drop"},
+    )
+    assert deposit_response.status_code == 201
+
+    notification_response = client.get("/api/v1/restaurant/notifications/feed", headers=headers)
+    assert notification_response.status_code == 200
+    payload = notification_response.json()
+    assert set(payload.keys()) == {"items"}
+    assert any("Cash available decreased by EUR 60.00" in item["title"] for item in payload["items"])
+    assert any("Cash available decreased by EUR 25.00" in item["title"] for item in payload["items"])
+    assert any("Daily cash updated to EUR 50.00" in item["title"] for item in payload["items"])
+
+
 def test_home_metrics_include_uploaded_document_expenses_like_inventory(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(

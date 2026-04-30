@@ -56,6 +56,7 @@ from app.schemas.restaurant import (
     RestaurantHomeInsightResponse,
     RestaurantHomeRecentActivityResponse,
     RestaurantHomeVatBalanceResponse,
+    RestaurantNotificationFeedResponse,
     RestaurantNotificationSettingsResponse,
     RestaurantNotificationSettingsUpdateRequest,
     RestaurantChangePasswordRequest,
@@ -155,6 +156,14 @@ async def get_home_recent_activity(
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> RestaurantHomeRecentActivityResponse:
     return await service.get_home_recent_activity(current_user)
+
+
+@router.get('/notifications/feed', response_model=RestaurantNotificationFeedResponse, tags=['Restaurant Notifications'], summary='Business Notification Feed', description='Recent business notifications for restaurant cash, expenses, documents, daily data, and inventory changes.')
+async def get_notification_feed(
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> RestaurantNotificationFeedResponse:
+    return await service.get_notification_feed(current_user)
 
 
 @router.get('/home/vat-balance', response_model=RestaurantHomeVatBalanceResponse, tags=['Restaurant Home'], summary='Home VAT Balance Section', description='Restaurant dashboard estimated VAT balance card for the mobile home screen.')

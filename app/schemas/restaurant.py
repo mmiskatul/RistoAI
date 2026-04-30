@@ -134,6 +134,10 @@ class RestaurantHomeRecentActivityResponse(BaseSchema):
     items: list[ActivityItemResponse] = Field(default_factory=list)
 
 
+class RestaurantNotificationFeedResponse(BaseSchema):
+    items: list[ActivityItemResponse] = Field(default_factory=list)
+
+
 class RestaurantHomeVatBalanceResponse(BaseSchema):
     balance: float
 

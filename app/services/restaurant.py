@@ -117,6 +117,7 @@ from app.schemas.restaurant import (
     RestaurantHomeRevenueResponse,
     RestaurantHomeResponse,
     RestaurantHomeVatBalanceResponse,
+    RestaurantNotificationFeedResponse,
     RestaurantNotificationSettingsResponse,
     RestaurantNotificationSettingsUpdateRequest,
     RestaurantProfileResponse,
@@ -927,6 +928,35 @@ class RestaurantOperationsService(BaseService):
         return RestaurantHomeRecentActivityResponse(
             items=self._build_recent_activity(
                 daily_records=await self._load_recent_activity_daily_records(scope_id),
+                expenses=self.serialize_list(expenses),
+                documents=self.serialize_list(documents),
+                cash_deposits=self.serialize_list(cash_deposits),
+                inventory_items=self.serialize_list(inventory_items),
+            )
+        )
+
+    async def get_notification_feed(self, current_user: dict) -> RestaurantNotificationFeedResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        (
+            daily_records,
+            expenses_result,
+            documents_result,
+            cash_deposits_result,
+            inventory_result,
+        ) = await asyncio.gather(
+            self._load_recent_activity_daily_records(scope_id),
+            self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=25),
+            self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=25),
+            self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=25),
+            self.inventory_repository.list_by_scope(scope_id=scope_id, page=1, page_size=25),
+        )
+        expenses, _ = expenses_result
+        documents, _ = documents_result
+        cash_deposits, _ = cash_deposits_result
+        inventory_items, _ = inventory_result
+        return RestaurantNotificationFeedResponse(
+            items=self._build_notification_feed(
+                daily_records=daily_records,
                 expenses=self.serialize_list(expenses),
                 documents=self.serialize_list(documents),
                 cash_deposits=self.serialize_list(cash_deposits),
@@ -4035,6 +4065,138 @@ class RestaurantOperationsService(BaseService):
             if len(selected) >= 6:
                 break
         return selected
+
+    @staticmethod
+    def _format_notification_currency(amount: float) -> str:
+        return f"EUR {abs(float(amount or 0)):,.2f}"
+
+    def _build_notification_feed(
+        self,
+        *,
+        daily_records: list[dict],
+        expenses: list[dict],
+        documents: list[dict],
+        cash_deposits: list[dict],
+        inventory_items: list[dict],
+        limit: int = 25,
+    ) -> list[ActivityItemResponse]:
+        notifications: list[ActivityItemResponse] = []
+
+        for item in daily_records:
+            business_date = self._safe_parse_date(item.get("business_date"))
+            cash_available = float(item.get("cash_available", 0) or 0)
+            total_revenue = float(item.get("total_revenue", 0) or 0)
+            notifications.append(
+                ActivityItemResponse(
+                    kind="daily_record",
+                    title=f"Daily cash updated to {self._format_notification_currency(cash_available)}",
+                    subtitle=(
+                        f"Revenue {self._format_notification_currency(total_revenue)}"
+                        f" on {(business_date.strftime('%d %b %Y') if business_date else str(item.get('business_date') or 'today'))}"
+                    ),
+                    timestamp=str(item.get("created_at") or ""),
+                    entity_id=str(item.get("id") or ""),
+                    reference_date=str(item.get("business_date") or ""),
+                    source_kind="daily_record",
+                    source_entity_id=str(item.get("id") or ""),
+                    route=f"/(tabs)/home/daily-record-details?dataId={item['id']}",
+                )
+            )
+
+        for item in documents:
+            expense_amount = float(item.get("expense_amount", 0) or 0)
+            cash_amount = float(item.get("cash_amount", 0) or 0)
+            revenue_amount = float(item.get("revenue_amount", 0) or 0)
+            profit_amount = float(item.get("profit_amount", 0) or 0)
+            if expense_amount > 0:
+                title = f"Expenses increased by {self._format_notification_currency(expense_amount)}"
+            elif cash_amount > 0:
+                title = f"Cash available increased by {self._format_notification_currency(cash_amount)}"
+            elif revenue_amount > 0:
+                title = f"Revenue increased by {self._format_notification_currency(revenue_amount)}"
+            elif profit_amount != 0:
+                direction = "increased" if profit_amount > 0 else "decreased"
+                title = f"Profit {direction} by {self._format_notification_currency(profit_amount)}"
+            else:
+                title = "Document processed"
+            notifications.append(
+                ActivityItemResponse(
+                    kind="invoice",
+                    title=title,
+                    subtitle=str(item.get("counterparty_name") or item.get("supplier_name") or item.get("source_file_name") or "Document saved"),
+                    timestamp=str(item.get("created_at") or ""),
+                    entity_id=str(item.get("id") or ""),
+                    reference_date=str(item.get("invoice_date") or ""),
+                    source_kind="invoice",
+                    source_entity_id=str(item.get("id") or ""),
+                    route=f"/(tabs)/documents/{item['id']}",
+                )
+            )
+
+        for item in expenses:
+            amount = float(item.get("amount", 0) or 0)
+            section = str(item.get("section") or "cash").lower()
+            if section == "cash":
+                title = f"Cash available decreased by {self._format_notification_currency(amount)}"
+            else:
+                title = f"Expenses increased by {self._format_notification_currency(amount)}"
+            notifications.append(
+                ActivityItemResponse(
+                    kind="expense",
+                    title=title,
+                    subtitle=str(item.get("category") or "Expense"),
+                    timestamp=str(item.get("created_at") or ""),
+                    entity_id=str(item.get("id") or ""),
+                    reference_date=str(item.get("expense_date") or ""),
+                    source_kind="expense",
+                    source_entity_id=str(item.get("id") or ""),
+                    route=f"/(tabs)/home/expense-details?id={item['id']}",
+                )
+            )
+
+        for item in cash_deposits:
+            amount = float(item.get("amount", 0) or 0)
+            transaction_type = str(item.get("type") or "bank_deposit")
+            if transaction_type in {"bank_deposit", "cash_deposit", "cash_withdrawal", "cash_out", "cash_expense"}:
+                title = f"Cash available decreased by {self._format_notification_currency(amount)}"
+            elif transaction_type == "cash_in":
+                title = f"Cash available increased by {self._format_notification_currency(amount)}"
+            else:
+                title = f"Collections increased by {self._format_notification_currency(amount)}"
+            notifications.append(
+                ActivityItemResponse(
+                    kind="cash",
+                    title=title,
+                    subtitle=str(item.get("bank_account") or item.get("display_title") or "Cash transaction"),
+                    timestamp=str(item.get("created_at") or ""),
+                    entity_id=str(item.get("id") or ""),
+                    reference_date=str(item.get("deposit_date") or ""),
+                    source_kind="cash",
+                    source_entity_id=str(item.get("id") or ""),
+                    route=f"/(tabs)/home/cash-transaction-details?id={item['id']}",
+                )
+            )
+
+        for item in inventory_items:
+            stock_quantity = float(item.get("stock_quantity", 0) or 0)
+            unit_price = float(item.get("unit_price", 0) or 0)
+            total_value = stock_quantity * unit_price
+            notifications.append(
+                ActivityItemResponse(
+                    kind="inventory",
+                    title=f"Inventory value increased by {self._format_notification_currency(total_value)}",
+                    subtitle=str(item.get("product_name") or item.get("category") or "Inventory item"),
+                    timestamp=str(item.get("created_at") or ""),
+                    entity_id=str(item.get("id") or ""),
+                    reference_date=str(item.get("purchase_date") or ""),
+                    source_kind="inventory",
+                    source_entity_id=str(item.get("id") or ""),
+                    route=f"/(tabs)/inventory/{item['id']}",
+                )
+            )
+
+        notifications.sort(key=lambda item: item.timestamp, reverse=True)
+        return notifications[:limit]
 
     @staticmethod
     def _top_category(items: list[dict[str, Any]]) -> str | None:
