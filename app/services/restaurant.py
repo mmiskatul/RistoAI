@@ -879,6 +879,7 @@ class RestaurantOperationsService(BaseService):
 
         recent_activity = (
             self._build_recent_activity(
+                current_user=current_user,
                 daily_records=recent_daily_records,
                 expenses=self.serialize_list(expenses),
                 documents=self.serialize_list(documents),
@@ -986,6 +987,7 @@ class RestaurantOperationsService(BaseService):
         scope_id, _, expenses, documents, cash_deposits, inventory_items = await self._load_home_dependencies(current_user)
         return RestaurantHomeRecentActivityResponse(
             items=self._build_recent_activity(
+                current_user=current_user,
                 daily_records=await self._load_recent_activity_daily_records(scope_id),
                 expenses=self.serialize_list(expenses),
                 documents=self.serialize_list(documents),
@@ -4053,16 +4055,17 @@ class RestaurantOperationsService(BaseService):
     def _build_recent_activity(
         self,
         *,
+        current_user: dict,
         daily_records: list[dict],
         expenses: list[dict],
         documents: list[dict],
         cash_deposits: list[dict],
         inventory_items: list[dict],
     ) -> list[ActivityItemResponse]:
+        activity_language = self._resolve_chat_language(current_user)
         items: list[ActivityItemResponse] = []
         for item in daily_records[:3]:
-            business_date = self._safe_parse_date(item.get("business_date"))
-            formatted_business_date = business_date.strftime("%d %b %Y") if business_date else str(item.get("business_date") or "Daily data")
+            formatted_business_date = self._format_activity_date(item.get("business_date"), language=activity_language)
             total_revenue = float(item.get("total_revenue", 0) or 0)
             total_covers = int(item.get("total_covers", 0) or 0)
             average_per_cover = float(item.get("avg_revenue_per_cover", 0) or 0)
@@ -4070,7 +4073,11 @@ class RestaurantOperationsService(BaseService):
                 ActivityItemResponse(
                     kind="daily_record",
                     title=formatted_business_date,
-                    subtitle=f"Revenue EUR {total_revenue:,.2f} | Covers {total_covers} | Avg EUR {average_per_cover:,.2f}",
+                    subtitle=(
+                        f"Ricavi EUR {total_revenue:,.2f} | Coperti {total_covers} | Media EUR {average_per_cover:,.2f}"
+                        if activity_language == "it"
+                        else f"Revenue EUR {total_revenue:,.2f} | Covers {total_covers} | Avg EUR {average_per_cover:,.2f}"
+                    ),
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=item["business_date"],
@@ -4083,8 +4090,13 @@ class RestaurantOperationsService(BaseService):
             items.append(
                 ActivityItemResponse(
                     kind="invoice",
-                    title="Invoice uploaded",
-                    subtitle=str(item.get("counterparty_name") or item.get("supplier_name") or item.get("source_file_name") or "Document"),
+                    title="Fattura caricata" if activity_language == "it" else "Invoice uploaded",
+                    subtitle=str(
+                        item.get("counterparty_name")
+                        or item.get("supplier_name")
+                        or item.get("source_file_name")
+                        or ("Documento" if activity_language == "it" else "Document")
+                    ),
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=str(item.get("invoice_date") or ""),
@@ -4106,11 +4118,19 @@ class RestaurantOperationsService(BaseService):
             reference_date = expense_date.isoformat() if expense_date else ""
             source_kind = str(item.get("source_kind") or "").lower()
             expense_route = f"/(tabs)/home/expense-details?id={item['id']}"
-            expense_title = {
-                "manual_entry": "Daily data expense",
-                "document": "Document expense",
-                "inventory": "Inventory expense",
-            }.get(source_kind, "Expense added")
+            expense_title = (
+                {
+                    "manual_entry": "Spesa dati giornalieri",
+                    "document": "Spesa documento",
+                    "inventory": "Spesa inventario",
+                }.get(source_kind, "Spesa aggiunta")
+                if activity_language == "it"
+                else {
+                    "manual_entry": "Daily data expense",
+                    "document": "Document expense",
+                    "inventory": "Inventory expense",
+                }.get(source_kind, "Expense added")
+            )
 
             items.append(
                 ActivityItemResponse(
@@ -4135,21 +4155,34 @@ class RestaurantOperationsService(BaseService):
         )
         for item in serialized_cash_deposits[:3]:
             transaction_type = str(item.get("type") or "bank_deposit")
-            cash_title = {
-                "bank_deposit": "Bank deposit logged",
-                "cash_deposit": "Cash deposit logged",
-                "pos_payment": "POS payment recorded",
-                "cash_in": "Cash in recorded",
-                "bank_transfer_payment": "Bank transfer recorded",
-                "cash_withdrawal": "Cash withdrawal recorded",
-                "cash_out": "Cash out recorded",
-                "cash_expense": "Cash expense recorded",
-            }.get(transaction_type, "Cash transaction recorded")
+            cash_title = (
+                {
+                    "bank_deposit": "Deposito bancario registrato",
+                    "cash_deposit": "Deposito cassa registrato",
+                    "pos_payment": "Pagamento POS registrato",
+                    "cash_in": "Entrata cassa registrata",
+                    "bank_transfer_payment": "Bonifico registrato",
+                    "cash_withdrawal": "Prelievo cassa registrato",
+                    "cash_out": "Uscita cassa registrata",
+                    "cash_expense": "Spesa in contanti registrata",
+                }.get(transaction_type, "Movimento di cassa registrato")
+                if activity_language == "it"
+                else {
+                    "bank_deposit": "Bank deposit logged",
+                    "cash_deposit": "Cash deposit logged",
+                    "pos_payment": "POS payment recorded",
+                    "cash_in": "Cash in recorded",
+                    "bank_transfer_payment": "Bank transfer recorded",
+                    "cash_withdrawal": "Cash withdrawal recorded",
+                    "cash_out": "Cash out recorded",
+                    "cash_expense": "Cash expense recorded",
+                }.get(transaction_type, "Cash transaction recorded")
+            )
             items.append(
                 ActivityItemResponse(
                     kind="cash",
                     title=cash_title,
-                    subtitle=item.get("bank_account") or item.get("deposit_type", ""),
+                    subtitle=str(item.get("bank_account") or item.get("deposit_type") or ""),
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=str(self._safe_parse_date(item.get("deposit_date")) or ""),
@@ -4162,8 +4195,8 @@ class RestaurantOperationsService(BaseService):
             items.append(
                 ActivityItemResponse(
                     kind="inventory",
-                    title="Inventory item added",
-                    subtitle=str(item.get("product_name") or item.get("category") or "Inventory"),
+                    title="Articolo inventario aggiunto" if activity_language == "it" else "Inventory item added",
+                    subtitle=str(item.get("product_name") or item.get("category") or ("Inventario" if activity_language == "it" else "Inventory")),
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=str(item.get("purchase_date") or ""),
@@ -5214,6 +5247,18 @@ class RestaurantOperationsService(BaseService):
         if language == "it":
             return "I ricavi stanno crescendo rispetto alla scorsa settimana."
         return "Your revenue is trending upward compared to last week."
+
+    @staticmethod
+    def _format_activity_date(value: Any, *, language: str) -> str:
+        parsed = RestaurantOperationsService._safe_parse_date(value)
+        if not parsed:
+            return "Dati giornalieri" if language == "it" else "Daily data"
+        month_names = (
+            ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
+            if language == "it"
+            else ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        )
+        return f"{parsed.day:02d} {month_names[parsed.month - 1]} {parsed.year}"
 
     def _to_chat_message_response(self, item: dict) -> ChatMessageResponse:
         serialized = self.serialize(item)

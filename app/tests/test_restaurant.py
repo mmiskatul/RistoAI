@@ -1327,6 +1327,25 @@ def test_home_recent_activity_includes_all_core_operations(client, app):
     kinds = {item["kind"] for item in recent_activity_payload["items"]}
     assert {"daily_record", "invoice", "expense", "cash", "inventory"}.issubset(kinds)
 
+    language_update_response = client.put(
+        "/api/v1/auth/preferences/language",
+        headers=headers,
+        json={"preferred_language": "it"},
+    )
+    assert language_update_response.status_code == 200
+
+    italian_recent_activity_response = client.get("/api/v1/restaurant/home/recent-activity", headers=headers)
+    assert italian_recent_activity_response.status_code == 200
+    italian_items = italian_recent_activity_response.json()["items"]
+    assert italian_items
+    assert any(
+        any(
+            phrase in f"{item.get('title', '')} {item.get('subtitle', '')}".lower()
+            for phrase in ("ricavi", "fattura caricata", "spesa", "deposito", "articolo inventario")
+        )
+        for item in italian_items
+    )
+
 
 def test_notification_feed_includes_business_change_messages(client, app):
     seed_subscription_plan(app)
