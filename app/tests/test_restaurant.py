@@ -1877,7 +1877,9 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert italian_chat_response.status_code == 201
     italian_messages = italian_chat_response.json()["messages"]
     assert italian_messages[-1]["role"] == "assistant"
-    assert "ricavi attuali" in italian_messages[-1]["message"].lower()
+    italian_reply = italian_messages[-1]["message"].lower()
+    assert "profitto" in italian_reply
+    assert "estimated profit" not in italian_reply
 
     edited_chat_response = client.patch(
         f"/api/v1/restaurant/chat/messages/{user_message['id']}",
@@ -1896,7 +1898,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     chat_attachment_response = client.post(
         "/api/v1/restaurant/chat/messages/attachments",
         headers=headers,
-        data={"message": "Please review this supplier file", "attachment_source": "docs"},
+        data={"message": "Please review this supplier file", "attachment_source": "docs", "language": "it"},
         files={"file": ("suppliers.csv", b"supplier,amount\nBakery Goods Co,425", "text/csv")},
     )
     assert chat_attachment_response.status_code == 201
@@ -1905,6 +1907,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert attachment_messages[-1]["attachment_name"] == "suppliers.csv"
     assert attachment_messages[-1]["attachment_source"] == "docs"
     assert attachment_messages[-1]["role"] == "user"
+    assert "anteprima" in (attachment_messages[-1].get("attachment_summary") or "").lower()
     assert chat_attachment_payload["messages"][-1]["role"] == "assistant"
 
 

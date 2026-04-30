@@ -156,6 +156,12 @@ class RestaurantOperationsService(BaseService):
         candidate = str(requested_language or current_user.get("preferred_language") or "en").strip().lower()
         return "it" if candidate.startswith("it") else "en"
 
+    @staticmethod
+    def _build_chat_welcome_message(language: str) -> str:
+        if language == "it":
+            return "Ciao! Posso aiutarti ad analizzare i dati del tuo ristorante. Cosa vuoi sapere?"
+        return "Hello! I can help you analyze your restaurant data. What would you like to know?"
+
     def __init__(
         self,
         user_repository: UserRepository,
@@ -2441,6 +2447,7 @@ class RestaurantOperationsService(BaseService):
 
     async def list_chat_messages(self, current_user: dict) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
+        chat_language = self._resolve_chat_language(current_user)
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
         messages = [self._to_chat_message_response(item) for item in items]
         if not messages:
@@ -2450,7 +2457,7 @@ class RestaurantOperationsService(BaseService):
                     role="assistant",
                     sender_label="Risto AI",
                     variant="assistant",
-                    message="Hello! I can help you analyze your restaurant data. What would you like to know?",
+                    message=self._build_chat_welcome_message(chat_language),
                     created_at=datetime.now(UTC).isoformat(),
                 )
             ]
@@ -2524,6 +2531,7 @@ class RestaurantOperationsService(BaseService):
     ) -> ChatConversationResponse:
         if not file_bytes:
             raise ValidationException("Uploaded chat attachment is empty")
+        chat_language = self._resolve_chat_language(current_user, payload.language)
 
         final_attachment_source = payload.attachment_source
         if raw_file and content_type.startswith("image/") and self.image_storage_service:
@@ -2543,6 +2551,7 @@ class RestaurantOperationsService(BaseService):
             file_name=file_name,
             content_type=content_type,
             file_bytes=file_bytes,
+            language=chat_language,
         )
         return await self._create_chat_conversation(
             current_user=current_user,
@@ -2584,7 +2593,7 @@ class RestaurantOperationsService(BaseService):
             recent_messages=[self.serialize(item) for item in recent],
             attachment_context=attachment_context,
         )
-        insight_message = self._build_chat_insight_message(metrics_context)
+        insight_message = self._build_chat_insight_message(metrics_context, language=chat_language)
         await asyncio.gather(
             self.chat_repository.create(
                 {
@@ -5082,14 +5091,18 @@ class RestaurantOperationsService(BaseService):
             history=[InventoryHistoryItemResponse(**entry) for entry in serialized.get("history", [])],
         )
 
-    def _build_chat_insight_message(self, metrics_context: dict[str, Any]) -> str:
+    def _build_chat_insight_message(self, metrics_context: dict[str, Any], *, language: str = "en") -> str:
         revenue_total = float(metrics_context.get("revenue_total", 0))
         expense_total = float(metrics_context.get("expenses_total", 0))
         if revenue_total > 0 and expense_total >= 0:
             margin = max(revenue_total - expense_total, 0)
             if margin > 0:
                 lift_percent = min(25, max(5, int(round((margin / max(revenue_total, 1)) * 15))))
+                if language == "it":
+                    return f"I ricavi della cena sono aumentati del {lift_percent}% questa settimana."
                 return f"Your dinner revenue increased by {lift_percent}% this week."
+        if language == "it":
+            return "I ricavi stanno crescendo rispetto alla scorsa settimana."
         return "Your revenue is trending upward compared to last week."
 
     def _to_chat_message_response(self, item: dict) -> ChatMessageResponse:

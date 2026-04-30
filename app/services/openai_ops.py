@@ -29,6 +29,50 @@ class OpenAIOperationsService:
     def enabled(self) -> bool:
         return bool(self.settings.openai_api_key) and not self.settings.testing
 
+    @staticmethod
+    def _resolve_language(language: str | None) -> str:
+        candidate = str(language or "").strip().lower()
+        return "it" if candidate.startswith("it") else "en"
+
+    @staticmethod
+    def _build_attachment_note(*, summary: str | None, language: str) -> str:
+        if not summary:
+            return ""
+        if language == "it":
+            return f" Documento allegato: {summary}"
+        return f" Attached document: {summary}"
+
+    def _build_chat_fallback_reply(
+        self,
+        *,
+        prompt: str,
+        language: str,
+        metrics_context: dict[str, Any],
+        attachment_context: dict[str, Any] | None = None,
+    ) -> str:
+        revenue = float(metrics_context.get("revenue_total", 0.0) or 0.0)
+        expenses = float(metrics_context.get("expenses_total", 0.0) or 0.0)
+        profit = revenue - expenses
+        attachment_note = self._build_attachment_note(
+            summary=(attachment_context or {}).get("summary"),
+            language=language,
+        )
+        if language == "it":
+            return (
+                f"Panoramica attuale: ricavi EUR {revenue:,.2f}, spese EUR {expenses:,.2f}, "
+                f"profitto stimato EUR {profit:,.2f}. "
+                f"In base alla tua richiesta \"{prompt}\", ti consiglio di controllare la voce di costo piu alta, "
+                f"verificare i giorni con ricavi piu bassi e riconciliare i movimenti di cassa."
+                f"{attachment_note}"
+            )
+        return (
+            f"Current snapshot: revenue EUR {revenue:,.2f}, expenses EUR {expenses:,.2f}, "
+            f"estimated profit EUR {profit:,.2f}. "
+            f"Based on your request \"{prompt}\", focus on the highest cost area, review the lowest-revenue days, "
+            f"and reconcile cash movements."
+            f"{attachment_note}"
+        )
+
     async def extract_invoice(
         self,
         *,
@@ -331,21 +375,13 @@ class OpenAIOperationsService:
         recent_messages: Sequence[dict[str, Any]],
         attachment_context: dict[str, Any] | None = None,
     ) -> str:
-        resolved_language = "it" if str(language or "").lower().startswith("it") else "en"
+        resolved_language = self._resolve_language(language)
         if not self.enabled:
-            revenue = metrics_context.get("revenue_total", 0.0)
-            expenses = metrics_context.get("expenses_total", 0.0)
-            attachment_note = f" Attached file summary: {attachment_context.get('summary')}" if attachment_context else ""
-            if resolved_language == "it":
-                return (
-                    f"I ricavi attuali sono EUR {revenue:,.2f} e le spese sono EUR {expenses:,.2f}. "
-                    f"Concentrati sulla spesa dei fornitori, sulla riconciliazione giornaliera della cassa e sul giorno feriale piu debole."
-                    f"{attachment_note}"
-                )
-            return (
-                f"Current revenue is EUR {revenue:,.2f} and expenses are EUR {expenses:,.2f}. "
-                f"Focus on supplier spend, daily cash reconciliation, and the weakest weekday trend."
-                f"{attachment_note}"
+            return self._build_chat_fallback_reply(
+                prompt=prompt,
+                language=resolved_language,
+                metrics_context=metrics_context,
+                attachment_context=attachment_context,
             )
 
         transcript = "\n".join(f"{item['role']}: {item['message']}" for item in recent_messages[-6:])
@@ -383,22 +419,22 @@ class OpenAIOperationsService:
         }
         try:
             response_payload = await self._responses_create(payload)
-            return response_payload.get("output_text") or "I could not generate a response."
+            output_text = str(response_payload.get("output_text") or "").strip()
+            if output_text:
+                return output_text
+            return self._build_chat_fallback_reply(
+                prompt=prompt,
+                language=resolved_language,
+                metrics_context=metrics_context,
+                attachment_context=attachment_context,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("OpenAI chat generation failed", exc_info=exc)
-            revenue = metrics_context.get("revenue_total", 0.0)
-            expenses = metrics_context.get("expenses_total", 0.0)
-            attachment_note = f" Attached file summary: {attachment_context.get('summary')}" if attachment_context else ""
-            if resolved_language == "it":
-                return (
-                    f"I ricavi attuali sono EUR {revenue:,.2f} e le spese sono EUR {expenses:,.2f}. "
-                    f"Concentrati sulla spesa dei fornitori, sulla riconciliazione giornaliera della cassa e sul giorno feriale piu debole."
-                    f"{attachment_note}"
-                )
-            return (
-                f"Current revenue is EUR {revenue:,.2f} and expenses are EUR {expenses:,.2f}. "
-                f"Focus on supplier spend, daily cash reconciliation, and the weakest weekday trend."
-                f"{attachment_note}"
+            return self._build_chat_fallback_reply(
+                prompt=prompt,
+                language=resolved_language,
+                metrics_context=metrics_context,
+                attachment_context=attachment_context,
             )
 
     async def summarize_chat_attachment(
@@ -407,15 +443,26 @@ class OpenAIOperationsService:
         file_name: str,
         content_type: str,
         file_bytes: bytes,
+        language: str = "en",
     ) -> dict[str, str]:
-        fallback = self._fallback_attachment_summary(file_name=file_name, content_type=content_type, file_bytes=file_bytes)
+        resolved_language = self._resolve_language(language)
+        fallback = self._fallback_attachment_summary(
+            file_name=file_name,
+            content_type=content_type,
+            file_bytes=file_bytes,
+            language=resolved_language,
+        )
         if not self.enabled:
             return fallback
 
         user_content: list[dict[str, Any]] = [
             {
                 "type": "input_text",
-                "text": f"Filename: {file_name}. Content type: {content_type}. Summarize this attachment for restaurant operations chat.",
+                "text": (
+                    f"Filename: {file_name}. Content type: {content_type}. "
+                    f"Summarize this attachment for restaurant operations chat in "
+                    f"{'Italian' if resolved_language == 'it' else 'English'}."
+                ),
             }
         ]
         if content_type.startswith("image/"):
@@ -438,6 +485,7 @@ class OpenAIOperationsService:
                             "text": (
                                 "Return only valid JSON with keys title and summary. "
                                 "Summarize the attached restaurant-related document briefly and practically. "
+                                f"Return the title and summary in {'Italian' if resolved_language == 'it' else 'English'}. "
                                 "Do not invent missing facts."
                             ),
                         }
@@ -609,21 +657,41 @@ class OpenAIOperationsService:
         return parsed if isinstance(parsed, dict) else None
 
     @staticmethod
-    def _fallback_attachment_summary(*, file_name: str, content_type: str, file_bytes: bytes) -> dict[str, str]:
+    def _fallback_attachment_summary(
+        *,
+        file_name: str,
+        content_type: str,
+        file_bytes: bytes,
+        language: str = "en",
+    ) -> dict[str, str]:
         stem = file_name.rsplit('.', 1)[0].replace('_', ' ').replace('-', ' ').title() or 'Uploaded File'
         if content_type in {'text/csv', 'application/csv'}:
             preview = file_bytes.decode('utf-8', errors='replace').strip().splitlines()[:3]
             snippet = ' | '.join(line[:80] for line in preview if line)
-            summary = f'CSV attachment uploaded. Preview: {snippet}' if snippet else 'CSV attachment uploaded for review.'
+            if language == "it":
+                summary = (
+                    f'Allegato CSV caricato. Anteprima: {snippet}'
+                    if snippet else
+                    'Allegato CSV caricato per la revisione.'
+                )
+            else:
+                summary = f'CSV attachment uploaded. Preview: {snippet}' if snippet else 'CSV attachment uploaded for review.'
         elif content_type == 'text/plain':
             preview = file_bytes.decode('utf-8', errors='replace').strip()[:160]
-            summary = f'Text attachment uploaded. Preview: {preview}' if preview else 'Text attachment uploaded for review.'
+            if language == "it":
+                summary = (
+                    f'Allegato di testo caricato. Anteprima: {preview}'
+                    if preview else
+                    'Allegato di testo caricato per la revisione.'
+                )
+            else:
+                summary = f'Text attachment uploaded. Preview: {preview}' if preview else 'Text attachment uploaded for review.'
         elif content_type == 'application/pdf':
-            summary = 'PDF document uploaded for restaurant review.'
+            summary = 'Documento PDF caricato per la revisione del ristorante.' if language == "it" else 'PDF document uploaded for restaurant review.'
         elif content_type.startswith('image/'):
-            summary = 'Image attachment uploaded for restaurant review.'
+            summary = 'Immagine caricata per la revisione del ristorante.' if language == "it" else 'Image attachment uploaded for restaurant review.'
         else:
-            summary = 'Document attachment uploaded for restaurant review.'
+            summary = 'Documento caricato per la revisione del ristorante.' if language == "it" else 'Document attachment uploaded for restaurant review.'
         return {'title': stem, 'summary': summary}
 
     @staticmethod
