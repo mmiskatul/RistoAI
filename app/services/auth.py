@@ -211,12 +211,13 @@ class AuthService(BaseService):
             code=code,
             purpose=purpose,
         )
+        email_provider_active = self.settings.resend_enabled or self.settings.smtp_enabled
         return AuthChallengeResponse(
             message=f"Verification code sent for {purpose.replace('_', ' ')}",
             purpose=purpose,
             email=user['email'],
             expires_in_seconds=self.CODE_EXPIRY_SECONDS,
-            debug_verification_code=code if self.settings.debug else None,
+            debug_verification_code=code if self.settings.debug and not email_provider_active else None,
         )
 
     async def _verify_code(self, *, email: str, code: str, purpose: str) -> None:

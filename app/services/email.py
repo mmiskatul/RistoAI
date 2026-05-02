@@ -5,6 +5,8 @@ import logging
 import smtplib
 from email.message import EmailMessage
 
+import httpx
+
 from app.config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -22,12 +24,38 @@ class EmailService:
             "This code expires in 10 minutes.\n"
             "If you did not request this, you can ignore this email.\n"
         )
-        if not self.settings.smtp_enabled:
-            logger.info("SMTP disabled. Verification code for %s (%s): %s", email, purpose, code)
+        html_body = (
+            f"<p>Hello {full_name},</p>"
+            f"<p>Your RistoAI {purpose.replace('_', ' ')} code is: "
+            f"<strong style=\"font-size:20px;letter-spacing:2px;\">{code}</strong></p>"
+            "<p>This code expires in 10 minutes.</p>"
+            "<p>If you did not request this, you can ignore this email.</p>"
+        )
+        if self.settings.resend_enabled:
+            await self._send_email_via_resend(email, subject, body, html_body)
             return
-        await asyncio.to_thread(self._send_email, email, subject, body)
+        if self.settings.smtp_enabled:
+            await asyncio.to_thread(self._send_email_via_smtp, email, subject, body)
+            return
+        logger.info("Email provider disabled. Verification code for %s (%s): %s", email, purpose, code)
 
-    def _send_email(self, to_email: str, subject: str, body: str) -> None:
+    async def _send_email_via_resend(self, to_email: str, subject: str, text_body: str, html_body: str) -> None:
+        payload = {
+            "from": f"{self.settings.resend_from_name} <{self.settings.resend_from_email}>",
+            "to": [to_email],
+            "subject": subject,
+            "text": text_body,
+            "html": html_body,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.settings.resend_api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(base_url=self.settings.resend_base_url, timeout=30.0) as client:
+            response = await client.post("/emails", headers=headers, json=payload)
+            response.raise_for_status()
+
+    def _send_email_via_smtp(self, to_email: str, subject: str, body: str) -> None:
         message = EmailMessage()
         message["From"] = f"{self.settings.smtp_from_name} <{self.settings.smtp_from_email}>"
         message["To"] = to_email

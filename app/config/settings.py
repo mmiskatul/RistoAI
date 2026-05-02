@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     smtp_from_name: str = Field(default="RistoAI", alias="SMTP_FROM_NAME")
     smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
     smtp_use_ssl: bool = Field(default=False, alias="SMTP_USE_SSL")
+    resend_enabled: bool = Field(default=False, alias="RESEND_ENABLED")
+    resend_api_key: str | None = Field(default=None, alias="RESEND_API_KEY")
+    resend_from_email: EmailStr = Field(default="onboarding@resend.dev", alias="RESEND_FROM_EMAIL")
+    resend_from_name: str = Field(default="RistoAI", alias="RESEND_FROM_NAME")
+    resend_base_url: str = Field(default="https://api.resend.com", alias="RESEND_BASE_URL")
 
     super_admin_email: EmailStr | None = Field(default=None, alias="SUPER_ADMIN_EMAIL")
     super_admin_password: str | None = Field(default=None, alias="SUPER_ADMIN_PASSWORD")
@@ -106,6 +111,8 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"SMTP is enabled but required settings are missing: {', '.join(missing_fields)}",
                 )
+        if self.resend_enabled and not self.resend_api_key:
+            raise ValueError("RESEND is enabled but RESEND_API_KEY is missing")
         return self
 
     @model_validator(mode="after")
