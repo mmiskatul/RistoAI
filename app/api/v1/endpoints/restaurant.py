@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import date
+import logging
 from mimetypes import guess_type
+from typing import Awaitable, Callable, TypeVar
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Response, UploadFile, status
 
-from app.core.exceptions import ValidationException
+from app.core.exceptions import AppException, ValidationException
 from app.dependencies.auth import get_current_user, get_current_user_allow_inactive
 from app.dependencies.services import get_restaurant_operations_service, get_support_service
 from app.schemas.restaurant import (
@@ -78,6 +80,21 @@ from app.services.restaurant import RestaurantOperationsService
 from app.services.support import SupportService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+T = TypeVar('T')
+
+
+async def _run_endpoint(endpoint_name: str, action: Callable[[], Awaitable[T]]) -> T:
+    try:
+        return await action()
+    except AppException:
+        raise
+    except OSError as exc:
+        logger.exception('Restaurant endpoint failed to read request payload: %s', endpoint_name, exc_info=exc)
+        raise ValidationException('Unable to read request payload')
+    except Exception as exc:
+        logger.exception('Restaurant endpoint failed: %s', endpoint_name, exc_info=exc)
+        raise
 
 
 @router.get('/home', response_model=RestaurantHomeResponse, tags=['Restaurant Home'], summary='Home Overview', description='Restaurant dashboard home data for the mobile app home screen.')
@@ -163,7 +180,7 @@ async def get_notification_feed(
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> RestaurantNotificationFeedResponse:
-    return await service.get_notification_feed(current_user)
+    return await _run_endpoint('get_notification_feed', lambda: service.get_notification_feed(current_user))
 
 
 @router.get('/home/vat-balance', response_model=RestaurantHomeVatBalanceResponse, tags=['Restaurant Home'], summary='Home VAT Balance Section', description='Restaurant dashboard estimated VAT balance card for the mobile home screen.')
@@ -253,17 +270,23 @@ async def list_documents(
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> DocumentListResponse:
-    return await service.list_documents(current_user, page=page, page_size=page_size, status=status_filter, search=search)
+    return await _run_endpoint(
+        'list_documents',
+        lambda: service.list_documents(current_user, page=page, page_size=page_size, status=status_filter, search=search),
+    )
 
 
 @router.get('/documents/{document_id}', response_model=DocumentDetailResponse, tags=['Restaurant Invoice AI'], summary='Invoice Detail', description='Returns one saved invoice record.')
 async def get_document_detail(document_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DocumentDetailResponse:
-    return await service.get_document_detail(current_user, document_id)
+    return await _run_endpoint('get_document_detail', lambda: service.get_document_detail(current_user, document_id))
 
 
 @router.get('/documents/{document_id}/download', tags=['Restaurant Invoice AI'], summary='Download Invoice PDF', description='Generates a downloadable A4 invoice PDF from the saved document data.')
 async def download_document(document_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
-    filename, content = await service.download_document_file(current_user, document_id)
+    filename, content = await _run_endpoint(
+        'download_document',
+        lambda: service.download_document_file(current_user, document_id),
+    )
     return Response(content=content, media_type='application/pdf', headers={'Content-Disposition': f'attachment; filename="{filename}"'})
 
 
@@ -274,18 +297,21 @@ async def download_document_image(
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> Response:
-    filename, media_type, content = await service.download_document_image(current_user, document_id, image_format=format)
+    filename, media_type, content = await _run_endpoint(
+        'download_document_image',
+        lambda: service.download_document_image(current_user, document_id, image_format=format),
+    )
     return Response(content=content, media_type=media_type, headers={'Content-Disposition': f'attachment; filename="{filename}"'})
 
 
 @router.patch('/documents/{document_id}', response_model=DocumentDetailResponse, tags=['Restaurant Invoice AI'], summary='Update Invoice', description='Updates an existing saved invoice record.')
 async def update_document(document_id: str, payload: DocumentConfirmRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DocumentDetailResponse:
-    return await service.update_document(current_user, document_id, payload)
+    return await _run_endpoint('update_document', lambda: service.update_document(current_user, document_id, payload))
 
 
 @router.delete('/documents/{document_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Invoice AI'], summary='Delete Invoice', description='Deletes a saved invoice record.')
 async def delete_document(document_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
-    await service.delete_document(current_user, document_id)
+    await _run_endpoint('delete_document', lambda: service.delete_document(current_user, document_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -452,7 +478,10 @@ async def list_inventory(
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> InventoryListResponse:
-    return await service.list_inventory(current_user, page=page, page_size=page_size, search=search, status=status_filter, category=category)
+    return await _run_endpoint(
+        'list_inventory',
+        lambda: service.list_inventory(current_user, page=page, page_size=page_size, search=search, status=status_filter, category=category),
+    )
 
 
 @router.get('/inventory/value', response_model=InventoryValueResponse, tags=['Restaurant Inventory'], summary='Inventory Value', description='Returns only the total inventory value for the inventory summary card.')
@@ -465,17 +494,17 @@ async def get_inventory_value(
 
 @router.get('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Inventory Detail', description='Returns the inventory detail screen payload for one product.', include_in_schema=False)
 async def get_inventory_item(item_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryDetailResponse:
-    return await service.get_inventory_item(current_user, item_id)
+    return await _run_endpoint('get_inventory_item', lambda: service.get_inventory_item(current_user, item_id))
 
 
 @router.patch('/inventory/{item_id}', response_model=InventoryDetailResponse, tags=['Restaurant Inventory'], summary='Update Inventory Item', description='Updates inventory item fields such as supplier, threshold, or stock metadata.', include_in_schema=False)
 async def update_inventory_item(item_id: str, payload: InventoryUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryDetailResponse:
-    return await service.update_inventory_item(current_user, item_id, payload)
+    return await _run_endpoint('update_inventory_item', lambda: service.update_inventory_item(current_user, item_id, payload))
 
 
 @router.delete('/inventory/{item_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Inventory'], summary='Delete Inventory Item', description='Deletes one inventory item.', include_in_schema=False)
 async def delete_inventory_item(item_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
-    await service.delete_inventory_item(current_user, item_id)
+    await _run_endpoint('delete_inventory_item', lambda: service.delete_inventory_item(current_user, item_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -492,7 +521,10 @@ async def get_analytics(
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> AnalyticsOverviewResponse:
-    return await service.get_analytics(current_user, period=period, from_date=from_date, to_date=to_date)
+    return await _run_endpoint(
+        'get_analytics',
+        lambda: service.get_analytics(current_user, period=period, from_date=from_date, to_date=to_date),
+    )
 
 
 @router.get('/analytics/business-insight', response_model=AnalyticsInsightBannerResponse, tags=['Restaurant Analytics'], summary='Analytics Business Insight', description='Returns the top analytics insight banner generated from restaurant data.')
@@ -590,17 +622,17 @@ async def get_analytics_supplier_alerts(
 
 @router.get('/chat/messages', response_model=ChatConversationResponse, tags=['Restaurant Chat'], summary='List Chat Messages', description='Returns the current restaurant AI chat conversation.')
 async def list_chat_messages(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ChatConversationResponse:
-    return await service.list_chat_messages(current_user)
+    return await _run_endpoint('list_chat_messages', lambda: service.list_chat_messages(current_user))
 
 
 @router.post('/chat/messages', response_model=ChatConversationResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Chat'], summary='Create Chat Message', description='Sends a user message and returns the updated AI chat conversation.')
 async def create_chat_message(payload: ChatMessageCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ChatConversationResponse:
-    return await service.create_chat_message(current_user, payload)
+    return await _run_endpoint('create_chat_message', lambda: service.create_chat_message(current_user, payload))
 
 
 @router.patch('/chat/messages/{message_id}', response_model=ChatConversationResponse, tags=['Restaurant Chat'], summary='Edit Chat Message', description='Updates a user message and stores a regenerated AI response linked to the edited message.')
 async def update_chat_message(message_id: str, payload: ChatMessageUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ChatConversationResponse:
-    return await service.update_chat_message(current_user, message_id, payload)
+    return await _run_endpoint('update_chat_message', lambda: service.update_chat_message(current_user, message_id, payload))
 
 
 @router.post('/chat/messages/attachments', response_model=ChatConversationResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Chat'], summary='Create Chat Message With Attachment', description='Sends a user message with a shared document and returns the updated personalized AI chat conversation.')
@@ -613,25 +645,28 @@ async def create_chat_message_with_attachment(
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> ChatConversationResponse:
-    content_type = _resolve_supported_upload_content_type(file, allow_text=True)
-    file_bytes = await file.read()
-    return await service.create_chat_message_with_attachment(
-        current_user,
-        payload=ChatMessageCreateRequest(
-            message=message,
-            attachment_source=attachment_source,
-            language=language or accept_language,
-        ),
-        file_name=file.filename or 'chat-attachment',
-        content_type=content_type,
-        file_bytes=file_bytes,
-        raw_file=file,
-    )
+    async def _execute() -> ChatConversationResponse:
+        content_type = _resolve_supported_upload_content_type(file, allow_text=True)
+        file_bytes = await file.read()
+        return await service.create_chat_message_with_attachment(
+            current_user,
+            payload=ChatMessageCreateRequest(
+                message=message,
+                attachment_source=attachment_source,
+                language=language or accept_language,
+            ),
+            file_name=file.filename or 'chat-attachment',
+            content_type=content_type,
+            file_bytes=file_bytes,
+            raw_file=file,
+        )
+
+    return await _run_endpoint('create_chat_message_with_attachment', _execute)
 
 
 @router.get('/settings/profile', response_model=RestaurantProfileResponse, tags=['Restaurant Settings'], summary='Profile Detail', description='Returns the restaurant profile and settings data.')
 async def get_profile(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RestaurantProfileResponse:
-    return await service.get_profile(current_user)
+    return await _run_endpoint('get_profile', lambda: service.get_profile(current_user))
 
 
 @router.put('/settings/profile', response_model=RestaurantProfileResponse, tags=['Restaurant Settings'], summary='Update Profile', description='Updates restaurant profile and settings fields.')
@@ -666,12 +701,15 @@ async def update_profile(
         improvement_focus=improvement_focus,
         profile_image_url=profile_image_url,
     )
-    return await service.update_profile_with_image(current_user, payload, profile_image=profile_image)
+    return await _run_endpoint(
+        'update_profile',
+        lambda: service.update_profile_with_image(current_user, payload, profile_image=profile_image),
+    )
 
 
 @router.delete('/settings/profile/image', response_model=RestaurantProfileResponse, tags=['Restaurant Settings'], summary='Remove Profile Image', description='Removes the saved restaurant profile image.')
 async def remove_profile_image(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RestaurantProfileResponse:
-    return await service.remove_profile_image(current_user)
+    return await _run_endpoint('remove_profile_image', lambda: service.remove_profile_image(current_user))
 
 
 @router.get('/settings/subscription', response_model=RestaurantSettingsSubscriptionResponse, tags=['Restaurant Settings'], summary='Subscription Settings', description='Returns the current restaurant subscription state and management endpoints.')
