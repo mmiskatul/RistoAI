@@ -2747,6 +2747,16 @@ class RestaurantOperationsService(BaseService):
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
         return await self.get_profile(user)
 
+    async def remove_profile_image(self, current_user: dict) -> RestaurantProfileResponse:
+        user = await self.user_repository.update(
+            current_user["_id"],
+            {
+                "profile_image_url": None,
+                "avatar_url": None,
+            },
+        )
+        return await self.get_profile(user)
+
     async def get_settings_subscription(self, current_user: dict) -> RestaurantSettingsSubscriptionResponse:
         serialized = self.serialize(current_user)
         return RestaurantSettingsSubscriptionResponse(

@@ -2004,6 +2004,15 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert updated_user["profile_image_url"].startswith("https://")
     assert "/restaurant/profile/" in updated_user["profile_image_url"]
 
+    remove_profile_image_response = client.delete("/api/v1/restaurant/settings/profile/image", headers=headers)
+    assert remove_profile_image_response.status_code == 200
+    removed_profile_payload = remove_profile_image_response.json()
+    assert removed_profile_payload["profile_image_url"] is None
+
+    removed_user = asyncio.run(db["users"].find_one({"email": "alex@example.com"}))
+    assert removed_user["profile_image_url"] is None
+    assert removed_user["avatar_url"] is None
+
     subscription_settings_response = client.get("/api/v1/restaurant/settings/subscription", headers=headers)
     assert subscription_settings_response.status_code == 200
     subscription_settings_payload = subscription_settings_response.json()

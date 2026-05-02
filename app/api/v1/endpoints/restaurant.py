@@ -669,6 +669,11 @@ async def update_profile(
     return await service.update_profile_with_image(current_user, payload, profile_image=profile_image)
 
 
+@router.delete('/settings/profile/image', response_model=RestaurantProfileResponse, tags=['Restaurant Settings'], summary='Remove Profile Image', description='Removes the saved restaurant profile image.')
+async def remove_profile_image(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RestaurantProfileResponse:
+    return await service.remove_profile_image(current_user)
+
+
 @router.get('/settings/subscription', response_model=RestaurantSettingsSubscriptionResponse, tags=['Restaurant Settings'], summary='Subscription Settings', description='Returns the current restaurant subscription state and management endpoints.')
 async def get_settings_subscription(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RestaurantSettingsSubscriptionResponse:
     return await service.get_settings_subscription(current_user)
