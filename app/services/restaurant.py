@@ -1161,9 +1161,9 @@ class RestaurantOperationsService(BaseService):
         if not cash_deposit_total and filtered_cash_deposits:
             cash_deposit_total = round(sum(float(item.get("amount", 0)) for item in filtered_cash_deposits), 2)
         return [
-            CashManagementItemResponse(label="Total Collection", amount=total_collection, subtitle="Cash available plus bank-side collections"),
+            CashManagementItemResponse(label="Total Collection", amount=total_collection, subtitle="Cash and POS collections"),
             CashManagementItemResponse(label="Cash Available", amount=cash_available, subtitle="Cash remaining after expenses and withdrawals"),
-            CashManagementItemResponse(label="Cash Deposit", amount=cash_deposit_total, subtitle="POS, invoice bank payments, and deposits"),
+            CashManagementItemResponse(label="Cash Deposit", amount=cash_deposit_total, subtitle="Bank transfers and recorded deposits"),
         ]
 
     async def get_vat_overview(self, current_user: dict) -> VatOverviewResponse:
@@ -1811,7 +1811,7 @@ class RestaurantOperationsService(BaseService):
             dinner_covers = 0
             record_payload = {
                 **data,
-                "cash_collected_total": data["cash_in"],
+                "cash_collected_total": round(data["cash_in"] + data["pos_payments"], 2),
                 "cash_available": max(data["cash_in"] - data["cash_out"] - data["cash_withdrawals"] - data["expenses_in_cash"], 0),
                 "closing_cash": max(data["cash_in"] - data["cash_out"], 0),
                 "opening_cash": 0,
@@ -1827,7 +1827,7 @@ class RestaurantOperationsService(BaseService):
             dinner_covers = data["dinner_covers"]
             record_payload = {
                 **data,
-                "cash_collected_total": data["cash_payments"],
+                "cash_collected_total": round(data["cash_payments"] + data["pos_payments"], 2),
                 "cash_available": round(data["closing_cash"], 2),
                 "cash_withdrawals": 0.0,
                 "cash_in": data["cash_payments"],
@@ -1882,7 +1882,7 @@ class RestaurantOperationsService(BaseService):
             dinner_covers = 0
             record_payload = {
                 **data,
-                "cash_collected_total": data["cash_in"],
+                "cash_collected_total": round(data["cash_in"] + data["pos_payments"], 2),
                 "cash_available": max(data["cash_in"] - data["cash_out"] - data["cash_withdrawals"] - data["expenses_in_cash"], 0),
                 "closing_cash": max(data["cash_in"] - data["cash_out"], 0),
                 "opening_cash": 0,
@@ -1898,7 +1898,7 @@ class RestaurantOperationsService(BaseService):
             dinner_covers = data["dinner_covers"]
             record_payload = {
                 **data,
-                "cash_collected_total": data["cash_payments"],
+                "cash_collected_total": round(data["cash_payments"] + data["pos_payments"], 2),
                 "cash_available": round(data["closing_cash"], 2),
                 "cash_withdrawals": 0.0,
                 "cash_in": data["cash_payments"],

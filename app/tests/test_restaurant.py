@@ -481,7 +481,7 @@ def test_manual_entry_method_one_creates_finance_transactions(client, app):
     assert daily_snapshot["cash_available"] == 155.0
     assert daily_snapshot["revenue_summary"]["sales_total"] == 550.0
     assert daily_snapshot["expense_summary"]["total_expenses"] == 35.0
-    assert daily_snapshot["deposit_summary"]["bank_deposits_total"] == 300.0
+    assert daily_snapshot["deposit_summary"]["bank_deposits_total"] == 0.0
     assert daily_snapshot["cash_summary"]["cash_available"] == 155.0
 
     first_transaction_metadata = transactions[0]["metadata"]
@@ -799,8 +799,8 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
     assert cash_overview_response.status_code == 200
     cash_overview_payload = cash_overview_response.json()
-    assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 1050.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 850.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 1000.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 150.0
     assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 200.0
     assert {item["display_title"] for item in cash_overview_payload["periods"]["today"]["recent_deposits"]} >= {
         "Cash Payments",
@@ -816,8 +816,8 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
     weekly_cash_cards = {item["label"]: item["amount"] for item in home_response.json()["weekly"]["cash_management"]}
-    assert weekly_cash_cards["Total Collection"] == 1050.0
-    assert weekly_cash_cards["Cash Deposit"] == 850.0
+    assert weekly_cash_cards["Total Collection"] == 1000.0
+    assert weekly_cash_cards["Cash Deposit"] == 150.0
     assert weekly_cash_cards["Cash Available"] == 200.0
 
     db = asyncio.run(app.dependency_overrides[get_database]())
@@ -825,10 +825,10 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
         db["restaurant_finance_snapshots"].find_one({"period_type": "day", "business_date": today_iso})
     )
     assert daily_aggregate is not None
-    assert daily_aggregate["bank_deposits_total"] == 850.0
+    assert daily_aggregate["bank_deposits_total"] == 150.0
     assert daily_aggregate["cash_deposits_total"] == 25.0
-    assert daily_aggregate["deposits_collection_total"] == 850.0
-    assert daily_aggregate["cash_collected_total"] == 1050.0
+    assert daily_aggregate["deposits_collection_total"] == 150.0
+    assert daily_aggregate["cash_collected_total"] == 1000.0
     assert daily_aggregate["cash_available"] == 200.0
 
     linked_cash_rows = asyncio.run(
@@ -847,9 +847,9 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
         )
     )
     assert month_aggregate is not None
-    assert month_aggregate["bank_deposits_total"] == 850.0
+    assert month_aggregate["bank_deposits_total"] == 150.0
     assert month_aggregate["cash_deposits_total"] == 25.0
-    assert month_aggregate["deposits_collection_total"] == 850.0
+    assert month_aggregate["deposits_collection_total"] == 150.0
     assert month_aggregate["cash_available"] == 200.0
 
 

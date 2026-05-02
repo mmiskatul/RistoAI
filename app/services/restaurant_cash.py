@@ -25,6 +25,20 @@ class CashLedgerSummary:
     deposits_collection_total: float
 
 
+def _resolve_total_collection(item: dict[str, Any]) -> float:
+    legacy_cash_total = float(item.get("cash_collected_total", 0) or 0)
+    fallback_cash_total = max(
+        float(item.get("cash_payments", 0) or 0),
+        float(item.get("cash_in", 0) or 0),
+    )
+    pos_total = float(item.get("pos_payments", 0) or 0)
+
+    # Older records stored only the cash portion in cash_collected_total.
+    if legacy_cash_total >= fallback_cash_total + pos_total:
+        return legacy_cash_total
+    return fallback_cash_total + pos_total
+
+
 def calculate_cash_ledger(
     *,
     daily_records: Iterable[dict[str, Any]],
@@ -34,7 +48,7 @@ def calculate_cash_ledger(
     transaction_items = list(finance_transactions)
 
     total_collected = round(
-        sum(float(item.get("cash_collected_total", item.get("cash_payments", 0) + item.get("cash_in", 0))) for item in daily_items),
+        sum(_resolve_total_collection(item) for item in daily_items),
         2,
     )
     base_cash_available = round(
@@ -46,7 +60,7 @@ def calculate_cash_ledger(
         2,
     )
     direct_bank_collection_total = round(
-        sum(float(item.get("pos_payments", 0)) + float(item.get("bank_transfer_payments", 0)) for item in daily_items),
+        sum(float(item.get("bank_transfer_payments", 0) or 0) for item in daily_items),
         2,
     )
     manual_expenses_total = round(
@@ -116,8 +130,6 @@ def calculate_cash_ledger(
         max(base_cash_available + document_cash_total - cash_expenses_total - document_expense_total - manual_bank_deposits_total - cash_deposits_total, 0.0),
         2,
     )
-    total_collected = round(cash_available + bank_deposits_total, 2)
-
     return CashLedgerSummary(
         total_collected=total_collected,
         base_cash_available=base_cash_available,
