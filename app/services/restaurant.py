@@ -5295,6 +5295,8 @@ class RestaurantOperationsService(BaseService):
         return uploaded.url
 
     def _resolve_profile_image_url(self, value: str | None) -> str | None:
+        if not value:
+            return None
         if not self.image_storage_service:
             return value
         return self.image_storage_service.resolve_public_url(value)
