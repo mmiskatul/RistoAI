@@ -519,6 +519,68 @@ class OpenAIOperationsService:
             logger.exception("OpenAI attachment summarization failed", exc_info=exc)
         return fallback
 
+    async def translate_text(
+        self,
+        *,
+        text: str,
+        target_language: str = "en",
+    ) -> str:
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            return ""
+
+        resolved_language = self._resolve_language(target_language)
+        if not self.enabled:
+            return cleaned
+
+        payload = {
+            "model": self.settings.openai_model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "Translate the provided restaurant app text accurately. "
+                                "Preserve meaning, numbers, and business tone. "
+                                "Return only the translated text with no explanation. "
+                                f"Translate into {'Italian' if resolved_language == 'it' else 'English'}."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": cleaned,
+                        }
+                    ],
+                },
+            ],
+        }
+        cache_key = self._generation_cache_key(
+            "translate_text",
+            {
+                "text": cleaned,
+                "target_language": resolved_language,
+            },
+        )
+
+        async def _generate() -> str:
+            try:
+                response_payload = await self._responses_create(payload)
+                translated = str(response_payload.get("output_text") or "").strip()
+                if translated:
+                    return translated
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("OpenAI text translation failed", exc_info=exc)
+            return cleaned
+
+        return await self._run_cached_generation(cache_key, _generate)
+
     async def _responses_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=45.0) as client:
             headers = {

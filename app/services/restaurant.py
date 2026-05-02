@@ -205,6 +205,80 @@ class RestaurantOperationsService(BaseService):
             ],
         }
 
+    @staticmethod
+    def _build_localized_text(*, en: str, it: str) -> dict[str, str]:
+        return {"en": en, "it": it}
+
+    @staticmethod
+    def _build_localized_list(*, en: list[str], it: list[str]) -> dict[str, list[str]]:
+        return {"en": en, "it": it}
+
+    @staticmethod
+    def _build_localized_actions(*, en: list[dict[str, str]], it: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
+        return {"en": en, "it": it}
+
+    @staticmethod
+    def _resolve_localized_text(
+        translations: Any,
+        *,
+        language: str,
+        fallback: str = "",
+    ) -> str:
+        if isinstance(translations, dict):
+            value = translations.get("it" if language == "it" else "en")
+            if value:
+                return str(value)
+            alternate = translations.get("en" if language == "it" else "it")
+            if alternate:
+                return str(alternate)
+        return fallback
+
+    @staticmethod
+    def _resolve_localized_list(
+        translations: Any,
+        *,
+        language: str,
+        fallback: list[str] | None = None,
+    ) -> list[str]:
+        if isinstance(translations, dict):
+            value = translations.get("it" if language == "it" else "en")
+            if isinstance(value, list) and value:
+                return [str(item) for item in value]
+            alternate = translations.get("en" if language == "it" else "it")
+            if isinstance(alternate, list) and alternate:
+                return [str(item) for item in alternate]
+        return fallback or []
+
+    @staticmethod
+    def _resolve_localized_actions(
+        translations: Any,
+        *,
+        language: str,
+        fallback: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, str]]:
+        if isinstance(translations, dict):
+            value = translations.get("it" if language == "it" else "en")
+            if isinstance(value, list) and value:
+                return [
+                    {
+                        "title": str(item.get("title") or ""),
+                        "description": str(item.get("description") or ""),
+                    }
+                    for item in value
+                    if isinstance(item, dict)
+                ]
+            alternate = translations.get("en" if language == "it" else "it")
+            if isinstance(alternate, list) and alternate:
+                return [
+                    {
+                        "title": str(item.get("title") or ""),
+                        "description": str(item.get("description") or ""),
+                    }
+                    for item in alternate
+                    if isinstance(item, dict)
+                ]
+        return fallback or []
+
     def __init__(
         self,
         user_repository: UserRepository,
@@ -1207,17 +1281,41 @@ class RestaurantOperationsService(BaseService):
     async def get_insight_detail(self, current_user: dict, insight_id: str) -> InsightDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         insight = self.serialize(await self.insight_repository.get_by_scope_and_id(scope_id=scope_id, insight_id=insight_id))
+        insight_language = self._resolve_chat_language(current_user)
         related_items = self._build_other_related_insights(insight)
         return InsightDetailResponse(
             id=insight["id"],
-            title=insight["title"],
+            title=self._resolve_localized_text(
+                insight.get("title_translations"),
+                language=insight_language,
+                fallback=str(insight.get("title") or ""),
+            ),
             priority=insight["priority"],
             metric_value=insight["metric_value"],
-            metric_caption=insight["metric_caption"],
+            metric_caption=self._resolve_localized_text(
+                insight.get("metric_caption_translations"),
+                language=insight_language,
+                fallback=str(insight.get("metric_caption") or ""),
+            ),
             trend=[ChartPointResponse(**item) for item in insight.get("trend", [])],
-            root_causes=insight.get("root_causes", []),
-            recommended_actions=[InsightActionResponse(**item) for item in insight.get("recommended_actions", [])],
+            root_causes=self._resolve_localized_list(
+                insight.get("root_causes_translations"),
+                language=insight_language,
+                fallback=insight.get("root_causes", []),
+            ),
+            recommended_actions=[
+                InsightActionResponse(**item)
+                for item in self._resolve_localized_actions(
+                    insight.get("recommended_actions_translations"),
+                    language=insight_language,
+                    fallback=insight.get("recommended_actions", []),
+                )
+            ],
             other_related_insights=related_items,
+            title_translations=insight.get("title_translations"),
+            metric_caption_translations=insight.get("metric_caption_translations"),
+            root_causes_translations=insight.get("root_causes_translations"),
+            recommended_actions_translations=insight.get("recommended_actions_translations"),
         )
 
     async def upload_and_extract_document(
@@ -2514,7 +2612,8 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         chat_language = self._resolve_chat_language(current_user)
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
-        messages = [self._to_chat_message_response(item) for item in items]
+        items = await self._hydrate_chat_message_translations(items)
+        messages = [self._to_chat_message_response(item, language=chat_language) for item in items]
         if not messages:
             messages = [
                 ChatMessageResponse(
@@ -2523,12 +2622,54 @@ class RestaurantOperationsService(BaseService):
                     sender_label="Risto AI",
                     variant="assistant",
                     message=self._build_chat_welcome_message(chat_language),
+                    message_translations=self._build_localized_text(
+                        en=self._build_chat_welcome_message("en"),
+                        it=self._build_chat_welcome_message("it"),
+                    ),
                     created_at=datetime.now(UTC).isoformat(),
                 )
             ]
         return ChatConversationResponse(
             messages=messages,
         )
+
+    async def _hydrate_chat_message_translations(self, items: list[dict]) -> list[dict]:
+        hydrated: list[dict] = []
+        for item in items:
+            current = item
+            updates: dict[str, Any] = {}
+            serialized = self.serialize(item)
+
+            if str(serialized.get("role") or "") in {"assistant", "insight"} and not serialized.get("message_translations"):
+                original_message = str(serialized.get("message") or "").strip()
+                if original_message:
+                    translated_en, translated_it = await asyncio.gather(
+                        self.openai_service.translate_text(text=original_message, target_language="en"),
+                        self.openai_service.translate_text(text=original_message, target_language="it"),
+                    )
+                    updates["message_translations"] = self._build_localized_text(
+                        en=translated_en,
+                        it=translated_it,
+                    )
+
+            if serialized.get("attachment_summary") and not serialized.get("attachment_summary_translations"):
+                original_summary = str(serialized.get("attachment_summary") or "").strip()
+                if original_summary:
+                    translated_en, translated_it = await asyncio.gather(
+                        self.openai_service.translate_text(text=original_summary, target_language="en"),
+                        self.openai_service.translate_text(text=original_summary, target_language="it"),
+                    )
+                    updates["attachment_summary_translations"] = self._build_localized_text(
+                        en=translated_en,
+                        it=translated_it,
+                    )
+
+            if updates:
+                current = await self.chat_repository.update(item["_id"], updates)
+
+            hydrated.append(current)
+
+        return hydrated
 
     async def create_chat_message(self, current_user: dict, payload: ChatMessageCreateRequest) -> ChatConversationResponse:
         return await self._create_chat_conversation(current_user=current_user, payload=payload)
@@ -2561,22 +2702,35 @@ class RestaurantOperationsService(BaseService):
             existing["_id"],
             {
                 "message": payload.message,
+                "message_translations": None,
                 "edited_at": now,
                 "last_edited_by_user_id": str(current_user["_id"]),
             },
         )
         recent, metrics_context = await self._load_chat_generation_context(scope_id=scope_id)
+        recent_context = [self._serialize_chat_message_for_context(item, language=chat_language) for item in recent]
+        alternate_chat_language = "it" if chat_language == "en" else "en"
         assistant_text = await self.openai_service.generate_chat_reply(
             prompt=payload.message,
             language=chat_language,
             metrics_context=metrics_context,
-            recent_messages=[self.serialize(item) for item in recent],
+            recent_messages=recent_context,
+        )
+        alternate_assistant_text = await self.openai_service.generate_chat_reply(
+            prompt=payload.message,
+            language=alternate_chat_language,
+            metrics_context=metrics_context,
+            recent_messages=[self._serialize_chat_message_for_context(item, language=alternate_chat_language) for item in recent],
         )
         await self.chat_repository.create(
             {
                 "tenant_id": scope_id,
                 "role": "assistant",
                 "message": assistant_text,
+                "message_translations": self._build_localized_text(
+                    en=assistant_text if chat_language == "en" else alternate_assistant_text,
+                    it=assistant_text if chat_language == "it" else alternate_assistant_text,
+                ),
                 "created_by_user_id": str(current_user["_id"]),
                 "reply_to_message_id": str(updated_message["_id"]),
                 "regenerated_from_message_id": str(updated_message["_id"]),
@@ -2618,13 +2772,29 @@ class RestaurantOperationsService(BaseService):
             file_bytes=file_bytes,
             language=chat_language,
         )
+        alternate_chat_language = "it" if chat_language == "en" else "en"
+        alternate_attachment_context = await self.openai_service.summarize_chat_attachment(
+            file_name=file_name,
+            content_type=content_type,
+            file_bytes=file_bytes,
+            language=alternate_chat_language,
+        )
         return await self._create_chat_conversation(
             current_user=current_user,
             payload=payload,
             attachment_name=file_name,
             attachment_source=final_attachment_source,
             attachment_summary=attachment_context.get("summary"),
+            attachment_summary_translations=self._build_localized_text(
+                en=str(attachment_context.get("summary") or "")
+                if chat_language == "en"
+                else str(alternate_attachment_context.get("summary") or ""),
+                it=str(attachment_context.get("summary") or "")
+                if chat_language == "it"
+                else str(alternate_attachment_context.get("summary") or ""),
+            ),
             attachment_context=attachment_context,
+            alternate_attachment_context=alternate_attachment_context,
         )
 
     async def _create_chat_conversation(
@@ -2635,7 +2805,9 @@ class RestaurantOperationsService(BaseService):
         attachment_name: str | None = None,
         attachment_source: str | None = None,
         attachment_summary: str | None = None,
+        attachment_summary_translations: dict[str, str] | None = None,
         attachment_context: dict[str, Any] | None = None,
+        alternate_attachment_context: dict[str, Any] | None = None,
     ) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         chat_language = self._resolve_chat_language(current_user, payload.language)
@@ -2649,22 +2821,37 @@ class RestaurantOperationsService(BaseService):
             user_message_payload["attachment_name"] = attachment_name
             user_message_payload["attachment_source"] = attachment_source
             user_message_payload["attachment_summary"] = attachment_summary
+            user_message_payload["attachment_summary_translations"] = attachment_summary_translations
         user_message = await self.chat_repository.create(user_message_payload)
         recent, metrics_context = await self._load_chat_generation_context(scope_id=scope_id)
+        recent_context = [self._serialize_chat_message_for_context(item, language=chat_language) for item in recent]
+        alternate_chat_language = "it" if chat_language == "en" else "en"
         assistant_text = await self.openai_service.generate_chat_reply(
             prompt=payload.message,
             language=chat_language,
             metrics_context=metrics_context,
-            recent_messages=[self.serialize(item) for item in recent],
+            recent_messages=recent_context,
             attachment_context=attachment_context,
         )
+        alternate_assistant_text = await self.openai_service.generate_chat_reply(
+            prompt=payload.message,
+            language=alternate_chat_language,
+            metrics_context=metrics_context,
+            recent_messages=[self._serialize_chat_message_for_context(item, language=alternate_chat_language) for item in recent],
+            attachment_context=alternate_attachment_context or attachment_context,
+        )
         insight_message = self._build_chat_insight_message(metrics_context, language=chat_language)
+        alternate_insight_message = self._build_chat_insight_message(metrics_context, language=alternate_chat_language)
         await asyncio.gather(
             self.chat_repository.create(
                 {
                     "tenant_id": scope_id,
                     "role": "insight",
                     "message": insight_message,
+                    "message_translations": self._build_localized_text(
+                        en=insight_message if chat_language == "en" else alternate_insight_message,
+                        it=insight_message if chat_language == "it" else alternate_insight_message,
+                    ),
                     "created_by_user_id": str(current_user["_id"]),
                     "reply_to_message_id": str(user_message["_id"]),
                 }
@@ -2674,6 +2861,10 @@ class RestaurantOperationsService(BaseService):
                     "tenant_id": scope_id,
                     "role": "assistant",
                     "message": assistant_text,
+                    "message_translations": self._build_localized_text(
+                        en=assistant_text if chat_language == "en" else alternate_assistant_text,
+                        it=assistant_text if chat_language == "it" else alternate_assistant_text,
+                    ),
                     "created_by_user_id": str(current_user["_id"]),
                     "reply_to_message_id": str(user_message["_id"]),
                 }
@@ -2681,7 +2872,7 @@ class RestaurantOperationsService(BaseService):
         )
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
         return ChatConversationResponse(
-            messages=[self._to_chat_message_response(item) for item in items],
+            messages=[self._to_chat_message_response(item, language=chat_language) for item in items],
         )
 
     def _build_chat_realtime_config(self) -> ChatRealtimeConfigResponse:
@@ -2809,23 +3000,67 @@ class RestaurantOperationsService(BaseService):
         insights = await self.insight_repository.list_by_scope(scope_id=scope_id, limit=10)
         context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
         insight_language = self._resolve_chat_language(current_user)
-        percent = abs(context["food_cost_change_percent"])
         trend = self._build_weekly_revenue_chart(daily_records)
-        fallback_insight = self._build_fallback_restaurant_insight(context, language=insight_language)
-        insight_payload = await self.openai_service.generate_restaurant_insight(
-            metrics_context=self._build_realtime_insight_context(
-                metrics_context=context,
-                daily_records=daily_records,
-                expenses=expenses,
-                documents=documents or [],
-                cash_deposits=cash_deposits or [],
-                inventory_items=inventory_items or [],
-                transactions=transactions or [],
-                trend=trend,
-            ),
-            fallback_insight=fallback_insight,
-            language=insight_language,
+        realtime_context = self._build_realtime_insight_context(
+            metrics_context=context,
+            daily_records=daily_records,
+            expenses=expenses,
+            documents=documents or [],
+            cash_deposits=cash_deposits or [],
+            inventory_items=inventory_items or [],
+            transactions=transactions or [],
+            trend=trend,
         )
+        fallback_insight_en = self._build_fallback_restaurant_insight(context, language="en")
+        fallback_insight_it = self._build_fallback_restaurant_insight(context, language="it")
+        insight_payload_en = await self.openai_service.generate_restaurant_insight(
+            metrics_context=realtime_context,
+            fallback_insight=fallback_insight_en,
+            language="en",
+        )
+        insight_payload_it = await self.openai_service.generate_restaurant_insight(
+            metrics_context=realtime_context,
+            fallback_insight=fallback_insight_it,
+            language="it",
+        )
+        primary_payload = insight_payload_it if insight_language == "it" else insight_payload_en
+        insight_payload = {
+            **primary_payload,
+            "title_translations": self._build_localized_text(
+                en=str(insight_payload_en.get("title") or ""),
+                it=str(insight_payload_it.get("title") or ""),
+            ),
+            "summary_translations": self._build_localized_text(
+                en=str(insight_payload_en.get("summary") or ""),
+                it=str(insight_payload_it.get("summary") or ""),
+            ),
+            "metric_caption_translations": self._build_localized_text(
+                en=str(insight_payload_en.get("metric_caption") or ""),
+                it=str(insight_payload_it.get("metric_caption") or ""),
+            ),
+            "root_causes_translations": self._build_localized_list(
+                en=[str(item) for item in insight_payload_en.get("root_causes", [])],
+                it=[str(item) for item in insight_payload_it.get("root_causes", [])],
+            ),
+            "recommended_actions_translations": self._build_localized_actions(
+                en=[
+                    {
+                        "title": str(action.get("title") or ""),
+                        "description": str(action.get("description") or ""),
+                    }
+                    for action in insight_payload_en.get("recommended_actions", [])
+                    if isinstance(action, dict)
+                ],
+                it=[
+                    {
+                        "title": str(action.get("title") or ""),
+                        "description": str(action.get("description") or ""),
+                    }
+                    for action in insight_payload_it.get("recommended_actions", [])
+                    if isinstance(action, dict)
+                ],
+            ),
+        }
         insight_payload.update(
             {
                 "tenant_id": scope_id,
@@ -2853,7 +3088,20 @@ class RestaurantOperationsService(BaseService):
         else:
             insights = [await self.insight_repository.create(insight_payload)]
         serialized = self.serialize_list(insights)
-        return [InsightSummaryResponse(id=item["id"], title=item["title"], summary=item["summary"], priority=item["priority"], metric_value=item["metric_value"], metric_caption=item["metric_caption"]) for item in serialized]
+        return [
+            InsightSummaryResponse(
+                id=item["id"],
+                title=item["title"],
+                summary=item["summary"],
+                priority=item["priority"],
+                metric_value=item["metric_value"],
+                metric_caption=item["metric_caption"],
+                title_translations=item.get("title_translations"),
+                summary_translations=item.get("summary_translations"),
+                metric_caption_translations=item.get("metric_caption_translations"),
+            )
+            for item in serialized
+        ]
 
     def _build_metrics_context(self, *, daily_records: list[dict], expenses: list[dict]) -> dict[str, float | int]:
         today = datetime.now(UTC).date()
@@ -3320,6 +3568,7 @@ class RestaurantOperationsService(BaseService):
         serialized_expenses: list[dict[str, Any]],
     ) -> AnalyticsInsightBannerResponse:
         insight_language = self._resolve_chat_language(current_user)
+        alternate_language = "it" if insight_language == "en" else "en"
         weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         weekday_names_it = ["Lunedi", "Martedi", "Mercoledi", "Giovedi", "Venerdi", "Sabato", "Domenica"]
         revenue_by_weekday: dict[int, float] = {}
@@ -3411,7 +3660,51 @@ class RestaurantOperationsService(BaseService):
                 fallback_subtitle=fallback_subtitle,
                 language=insight_language,
             )
-            return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
+            alternate_generated = await self.openai_service.generate_business_insight(
+                analytics_context={
+                    "insight_type": best_group,
+                    "weekday": weekday_names_it[best_weekday] if alternate_language == "it" else weekday_names[best_weekday],
+                    "lift_percent": percent,
+                    "ratio": round(best_ratio * 100, 2),
+                    "revenue_by_weekday": revenue_by_weekday,
+                    "costs_by_group_by_weekday": costs_by_group_by_weekday,
+                },
+                fallback_title=(
+                    f"Suggerimento di ottimizzazione: "
+                    f"{({'staff': 'Costi del personale', 'food': 'Costi del cibo', 'operations': 'Costi operativi'}.get(best_group, 'Costi'))} "
+                    f"sono superiori del {percent}% di {weekday_names_it[best_weekday]} rispetto ai ricavi."
+                    if alternate_language == "it"
+                    else f"Optimization Tip: "
+                    f"{({'staff': 'Staffing costs', 'food': 'Food costs', 'operations': 'Operating costs'}.get(best_group, 'Costs'))} "
+                    f"are {percent}% higher on {weekday_names[best_weekday]}s relative to revenue."
+                ),
+                fallback_subtitle=(
+                    {
+                        "staff": "Controlla la pianificazione del personale rispetto alla domanda.",
+                        "food": "Controlla acquisti e mix del menu per questo giorno.",
+                        "operations": "Controlla costi generali e pianificazione dei turni.",
+                    }.get(best_group, "Controlla i principali costi di questa giornata.")
+                    if alternate_language == "it"
+                    else {
+                        "staff": "Review labor scheduling against demand patterns.",
+                        "food": "Review purchasing and menu mix for this day.",
+                        "operations": "Review overhead allocations and shift planning.",
+                    }.get(best_group, "Review cost drivers for this day.")
+                ),
+                language=alternate_language,
+            )
+            return AnalyticsInsightBannerResponse(
+                title=generated["title"],
+                subtitle=generated["subtitle"],
+                title_translations=self._build_localized_text(
+                    en=generated["title"] if insight_language == "en" else alternate_generated["title"],
+                    it=generated["title"] if insight_language == "it" else alternate_generated["title"],
+                ),
+                subtitle_translations=self._build_localized_text(
+                    en=generated["subtitle"] if insight_language == "en" else alternate_generated["subtitle"],
+                    it=generated["subtitle"] if insight_language == "it" else alternate_generated["subtitle"],
+                ),
+            )
 
         if serialized_expenses:
             top_expense = max(serialized_expenses, key=lambda item: float(item.get("amount", 0)))
@@ -3436,7 +3729,36 @@ class RestaurantOperationsService(BaseService):
                 fallback_subtitle=fallback_subtitle,
                 language=insight_language,
             )
-            return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
+            alternate_generated = await self.openai_service.generate_business_insight(
+                analytics_context={
+                    "insight_type": "largest_expense",
+                    "category": category_name,
+                    "top_expense_amount": float(top_expense.get("amount", 0)),
+                },
+                fallback_title=(
+                    f"Suggerimento di ottimizzazione: {category_name} e il principale costo recente."
+                    if alternate_language == "it"
+                    else f"Optimization Tip: {category_name} is your largest recent cost driver."
+                ),
+                fallback_subtitle=(
+                    "Controlla la categoria di spesa piu alta rispetto all'andamento dei ricavi."
+                    if alternate_language == "it"
+                    else "Review the largest expense category against revenue trend."
+                ),
+                language=alternate_language,
+            )
+            return AnalyticsInsightBannerResponse(
+                title=generated["title"],
+                subtitle=generated["subtitle"],
+                title_translations=self._build_localized_text(
+                    en=generated["title"] if insight_language == "en" else alternate_generated["title"],
+                    it=generated["title"] if insight_language == "it" else alternate_generated["title"],
+                ),
+                subtitle_translations=self._build_localized_text(
+                    en=generated["subtitle"] if insight_language == "en" else alternate_generated["subtitle"],
+                    it=generated["subtitle"] if insight_language == "it" else alternate_generated["subtitle"],
+                ),
+            )
 
         generated = await self.openai_service.generate_business_insight(
             analytics_context={"insight_type": "insufficient_data"},
@@ -3452,7 +3774,32 @@ class RestaurantOperationsService(BaseService):
             ),
             language=insight_language,
         )
-        return AnalyticsInsightBannerResponse(title=generated["title"], subtitle=generated["subtitle"])
+        alternate_generated = await self.openai_service.generate_business_insight(
+            analytics_context={"insight_type": "insufficient_data"},
+            fallback_title=(
+                "Suggerimento di ottimizzazione: aggiungi piu dati giornalieri per sbloccare insight utili."
+                if alternate_language == "it"
+                else "Optimization Tip: Add more daily data to unlock pattern-based insights."
+            ),
+            fallback_subtitle=(
+                "Servono piu dati su ricavi e costi per generare raccomandazioni piu forti."
+                if alternate_language == "it"
+                else "We need a bit more revenue and cost history to generate stronger recommendations."
+            ),
+            language=alternate_language,
+        )
+        return AnalyticsInsightBannerResponse(
+            title=generated["title"],
+            subtitle=generated["subtitle"],
+            title_translations=self._build_localized_text(
+                en=generated["title"] if insight_language == "en" else alternate_generated["title"],
+                it=generated["title"] if insight_language == "it" else alternate_generated["title"],
+            ),
+            subtitle_translations=self._build_localized_text(
+                en=generated["subtitle"] if insight_language == "en" else alternate_generated["subtitle"],
+                it=generated["subtitle"] if insight_language == "it" else alternate_generated["subtitle"],
+            ),
+        )
 
     async def _build_supplier_alerts(
         self,
@@ -3460,8 +3807,9 @@ class RestaurantOperationsService(BaseService):
         current_user: dict,
         serialized_expenses: list[dict[str, Any]],
         serialized_documents: list[dict[str, Any]],
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         alert_language = self._resolve_chat_language(current_user)
+        alternate_language = "it" if alert_language == "en" else "en"
         category_totals: dict[str, float] = {}
 
         for expense in serialized_expenses:
@@ -3509,7 +3857,55 @@ class RestaurantOperationsService(BaseService):
             fallback_alerts=fallback_alerts,
             language=alert_language,
         )
-        return generated_alerts
+        alternate_fallback_alerts: list[dict[str, str]] = []
+        for category, amount in sorted_categories[:3]:
+            share = round((amount / max(total_spend, 1)) * 100, 1)
+            impact = round(amount * 0.1, 2)
+            alternate_fallback_alerts.append(
+                {
+                    "title": (
+                        f"I prezzi di {category} sono aumentati del {max(5, int(round(share / 2)))}%"
+                        if alternate_language == "it"
+                        else f"{category} prices increased by {max(5, int(round(share / 2)))}%"
+                    ),
+                    "subtitle": (
+                        f"Impatto: +{self._format_currency(impact)} di pressione mensile sui costi"
+                        if alternate_language == "it"
+                        else f"Impact: +{self._format_currency(impact)} monthly cost pressure"
+                    ),
+                }
+            )
+        alternate_generated_alerts = await self.openai_service.generate_supplier_alerts(
+            analytics_context={
+                "total_spend": total_spend,
+                "expense_count": len(serialized_expenses),
+                "invoice_count": len(serialized_documents),
+                "top_categories": [
+                    {"category": category, "amount": amount, "share_percent": round((amount / max(total_spend, 1)) * 100, 1)}
+                    for category, amount in sorted_categories[:5]
+                ],
+            },
+            fallback_alerts=alternate_fallback_alerts,
+            language=alternate_language,
+        )
+        localized_alerts: list[dict[str, Any]] = []
+        for index, item in enumerate(generated_alerts):
+            alternate_item = alternate_generated_alerts[index] if index < len(alternate_generated_alerts) else {"title": "", "subtitle": ""}
+            localized_alerts.append(
+                {
+                    "title": item["title"],
+                    "subtitle": item["subtitle"],
+                    "title_translations": self._build_localized_text(
+                        en=item["title"] if alert_language == "en" else str(alternate_item.get("title") or ""),
+                        it=item["title"] if alert_language == "it" else str(alternate_item.get("title") or ""),
+                    ),
+                    "subtitle_translations": self._build_localized_text(
+                        en=item["subtitle"] if alert_language == "en" else str(alternate_item.get("subtitle") or ""),
+                        it=item["subtitle"] if alert_language == "it" else str(alternate_item.get("subtitle") or ""),
+                    ),
+                }
+            )
+        return localized_alerts
 
     @staticmethod
     def _pdf_escape(value: str) -> str:
@@ -5258,6 +5654,24 @@ class RestaurantOperationsService(BaseService):
             return "I ricavi stanno crescendo rispetto alla scorsa settimana."
         return "Your revenue is trending upward compared to last week."
 
+    def _serialize_chat_message_for_context(self, item: dict, *, language: str) -> dict[str, Any]:
+        serialized = self.serialize(item)
+        message = self._resolve_localized_text(
+            serialized.get("message_translations"),
+            language=language,
+            fallback=str(serialized.get("message") or ""),
+        )
+        payload = dict(serialized)
+        payload["message"] = message
+        attachment_summary = self._resolve_localized_text(
+            serialized.get("attachment_summary_translations"),
+            language=language,
+            fallback=str(serialized.get("attachment_summary") or ""),
+        )
+        if attachment_summary:
+            payload["attachment_summary"] = attachment_summary
+        return payload
+
     @staticmethod
     def _format_activity_date(value: Any, *, language: str) -> str:
         parsed = RestaurantOperationsService._safe_parse_date(value)
@@ -5270,19 +5684,33 @@ class RestaurantOperationsService(BaseService):
         )
         return f"{parsed.day:02d} {month_names[parsed.month - 1]} {parsed.year}"
 
-    def _to_chat_message_response(self, item: dict) -> ChatMessageResponse:
+    def _to_chat_message_response(self, item: dict, *, language: str | None = None) -> ChatMessageResponse:
         serialized = self.serialize(item)
+        resolved_language = "it" if language == "it" else "en"
+        message_translations = serialized.get("message_translations")
+        attachment_summary_translations = serialized.get("attachment_summary_translations")
         return ChatMessageResponse(
             id=serialized["id"],
             role=serialized["role"],
-            message=serialized["message"],
+            message=self._resolve_localized_text(
+                message_translations,
+                language=resolved_language,
+                fallback=str(serialized.get("message") or ""),
+            ),
+            message_translations=message_translations,
             created_at=serialized["created_at"],
             updated_at=serialized.get("updated_at"),
             edited_at=serialized.get("edited_at"),
             reply_to_message_id=serialized.get("reply_to_message_id"),
             attachment_name=serialized.get("attachment_name"),
             attachment_source=serialized.get("attachment_source"),
-            attachment_summary=serialized.get("attachment_summary"),
+            attachment_summary=self._resolve_localized_text(
+                attachment_summary_translations,
+                language=resolved_language,
+                fallback=str(serialized.get("attachment_summary") or ""),
+            )
+            or None,
+            attachment_summary_translations=attachment_summary_translations,
         )
 
     async def _upload_profile_image(self, current_user: dict, file: UploadFile) -> str:

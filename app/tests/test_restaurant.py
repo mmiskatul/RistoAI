@@ -1691,6 +1691,10 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert italian_insights_response.status_code == 200
     italian_insight = italian_insights_response.json()["insight"]
     assert italian_insight["title"]
+    assert italian_insight["title_translations"]["en"]
+    assert italian_insight["title_translations"]["it"]
+    assert italian_insight["summary_translations"]["en"]
+    assert italian_insight["summary_translations"]["it"]
     assert any(
         phrase in italian_insight["summary"].lower()
         for phrase in ("il costo del cibo", "controlla i prezzi", "sprechi")
@@ -1832,6 +1836,10 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     business_insight_payload = business_insight_response.json()
     assert business_insight_payload["title"]
     assert business_insight_payload["subtitle"]
+    assert business_insight_payload["title_translations"]["en"]
+    assert business_insight_payload["title_translations"]["it"]
+    assert business_insight_payload["subtitle_translations"]["en"]
+    assert business_insight_payload["subtitle_translations"]["it"]
 
     italian_business_insight_response = client.get("/api/v1/restaurant/analytics/business-insight", headers=headers)
     assert italian_business_insight_response.status_code == 200
@@ -1910,6 +1918,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert any(message["role"] == "insight" for message in messages)
     assert messages[-1]["role"] == "assistant"
     assert "revenue" in messages[-1]["message"].lower()
+    assert messages[-1]["message_translations"]["en"]
+    assert messages[-1]["message_translations"]["it"]
     user_message = next(message for message in messages if message["role"] == "user" and message["message"] == "How can I improve profit?")
     assert messages[-1]["reply_to_message_id"] == user_message["id"]
 
@@ -1924,6 +1934,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     italian_reply = italian_messages[-1]["message"].lower()
     assert "profitto" in italian_reply
     assert "estimated profit" not in italian_reply
+    assert italian_messages[-1]["message_translations"]["en"]
+    assert italian_messages[-1]["message_translations"]["it"]
 
     edited_chat_response = client.patch(
         f"/api/v1/restaurant/chat/messages/{user_message['id']}",
@@ -1952,6 +1964,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert attachment_messages[-1]["attachment_source"] == "docs"
     assert attachment_messages[-1]["role"] == "user"
     assert "anteprima" in (attachment_messages[-1].get("attachment_summary") or "").lower()
+    assert attachment_messages[-1]["attachment_summary_translations"]["en"]
+    assert attachment_messages[-1]["attachment_summary_translations"]["it"]
     assert chat_attachment_payload["messages"][-1]["role"] == "assistant"
 
 

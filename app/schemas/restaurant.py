@@ -68,6 +68,21 @@ class ChartPointResponse(BaseSchema):
     value: float
 
 
+class LocalizedTextResponse(BaseSchema):
+    en: str
+    it: str
+
+
+class LocalizedTextListResponse(BaseSchema):
+    en: list[str] = Field(default_factory=list)
+    it: list[str] = Field(default_factory=list)
+
+
+class LocalizedActionListResponse(BaseSchema):
+    en: list[dict[str, str]] = Field(default_factory=list)
+    it: list[dict[str, str]] = Field(default_factory=list)
+
+
 class ActivityItemResponse(BaseSchema):
     kind: str
     title: str
@@ -87,6 +102,9 @@ class InsightSummaryResponse(BaseSchema):
     priority: str
     metric_value: str
     metric_caption: str
+    title_translations: LocalizedTextResponse | None = None
+    summary_translations: LocalizedTextResponse | None = None
+    metric_caption_translations: LocalizedTextResponse | None = None
 
 
 class RestaurantHomePeriodResponse(BaseSchema):
@@ -172,6 +190,10 @@ class InsightDetailResponse(BaseSchema):
     root_causes: list[str]
     recommended_actions: list[InsightActionResponse]
     other_related_insights: list[InsightRelatedItemResponse]
+    title_translations: LocalizedTextResponse | None = None
+    metric_caption_translations: LocalizedTextResponse | None = None
+    root_causes_translations: LocalizedTextListResponse | None = None
+    recommended_actions_translations: LocalizedActionListResponse | None = None
 
 
 class DocumentLineItemSchema(BaseSchema):
@@ -748,6 +770,8 @@ class InventoryListResponse(BaseSchema):
 class AnalyticsInsightBannerResponse(BaseSchema):
     title: str
     subtitle: str
+    title_translations: LocalizedTextResponse | None = None
+    subtitle_translations: LocalizedTextResponse | None = None
 
 
 class AnalyticsMetricTileResponse(BaseSchema):
@@ -770,6 +794,8 @@ class AnalyticsComparisonRowResponse(BaseSchema):
 class AnalyticsSupplierAlertResponse(BaseSchema):
     title: str
     subtitle: str
+    title_translations: LocalizedTextResponse | None = None
+    subtitle_translations: LocalizedTextResponse | None = None
 
 
 class AnalyticsOverviewResponse(BaseSchema):
@@ -856,6 +882,7 @@ class ChatMessageResponse(BaseSchema):
     id: str
     role: Literal["user", "assistant", "insight"]
     message: str
+    message_translations: LocalizedTextResponse | None = None
     created_at: str | None = None
     updated_at: str | None = None
     edited_at: str | None = None
@@ -863,6 +890,7 @@ class ChatMessageResponse(BaseSchema):
     attachment_name: str | None = None
     attachment_source: str | None = None
     attachment_summary: str | None = None
+    attachment_summary_translations: LocalizedTextResponse | None = None
 
 
 class ChatRealtimeConfigResponse(BaseSchema):
