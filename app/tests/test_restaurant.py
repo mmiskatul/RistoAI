@@ -1955,6 +1955,28 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert italian_messages[-1]["message_translations"]["en"]
     assert italian_messages[-1]["message_translations"]["it"]
 
+    follow_up_chat_response = client.post(
+        "/api/v1/restaurant/chat/messages",
+        headers=headers,
+        json={"message": "What should I do next?"},
+    )
+    assert follow_up_chat_response.status_code == 201
+    follow_up_messages = follow_up_chat_response.json()["messages"]
+    assert follow_up_messages[-1]["role"] == "assistant"
+    assert "only answer restaurant business questions" not in follow_up_messages[-1]["message"].lower()
+    assert follow_up_messages[-1]["message_translations"]["en"]
+    assert follow_up_messages[-1]["message_translations"]["it"]
+
+    unrelated_chat_response = client.post(
+        "/api/v1/restaurant/chat/messages",
+        headers=headers,
+        json={"message": "Who won the World Cup in 2018?"},
+    )
+    assert unrelated_chat_response.status_code == 201
+    unrelated_messages = unrelated_chat_response.json()["messages"]
+    assert unrelated_messages[-1]["role"] == "assistant"
+    assert "only answer restaurant business questions" in unrelated_messages[-1]["message"].lower()
+
     edited_chat_response = client.patch(
         f"/api/v1/restaurant/chat/messages/{user_message['id']}",
         headers=headers,

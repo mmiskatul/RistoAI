@@ -59,19 +59,115 @@ class OpenAIOperationsService:
         )
         if language == "it":
             return (
-                f"Panoramica attuale: ricavi EUR {revenue:,.2f}, spese EUR {expenses:,.2f}, "
-                f"profitto stimato EUR {profit:,.2f}. "
+                f"Panoramica attuale: ricavi €{revenue:,.2f}, spese €{expenses:,.2f}, "
+                f"profitto stimato €{profit:,.2f}. "
                 f"In base alla tua richiesta \"{prompt}\", ti consiglio di controllare la voce di costo piu alta, "
                 f"verificare i giorni con ricavi piu bassi e riconciliare i movimenti di cassa."
                 f"{attachment_note}"
-            )
+        )
         return (
-            f"Current snapshot: revenue EUR {revenue:,.2f}, expenses EUR {expenses:,.2f}, "
-            f"estimated profit EUR {profit:,.2f}. "
+            f"Current snapshot: revenue €{revenue:,.2f}, expenses €{expenses:,.2f}, "
+            f"estimated profit €{profit:,.2f}. "
             f"Based on your request \"{prompt}\", focus on the highest cost area, review the lowest-revenue days, "
             f"and reconcile cash movements."
             f"{attachment_note}"
         )
+
+    @staticmethod
+    def _build_chat_scope_refusal(*, language: str) -> str:
+        if language == "it":
+            return (
+                "Posso rispondere solo a domande legate alla gestione del ristorante, "
+                "come ricavi, costi, coperti, documenti, inventario, cassa, personale e operazioni."
+            )
+        return (
+            "I can only answer restaurant business questions, such as revenue, costs, covers, "
+            "documents, inventory, cash flow, staff, and operations."
+        )
+
+    @classmethod
+    def _restaurant_scope_keywords(cls) -> set[str]:
+        return {
+            "restaurant", "business", "revenue", "sales", "profit", "cost", "costs", "expense", "expenses", "margin",
+            "invoice", "invoices", "document", "documents", "supplier", "suppliers", "inventory", "stock", "cash",
+            "deposit", "deposits", "bank", "payment", "payments", "staff", "payroll", "labor", "menu", "pricing",
+            "price", "prices", "food", "drink", "kitchen", "waste", "covers", "table", "tables", "booking",
+            "bookings", "reservation", "reservations", "operations", "analytics", "insight", "insights", "vat", "tax",
+            "receipt", "receipts", "pos", "customer", "customers", "guest", "guests", "service", "turnover",
+            "ristorante", "ricavi", "profitto", "costi", "spese", "fattura", "fatture", "documento", "documenti",
+            "fornitore", "fornitori", "inventario", "magazzino", "cassa", "deposito", "banca", "pagamento",
+            "pagamenti", "personale", "lavoro", "coperti", "prenotazione", "prenotazioni", "operazioni", "analisi",
+            "iva", "scontrino", "scontrini", "sprechi", "vendite", "cliente", "clienti", "cucina", "prezzo", "prezzi",
+        }
+
+    @classmethod
+    def _contains_restaurant_scope_keywords(cls, value: str | None) -> bool:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return False
+        return any(keyword in normalized for keyword in cls._restaurant_scope_keywords())
+
+    @classmethod
+    def _is_restaurant_business_query(
+        cls,
+        *,
+        prompt: str,
+        recent_messages: Sequence[dict[str, Any]] | None = None,
+        attachment_context: dict[str, Any] | None = None,
+    ) -> bool:
+        normalized_prompt = str(prompt or "").strip().lower()
+        if not normalized_prompt:
+            return False
+
+        if cls._contains_restaurant_scope_keywords(normalized_prompt):
+            return True
+
+        attachment_summary = ""
+        if attachment_context:
+            attachment_summary = " ".join(
+                str(attachment_context.get(key) or "")
+                for key in ("title", "summary")
+            )
+        if cls._contains_restaurant_scope_keywords(attachment_summary):
+            return True
+
+        recent_messages = list(recent_messages or [])
+        recent_transcript = "\n".join(
+            str(item.get("message") or "")
+            for item in recent_messages[-6:]
+        )
+        return cls._contains_restaurant_scope_keywords(recent_transcript)
+
+    @classmethod
+    def _build_chat_scope_context(
+        cls,
+        *,
+        prompt: str,
+        recent_messages: Sequence[dict[str, Any]] | None = None,
+        attachment_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        recent_messages = list(recent_messages or [])
+        attachment_summary = ""
+        if attachment_context:
+            attachment_summary = " ".join(
+                str(attachment_context.get(key) or "")
+                for key in ("title", "summary")
+            ).strip()
+
+        prompt_in_scope = cls._contains_restaurant_scope_keywords(prompt)
+        attachment_in_scope = cls._contains_restaurant_scope_keywords(attachment_summary)
+        recent_transcript = "\n".join(
+            str(item.get("message") or "")
+            for item in recent_messages[-6:]
+        )
+        recent_context_in_scope = cls._contains_restaurant_scope_keywords(recent_transcript)
+
+        return {
+            "prompt_in_scope": prompt_in_scope,
+            "recent_context_in_scope": recent_context_in_scope,
+            "attachment_in_scope": attachment_in_scope,
+            "is_follow_up": not prompt_in_scope and (recent_context_in_scope or attachment_in_scope),
+        }
 
     async def extract_invoice(
         self,
@@ -386,6 +482,18 @@ class OpenAIOperationsService:
         attachment_context: dict[str, Any] | None = None,
     ) -> str:
         resolved_language = self._resolve_language(language)
+        scope_context = self._build_chat_scope_context(
+            prompt=prompt,
+            recent_messages=recent_messages,
+            attachment_context=attachment_context,
+        )
+        if not self._is_restaurant_business_query(
+            prompt=prompt,
+            recent_messages=recent_messages,
+            attachment_context=attachment_context,
+        ):
+            return self._build_chat_scope_refusal(language=resolved_language)
+
         if not self.enabled:
             return self._build_chat_fallback_reply(
                 prompt=prompt,
@@ -404,7 +512,11 @@ class OpenAIOperationsService:
                         {
                             "type": "input_text",
                             "text": (
-                            "You are an operations copilot for a restaurant back office app. "
+                                "You are an operations copilot for a restaurant back office app. "
+                                "You must answer only restaurant business and operations questions. "
+                                "If the user asks anything outside restaurant business scope, refuse briefly. "
+                                "Treat short follow-up questions as in-scope when the recent conversation "
+                                "or attachment context is clearly about restaurant operations. "
                                 "Keep replies concise, practical, and grounded in the supplied metrics. "
                                 f"Always answer in {'Italian' if resolved_language == 'it' else 'English'}."
                             ),
@@ -420,6 +532,7 @@ class OpenAIOperationsService:
                                 f"Metrics context: {json.dumps(metrics_context)}\n"
                                 f"Recent messages:\n{transcript}\n"
                                 f"Attachment context: {json.dumps(attachment_context) if attachment_context else "none"}\n"
+                                f"Scope context: {json.dumps(scope_context)}\n"
                                 f"User question: {prompt}"
                             ),
                         }

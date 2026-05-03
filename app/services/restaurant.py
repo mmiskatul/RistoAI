@@ -4455,7 +4455,7 @@ class RestaurantOperationsService(BaseService):
 
     @staticmethod
     def _format_currency(value: float) -> str:
-        return f"${value:,.2f}" if value >= 0 else f"-${abs(value):,.2f}"
+        return f"€{value:,.2f}" if value >= 0 else f"-€{abs(value):,.2f}"
 
     @staticmethod
     def _percent_change(previous: float, current: float) -> float:
@@ -4512,9 +4512,9 @@ class RestaurantOperationsService(BaseService):
                     kind="daily_record",
                     title=formatted_business_date,
                     subtitle=(
-                        f"Ricavi EUR {total_revenue:,.2f} | Coperti {total_covers} | Media EUR {average_per_cover:,.2f}"
+                        f"Ricavi €{total_revenue:,.2f} | Coperti {total_covers} | Media €{average_per_cover:,.2f}"
                         if activity_language == "it"
-                        else f"Revenue EUR {total_revenue:,.2f} | Covers {total_covers} | Avg EUR {average_per_cover:,.2f}"
+                        else f"Revenue €{total_revenue:,.2f} | Covers {total_covers} | Avg €{average_per_cover:,.2f}"
                     ),
                     timestamp=item["created_at"],
                     entity_id=item["id"],
@@ -4667,7 +4667,7 @@ class RestaurantOperationsService(BaseService):
 
     @staticmethod
     def _format_notification_currency(amount: float) -> str:
-        return f"EUR {abs(float(amount or 0)):,.2f}"
+        return f"€{abs(float(amount or 0)):,.2f}"
 
     def _build_notification_feed(
         self,
@@ -4997,7 +4997,7 @@ class RestaurantOperationsService(BaseService):
             value = float(metric.get("value", 0))
             change_percent = float(metric.get("change_percent", 0))
             currency = str(metric.get("currency", "EUR"))
-            currency_symbol = "EUR " if currency == "EUR" else f"{currency} "
+            currency_symbol = "€" if currency == "EUR" else f"{currency} "
             if label.lower() == "expenses":
                 related_items.append({"label": f"{label} increase", "value": f"+{currency_symbol}{value:,.0f}", "subtitle": None})
             else:
