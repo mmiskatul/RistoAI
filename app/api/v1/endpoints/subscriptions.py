@@ -130,6 +130,14 @@ async def create_user_subscription_customer_portal(
     return await service.create_customer_portal(current_user)
 
 
+@router.post('/user/cancel', response_model=UserSubscriptionActionResponse, tags=['User Subscription'], summary='Cancel Current Subscription', description='Cancels the current subscription for the logged-in restaurant user. Stripe-backed subscriptions are canceled in Stripe; local trial/default subscriptions are canceled in the application state.')
+async def cancel_user_subscription(
+    current_user: dict = Depends(require_roles(UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF)),
+    service: SubscriptionService = Depends(get_subscription_service),
+) -> UserSubscriptionActionResponse:
+    return await service.cancel_user_subscription(current_user)
+
+
 @router.post('/webhook', response_model=StripeWebhookResponse, include_in_schema=False)
 async def stripe_webhook(
     request: Request,

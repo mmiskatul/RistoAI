@@ -200,3 +200,29 @@ def test_subscription_middleware_allows_protected_routes_after_automatic_trial_a
     assert len(plans_response.json()['plans']) == 1
     assert onboarding_response.status_code == 200
     assert onboarding_response.json() is None
+
+
+def test_user_can_cancel_local_trial_and_then_loses_protected_access():
+    app, _ = _build_app_with_mock_db()
+    seed_subscription_plan(app)
+
+    with TestClient(app) as client:
+        headers = register_and_login(
+            client,
+            {
+                'full_name': 'Cancel Trial User',
+                'email': 'cancel-trial@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550006666',
+            },
+        )
+
+        cancel_response = client.post('/api/v1/subscriptions/user/cancel', headers=headers)
+        protected_response = client.get('/api/v1/onboarding/profile', headers=headers)
+
+    assert cancel_response.status_code == 200
+    cancel_payload = cancel_response.json()
+    assert cancel_payload['subscription']['status'] == 'canceled'
+    assert cancel_payload['subscription']['selection_required'] is True
+    assert protected_response.status_code == 403
+    assert protected_response.json()['error']['code'] == 'subscription_required'

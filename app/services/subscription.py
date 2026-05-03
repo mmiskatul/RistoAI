@@ -126,6 +126,48 @@ class SubscriptionService(BaseService):
     async def get_user_current_subscription(self, current_user: dict) -> UserCurrentSubscriptionResponse:
         return self._to_user_current_subscription(current_user)
 
+    async def cancel_user_subscription(self, current_user: dict) -> UserSubscriptionActionResponse:
+        current_plan_name = current_user.get('subscription_plan_name')
+        current_status = current_user.get('subscription_status')
+        stripe_subscription_id = current_user.get('stripe_subscription_id')
+        now = datetime.now(UTC)
+
+        if not current_plan_name and not stripe_subscription_id:
+            raise ValidationException('No subscription is available to cancel')
+
+        if stripe_subscription_id and self.stripe_billing_service is not None:
+            canceled_subscription = await self.stripe_billing_service.cancel_subscription(str(stripe_subscription_id))
+            await self._sync_stripe_subscription_object(canceled_subscription)
+            refreshed_user = await self.user_repository.get_by_id(str(current_user['_id']))
+            return UserSubscriptionActionResponse(
+                message='Subscription canceled successfully',
+                subscription=self._to_user_current_subscription(refreshed_user),
+            )
+
+        if current_status == SubscriptionStatus.CANCELED:
+            raise ValidationException('Subscription is already canceled')
+
+        updated_user = await self.user_repository.update(
+            current_user['_id'],
+            {
+                'subscription_plan_name': current_plan_name,
+                'subscription_plan': current_user.get('subscription_plan'),
+                'subscription_status': SubscriptionStatus.CANCELED,
+                'subscription_expires_at': now,
+                'stripe_subscription_id': None,
+                'stripe_price_id': None,
+            },
+        )
+        await self.user_subscription_repository.close_current_for_user(
+            str(current_user['_id']),
+            ended_at=now,
+            final_status=SubscriptionStatus.CANCELED,
+        )
+        return UserSubscriptionActionResponse(
+            message='Subscription canceled successfully',
+            subscription=self._to_user_current_subscription(updated_user),
+        )
+
     async def preview_user_discount(
         self,
         current_user: dict,
@@ -605,7 +647,11 @@ class SubscriptionService(BaseService):
 
     @staticmethod
     def _selection_required(user: dict) -> bool:
-        return not bool(user.get('subscription_plan_name'))
+        return (not bool(user.get('subscription_plan_name'))) or user.get('subscription_status') in {
+            SubscriptionStatus.CANCELED,
+            SubscriptionStatus.EXPIRED,
+            SubscriptionStatus.SUSPENDED,
+        }
     def _to_active_plan_display(self, plan: dict) -> SubscriptionPlanDisplayResponse:
         serialized = self.serialize(plan)
         return SubscriptionPlanDisplayResponse(

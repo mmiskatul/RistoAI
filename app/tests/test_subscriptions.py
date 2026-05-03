@@ -356,6 +356,17 @@ class _FakeStripeBillingService:
             'items': {'data': [{'price': {'id': 'price_month'}}]},
         }
 
+    async def cancel_subscription(self, subscription_id: str):
+        return {
+            'id': subscription_id,
+            'customer': 'cus_test_123',
+            'status': 'canceled',
+            'metadata': {'user_id': self.user_id, 'plan_name': 'Core Plan'},
+            'current_period_start': 1772486400,
+            'current_period_end': 1775164800,
+            'items': {'data': [{'price': {'id': 'price_month'}}]},
+        }
+
 
 def test_user_can_create_stripe_checkout_session_and_customer_portal():
     app, mock_db = _build_app_with_mock_db()
@@ -436,3 +447,76 @@ def test_stripe_webhook_syncs_subscription_into_database():
     assert current_subscription is not None
     assert current_subscription['payment_provider'] == 'stripe'
     assert current_subscription['status'] == 'active'
+
+
+def test_user_can_cancel_stripe_backed_subscription():
+    app, mock_db = _build_app_with_mock_db()
+    _, owner_id = _seed_subscription_data(mock_db)
+    owner_token = token_manager.create_access_token(str(owner_id), UserRole.RESTAURANT_OWNER)
+    fake_stripe = _FakeStripeBillingService()
+    fake_stripe.user_id = str(owner_id)
+
+    asyncio.run(
+        mock_db['users'].update_one(
+            {'_id': owner_id},
+            {
+                '$set': {
+                    'stripe_customer_id': 'cus_test_123',
+                    'stripe_subscription_id': 'sub_test_123',
+                    'stripe_price_id': 'price_month',
+                    'subscription_plan_name': 'Core Plan',
+                    'subscription_plan': SubscriptionPlan.ONE_MONTH,
+                    'subscription_status': SubscriptionStatus.ACTIVE,
+                }
+            },
+        )
+    )
+    asyncio.run(
+        mock_db['user_subscriptions'].insert_one(
+            {
+                '_id': ObjectId(),
+                'user_id': owner_id,
+                'subscription_plan_id': None,
+                'plan_name': 'Core Plan',
+                'billing_cycle': SubscriptionPlan.ONE_MONTH,
+                'status': SubscriptionStatus.ACTIVE,
+                'start_trial': False,
+                'trial_days': 0,
+                'amount': 30.0,
+                'is_current': True,
+                'started_at': datetime.now(UTC),
+                'ended_at': None,
+                'expires_at': datetime.now(UTC) + timedelta(days=30),
+                'payment_provider': 'stripe',
+                'stripe_subscription_id': 'sub_test_123',
+                'stripe_customer_id': 'cus_test_123',
+                'stripe_price_id': 'price_month',
+            }
+        )
+    )
+
+    async def override_subscription_service():
+        return SubscriptionService(
+            UserRepository(mock_db),
+            SubscriptionPlanRepository(mock_db),
+            CouponRepository(mock_db),
+            UserSubscriptionRepository(mock_db),
+            fake_stripe,
+        )
+
+    app.dependency_overrides[get_subscription_service] = override_subscription_service
+
+    with TestClient(app) as client:
+        response = client.post(
+            '/api/v1/subscriptions/user/cancel',
+            headers={'Authorization': f'Bearer {owner_token}'},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['message'] == 'Subscription canceled successfully'
+    assert payload['subscription']['status'] == 'canceled'
+    assert payload['subscription']['selection_required'] is True
+
+    user = asyncio.run(mock_db['users'].find_one({'_id': owner_id}))
+    assert user['subscription_status'] == 'canceled'

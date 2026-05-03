@@ -72,6 +72,10 @@ class StripeBillingService:
         client = self._require_client()
         return await asyncio.to_thread(client.Subscription.retrieve, subscription_id, expand=['items.data.price'])
 
+    async def cancel_subscription(self, subscription_id: str) -> dict[str, Any]:
+        client = self._require_client()
+        return await asyncio.to_thread(client.Subscription.cancel, subscription_id)
+
     def construct_event(self, payload: bytes, sig_header: str | None) -> dict[str, Any]:
         client = self._require_client()
         if not sig_header or not self.settings.stripe_webhook_secret:

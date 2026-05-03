@@ -989,6 +989,7 @@ class RestaurantSettingsSubscriptionResponse(BaseSchema):
     plans_endpoint: str = "/api/v1/subscriptions/user/plans"
     checkout_endpoint: str = "/api/v1/subscriptions/user/checkout-session"
     customer_portal_endpoint: str = "/api/v1/subscriptions/user/customer-portal"
+    cancel_endpoint: str = "/api/v1/subscriptions/user/cancel"
 
 
 class RestaurantNotificationSettingsResponse(BaseSchema):

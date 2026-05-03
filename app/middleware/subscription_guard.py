@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from app.core.enums import UserRole
+from app.core.enums import SubscriptionStatus, UserRole
 from app.core.security import token_manager
 from app.db.mongodb import get_database
 from app.repositories.user import UserRepository
@@ -25,6 +25,11 @@ ALLOWED_PATH_PREFIXES = (
     '/api/v1/support',
 )
 RESTAURANT_ROLES = {UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF}
+BLOCKED_SUBSCRIPTION_STATUSES = {
+    SubscriptionStatus.CANCELED,
+    SubscriptionStatus.EXPIRED,
+    SubscriptionStatus.SUSPENDED,
+}
 
 
 class SubscriptionGuardMiddleware(BaseHTTPMiddleware):
@@ -61,6 +66,19 @@ class SubscriptionGuardMiddleware(BaseHTTPMiddleware):
                     'error': {
                         'code': 'subscription_required',
                         'message': 'Select a subscription plan before accessing this resource',
+                        'details': {'selection_required': True},
+                    },
+                },
+            )
+
+        if user.get('role') in RESTAURANT_ROLES and user.get('subscription_status') in BLOCKED_SUBSCRIPTION_STATUSES:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    'success': False,
+                    'error': {
+                        'code': 'subscription_required',
+                        'message': 'An active subscription is required to access this resource',
                         'details': {'selection_required': True},
                     },
                 },
