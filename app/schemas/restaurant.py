@@ -977,6 +977,17 @@ class RestaurantNotificationSettingsUpdateRequest(BaseSchema):
     daily_summary_notifications: bool | None = None
 
 
+class PushDeviceRegistrationRequest(BaseSchema):
+    expo_push_token: str = Field(min_length=8, max_length=255)
+    device_id: str = Field(min_length=8, max_length=120)
+    platform: Literal["ios", "android", "web", "unknown"] = "unknown"
+    device_name: str | None = Field(default=None, max_length=120)
+
+
+class PushDeviceUnregisterRequest(BaseSchema):
+    device_id: str = Field(min_length=8, max_length=120)
+
+
 class RestaurantChangePasswordRequest(BaseSchema):
     current_password: str = Field(min_length=8, max_length=72)
     new_password: str = Field(min_length=8, max_length=72)

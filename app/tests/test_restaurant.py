@@ -2103,6 +2103,35 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert changed_user["notification_settings"]["push_notifications"] is False
     assert changed_user["notification_settings"]["marketing_notifications"] is True
 
+    register_push_device_response = client.post(
+        "/api/v1/restaurant/settings/push-devices/register",
+        headers=headers,
+        json={
+            "expo_push_token": "ExponentPushToken[test-token-1]",
+            "device_id": "device-abc-123",
+            "platform": "android",
+            "device_name": "android",
+        },
+    )
+    assert register_push_device_response.status_code == 200
+    assert register_push_device_response.json() == {"message": "Push device registered"}
+
+    changed_user = asyncio.run(db["users"].find_one({"email": "alex@example.com"}))
+    assert len(changed_user["push_devices"]) == 1
+    assert changed_user["push_devices"][0]["device_id"] == "device-abc-123"
+    assert changed_user["push_devices"][0]["expo_push_token"] == "ExponentPushToken[test-token-1]"
+
+    unregister_push_device_response = client.post(
+        "/api/v1/restaurant/settings/push-devices/unregister",
+        headers=headers,
+        json={"device_id": "device-abc-123"},
+    )
+    assert unregister_push_device_response.status_code == 200
+    assert unregister_push_device_response.json() == {"message": "Push device unregistered"}
+
+    changed_user = asyncio.run(db["users"].find_one({"email": "alex@example.com"}))
+    assert changed_user["push_devices"] == []
+
     change_password_response = client.post(
         "/api/v1/restaurant/settings/change-password",
         headers=headers,

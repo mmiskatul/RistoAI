@@ -61,6 +61,8 @@ from app.schemas.restaurant import (
     RestaurantNotificationFeedResponse,
     RestaurantNotificationSettingsResponse,
     RestaurantNotificationSettingsUpdateRequest,
+    PushDeviceRegistrationRequest,
+    PushDeviceUnregisterRequest,
     RestaurantChangePasswordRequest,
     RestaurantProfileResponse,
     RestaurantProfileUpdateRequest,
@@ -729,6 +731,24 @@ async def update_notification_settings(
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> RestaurantNotificationSettingsResponse:
     return await service.update_notification_settings(current_user, payload)
+
+
+@router.post('/settings/push-devices/register', response_model=MessageResponse, tags=['Restaurant Settings'], summary='Register Push Device', description='Registers the current mobile device Expo push token for restaurant push notifications.')
+async def register_push_device(
+    payload: PushDeviceRegistrationRequest,
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> MessageResponse:
+    return await service.register_push_device(current_user, payload)
+
+
+@router.post('/settings/push-devices/unregister', response_model=MessageResponse, tags=['Restaurant Settings'], summary='Unregister Push Device', description='Removes the current mobile device from restaurant push notifications.')
+async def unregister_push_device(
+    payload: PushDeviceUnregisterRequest,
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> MessageResponse:
+    return await service.unregister_push_device(current_user, payload)
 
 
 @router.post('/settings/change-password', response_model=MessageResponse, tags=['Restaurant Settings'], summary='Change Password', description='Changes the current authenticated restaurant user password.')

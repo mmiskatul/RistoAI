@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+import logging
 from datetime import UTC, date, datetime, timedelta
 from html import escape
 from typing import Any
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 from bson import ObjectId
 from fastapi import UploadFile
@@ -120,6 +124,8 @@ from app.schemas.restaurant import (
     RestaurantNotificationFeedResponse,
     RestaurantNotificationSettingsResponse,
     RestaurantNotificationSettingsUpdateRequest,
+    PushDeviceRegistrationRequest,
+    PushDeviceUnregisterRequest,
     RestaurantProfileResponse,
     RestaurantProfileUpdateRequest,
     RestaurantSettingsSubscriptionResponse,
@@ -134,6 +140,8 @@ from app.services.image_storage import ImageStorageService, UploadedImage
 from app.services.openai_ops import OpenAIOperationsService
 from app.services.restaurant_cash import build_aggregate_snapshot, calculate_cash_ledger
 from app.utils.pagination import build_pagination_meta
+
+logger = logging.getLogger(__name__)
 
 
 class RestaurantOperationsService(BaseService):
@@ -1401,6 +1409,7 @@ class RestaurantOperationsService(BaseService):
             document=serialized_document,
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=resolved_invoice_date, current_user=current_user)
+        await self._send_activity_push_for_document(current_user, serialized_document)
         return self._to_document_confirm_save(document)
 
     async def confirm_document(self, current_user: dict, document_id: str, payload: DocumentConfirmRequest) -> DocumentDetailResponse:
@@ -1574,6 +1583,7 @@ class RestaurantOperationsService(BaseService):
             transactions=self._build_expense_transactions(serialized_expense),
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=payload.expense_date, current_user=current_user)
+        await self._send_activity_push_for_expense(current_user, serialized_expense)
         return self._to_expense_response(document)
 
     async def list_expenses(self, current_user: dict, *, page: int, page_size: int) -> ExpenseListResponse:
@@ -1669,6 +1679,7 @@ class RestaurantOperationsService(BaseService):
             transactions=self._build_cash_deposit_transactions(serialized_deposit),
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=payload.deposit_date, current_user=current_user)
+        await self._send_activity_push_for_cash_deposit(current_user, serialized_deposit)
         return self._to_cash_deposit_response(document)
 
     async def get_cash_deposit(self, current_user: dict, deposit_id: str) -> CashDepositResponse:
@@ -1964,6 +1975,7 @@ class RestaurantOperationsService(BaseService):
             record=serialized_document,
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=business_date, current_user=current_user)
+        await self._send_activity_push_for_daily_record(current_user, serialized_document)
         return self._to_daily_data_response(document)
 
     async def update_daily_data(self, current_user: dict, record_id: str, payload: DailyDataCreateRequest) -> DailyDataResponse:
@@ -2364,6 +2376,8 @@ class RestaurantOperationsService(BaseService):
             purchase_date=purchase_date,
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=purchase_date, current_user=current_user)
+        await self._send_activity_push_for_inventory(current_user, self.serialize(document))
+        await self._send_low_stock_push_if_needed(current_user, self.serialize(document))
         return self._to_inventory_item_response(document)
 
     async def list_inventory(self, current_user: dict, *, page: int, page_size: int, search: str | None, status: str | None, category: str | None) -> InventoryListResponse:
@@ -2445,6 +2459,8 @@ class RestaurantOperationsService(BaseService):
                 "history": history,
             },
         )
+        serialized_updated = self.serialize(updated)
+        await self._send_low_stock_push_if_needed(current_user, serialized_updated)
         return self._to_inventory_detail_response(updated)
 
     async def get_analytics(self, current_user: dict, *, period: str = "weekly", from_date: date | None = None, to_date: date | None = None) -> AnalyticsOverviewResponse:
@@ -2981,6 +2997,43 @@ class RestaurantOperationsService(BaseService):
         merged = existing.model_dump() | payload.model_dump(exclude_none=True)
         await self.user_repository.update(current_user["_id"], {"notification_settings": merged})
         return RestaurantNotificationSettingsResponse(**merged)
+
+    async def register_push_device(self, current_user: dict, payload: PushDeviceRegistrationRequest) -> MessageResponse:
+        serialized = self.serialize(current_user)
+        existing_devices = serialized.get("push_devices") or []
+        now = datetime.now(UTC)
+        next_devices: list[dict[str, Any]] = []
+        for item in existing_devices:
+            if not isinstance(item, dict):
+                continue
+            same_device = str(item.get("device_id") or "") == payload.device_id
+            same_token = str(item.get("expo_push_token") or "") == payload.expo_push_token
+            if same_device or same_token:
+                continue
+            next_devices.append(item)
+        next_devices.append(
+            {
+                "device_id": payload.device_id,
+                "expo_push_token": payload.expo_push_token,
+                "platform": payload.platform,
+                "device_name": payload.device_name,
+                "last_registered_at": now,
+                "updated_at": now,
+            }
+        )
+        await self.user_repository.update(current_user["_id"], {"push_devices": next_devices})
+        return MessageResponse(message="Push device registered")
+
+    async def unregister_push_device(self, current_user: dict, payload: PushDeviceUnregisterRequest) -> MessageResponse:
+        serialized = self.serialize(current_user)
+        existing_devices = serialized.get("push_devices") or []
+        next_devices = [
+            item
+            for item in existing_devices
+            if isinstance(item, dict) and str(item.get("device_id") or "") != payload.device_id
+        ]
+        await self.user_repository.update(current_user["_id"], {"push_devices": next_devices})
+        return MessageResponse(message="Push device unregistered")
 
     async def change_password(self, current_user: dict, payload: RestaurantChangePasswordRequest) -> MessageResponse:
         if not password_manager.verify_password(payload.current_password, current_user["hashed_password"]):
@@ -4668,6 +4721,186 @@ class RestaurantOperationsService(BaseService):
     @staticmethod
     def _format_notification_currency(amount: float) -> str:
         return f"€{abs(float(amount or 0)):,.2f}"
+
+    @staticmethod
+    def _resolve_push_devices(current_user: dict) -> list[dict[str, Any]]:
+        serialized = RestaurantOperationsService.serialize(current_user)
+        devices = serialized.get("push_devices") or []
+        return [item for item in devices if isinstance(item, dict) and item.get("expo_push_token")]
+
+    async def _send_push_notification(
+        self,
+        current_user: dict,
+        *,
+        title: str,
+        body: str,
+        data: dict[str, Any] | None = None,
+        respect_low_stock_alerts: bool = False,
+        respect_daily_summary_alerts: bool = False,
+    ) -> None:
+        try:
+            settings = await self.get_notification_settings(current_user)
+            if not settings.push_notifications:
+                return
+            if respect_low_stock_alerts and not settings.low_stock_alerts:
+                return
+            if respect_daily_summary_alerts and not settings.daily_summary_notifications:
+                return
+
+            devices = self._resolve_push_devices(current_user)
+            if not devices:
+                return
+
+            messages = [
+                {
+                    "to": str(device["expo_push_token"]),
+                    "title": title,
+                    "body": body,
+                    "sound": "default",
+                    "data": data or {},
+                }
+                for device in devices
+            ]
+            await asyncio.to_thread(self._post_expo_push_messages, messages)
+        except Exception as exc:
+            logger.warning("Push notification delivery failed: %s", exc)
+
+    @staticmethod
+    def _post_expo_push_messages(messages: list[dict[str, Any]]) -> None:
+        if not messages:
+            return
+        request = urllib_request.Request(
+            "https://exp.host/--/api/v2/push/send",
+            data=json.dumps(messages).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=10) as response:
+                response.read()
+        except urllib_error.URLError as exc:
+            raise RuntimeError(f"Expo push request failed: {exc}") from exc
+
+    async def _send_activity_push_for_daily_record(self, current_user: dict, item: dict[str, Any]) -> None:
+        business_date = self._safe_parse_date(item.get("business_date"))
+        cash_available = float(item.get("cash_available", 0) or 0)
+        total_revenue = float(item.get("total_revenue", 0) or 0)
+        await self._send_push_notification(
+            current_user,
+            title=f"Daily cash updated to {self._format_notification_currency(cash_available)}",
+            body=(
+                f"Revenue {self._format_notification_currency(total_revenue)}"
+                f" on {(business_date.strftime('%d %b %Y') if business_date else str(item.get('business_date') or 'today'))}"
+            ),
+            data={
+                "route": f"/(tabs)/home/daily-record-details?dataId={item['id']}",
+                "kind": "daily_record",
+                "entity_id": str(item.get("id") or ""),
+            },
+            respect_daily_summary_alerts=True,
+        )
+
+    async def _send_activity_push_for_document(self, current_user: dict, item: dict[str, Any]) -> None:
+        expense_amount = float(item.get("expense_amount", 0) or 0)
+        cash_amount = float(item.get("cash_amount", 0) or 0)
+        revenue_amount = float(item.get("revenue_amount", 0) or 0)
+        profit_amount = float(item.get("profit_amount", 0) or 0)
+        if expense_amount > 0:
+            title = f"Expenses increased by {self._format_notification_currency(expense_amount)}"
+        elif cash_amount > 0:
+            title = f"Cash available increased by {self._format_notification_currency(cash_amount)}"
+        elif revenue_amount > 0:
+            title = f"Revenue increased by {self._format_notification_currency(revenue_amount)}"
+        elif profit_amount != 0:
+            direction = "increased" if profit_amount > 0 else "decreased"
+            title = f"Profit {direction} by {self._format_notification_currency(profit_amount)}"
+        else:
+            title = "Document processed"
+        await self._send_push_notification(
+            current_user,
+            title=title,
+            body=str(item.get("counterparty_name") or item.get("supplier_name") or item.get("source_file_name") or "Document saved"),
+            data={
+                "route": f"/(tabs)/documents/{item['id']}",
+                "kind": "invoice",
+                "entity_id": str(item.get("id") or ""),
+            },
+        )
+
+    async def _send_activity_push_for_expense(self, current_user: dict, item: dict[str, Any]) -> None:
+        amount = float(item.get("amount", 0) or 0)
+        section = str(item.get("section") or "cash").lower()
+        title = (
+            f"Cash available decreased by {self._format_notification_currency(amount)}"
+            if section == "cash"
+            else f"Expenses increased by {self._format_notification_currency(amount)}"
+        )
+        await self._send_push_notification(
+            current_user,
+            title=title,
+            body=str(item.get("category") or "Expense"),
+            data={
+                "route": f"/(tabs)/home/expense-details?id={item['id']}",
+                "kind": "expense",
+                "entity_id": str(item.get("id") or ""),
+            },
+        )
+
+    async def _send_activity_push_for_cash_deposit(self, current_user: dict, item: dict[str, Any]) -> None:
+        amount = float(item.get("amount", 0) or 0)
+        transaction_type = str(item.get("type") or "bank_deposit")
+        if transaction_type in {"bank_deposit", "cash_deposit", "cash_withdrawal", "cash_out", "cash_expense"}:
+            title = f"Cash available decreased by {self._format_notification_currency(amount)}"
+        elif transaction_type == "cash_in":
+            title = f"Cash available increased by {self._format_notification_currency(amount)}"
+        else:
+            title = f"Collections increased by {self._format_notification_currency(amount)}"
+        await self._send_push_notification(
+            current_user,
+            title=title,
+            body=str(item.get("bank_account") or item.get("display_title") or "Cash transaction"),
+            data={
+                "route": f"/(tabs)/home/cash-transaction-details?id={item['id']}",
+                "kind": "cash",
+                "entity_id": str(item.get("id") or ""),
+            },
+        )
+
+    async def _send_activity_push_for_inventory(self, current_user: dict, item: dict[str, Any]) -> None:
+        stock_quantity = float(item.get("stock_quantity", 0) or 0)
+        unit_price = float(item.get("unit_price", 0) or 0)
+        total_value = stock_quantity * unit_price
+        await self._send_push_notification(
+            current_user,
+            title=f"Inventory value increased by {self._format_notification_currency(total_value)}",
+            body=str(item.get("product_name") or item.get("category") or "Inventory item"),
+            data={
+                "route": f"/(tabs)/inventory/{item['id']}",
+                "kind": "inventory",
+                "entity_id": str(item.get("id") or ""),
+            },
+        )
+
+    async def _send_low_stock_push_if_needed(self, current_user: dict, item: dict[str, Any]) -> None:
+        stock_status = str(item.get("stock_status") or "")
+        if stock_status not in {"low_stock", "out_of_stock"}:
+            return
+        quantity = float(item.get("stock_quantity", 0) or 0)
+        unit = str(item.get("unit_type") or "units")
+        await self._send_push_notification(
+            current_user,
+            title=f"Low stock alert: {str(item.get('product_name') or 'Inventory item')}",
+            body=f"{quantity:g} {unit} remaining. Restock soon.",
+            data={
+                "route": f"/(tabs)/inventory/{item['id']}",
+                "kind": "inventory_low_stock",
+                "entity_id": str(item.get("id") or ""),
+            },
+            respect_low_stock_alerts=True,
+        )
 
     def _build_notification_feed(
         self,
