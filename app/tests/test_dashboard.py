@@ -188,7 +188,7 @@ def test_dashboard_overview_returns_all_aggregated_data_for_admin():
         'pending_verifications': 1,
         'active_subscriptions': 1,
         'trial_users': 1,
-        'monthly_revenue': 29.0,
+        'monthly_revenue': 30.0,
         'admins': 1,
         'restaurant_owners': 1,
         'managers': 1,
@@ -200,8 +200,8 @@ def test_dashboard_overview_returns_all_aggregated_data_for_admin():
     assert payload['charts']['monthly_completed_onboarding'][1] == {'month': 2, 'label': 'Feb', 'value': 1}
     assert payload['charts']['monthly_completed_onboarding'][2] == {'month': 3, 'label': 'Mar', 'value': 1}
     assert payload['charts']['monthly_revenue'][0] == {'key': '2026-01', 'label': 'JAN', 'value': 0.0}
-    assert payload['charts']['monthly_revenue'][1] == {'key': '2026-02', 'label': 'FEB', 'value': 29.0}
-    assert payload['charts']['monthly_revenue'][2] == {'key': '2026-03', 'label': 'MAR', 'value': 29.0}
+    assert payload['charts']['monthly_revenue'][1] == {'key': '2026-02', 'label': 'FEB', 'value': 30.0}
+    assert payload['charts']['monthly_revenue'][2] == {'key': '2026-03', 'label': 'MAR', 'value': 30.0}
     assert len(payload['charts']['weekly_revenue']) == 8
     assert payload['charts']['weekly_revenue'][0]['key'].startswith('2026-W')
     assert payload['charts']['users_by_role'] == [

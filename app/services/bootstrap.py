@@ -54,6 +54,18 @@ class BootstrapService:
 
         existing_plan = await self.subscription_plan_repository.get_optional_plan()
         if existing_plan:
+            updates = {
+                'singleton_key': self.SINGLETON_KEY,
+                'name': settings.subscription_plan_name,
+                'monthly_price': settings.subscription_plan_monthly_price,
+                'annual_price': settings.subscription_plan_annual_price,
+                'trial_days': settings.subscription_plan_trial_days,
+                'features': settings.subscription_plan_features,
+                'is_visible': settings.subscription_plan_is_visible,
+                'is_active': settings.subscription_plan_is_active,
+                'is_best_plan': settings.subscription_plan_is_best,
+            }
+            await self.subscription_plan_repository.update(existing_plan['_id'], updates)
             return
 
         await self.subscription_plan_repository.create(

@@ -586,8 +586,8 @@ class DashboardService(BaseService):
             return round(float(plan["monthly_price"]), 2)
 
         if user.get("subscription_plan") == SubscriptionPlan.ONE_YEAR:
-            return round(290.0 / 12, 2)
-        return 29.0
+            return round(300.0 / 12, 2)
+        return 30.0
 
     @staticmethod
     def _format_currency(value: float) -> str:
@@ -602,5 +602,5 @@ class DashboardService(BaseService):
             return round(float(plan["monthly_price"]), 2)
 
         if user.get("subscription_plan") == SubscriptionPlan.ONE_YEAR:
-            return 290.0
-        return 29.0
+            return 300.0
+        return 30.0

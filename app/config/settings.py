@@ -62,7 +62,7 @@ class Settings(BaseSettings):
 
     subscription_plan_name: str = Field(default="Core Plan", alias="SUBSCRIPTION_PLAN_NAME")
     subscription_plan_monthly_price: float = Field(default=30.0, alias="SUBSCRIPTION_PLAN_MONTHLY_PRICE")
-    subscription_plan_annual_price: float = Field(default=350.0, alias="SUBSCRIPTION_PLAN_ANNUAL_PRICE")
+    subscription_plan_annual_price: float = Field(default=300.0, alias="SUBSCRIPTION_PLAN_ANNUAL_PRICE")
     subscription_plan_trial_days: int = Field(default=7, alias="SUBSCRIPTION_PLAN_TRIAL_DAYS")
     subscription_plan_features: list[str] = Field(
         default_factory=lambda: ["AI menu suggestions", "Basic sales analytics", "Email support"],

@@ -126,8 +126,8 @@ def _seed_subscription_data(mock_db):
                 '_id': ObjectId(),
                 'singleton_key': 'default_plan',
                 'name': 'Core Plan',
-                'monthly_price': 29.0,
-                'annual_price': 290.0,
+                'monthly_price': 30.0,
+                'annual_price': 300.0,
                 'trial_days': 7,
                 'features': ['Advanced AI insights', 'Revenue analytics'],
                 'is_visible': True,
@@ -212,7 +212,7 @@ def test_subscription_overview_returns_page_data():
         'active_subscriptions': 1,
         'trial_users': 1,
         'monthly_revenue_mrr': 24.17,
-        'annual_revenue': 290.0,
+        'annual_revenue': 300.0,
     }
     assert payload['total'] == 3
     assert len(payload['revenue_chart']) == 6
@@ -232,8 +232,8 @@ def test_subscription_plan_management_returns_plans_and_coupons():
     assert response.status_code == 200
     payload = response.json()
     assert payload['plan']['name'] == 'Core Plan'
-    assert payload['plan']['monthly_price'] == 29.0
-    assert payload['plan']['annual_price'] == 290.0
+    assert payload['plan']['monthly_price'] == 30.0
+    assert payload['plan']['annual_price'] == 300.0
     assert payload['plan']['trial_days'] == 7
     assert payload['plan']['is_visible'] is True
     assert payload['active_plan']['name'] == 'Core Plan'
