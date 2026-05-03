@@ -648,6 +648,18 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     assert inventory_list_payload["total_inventory_value"] == 54.0
     assert inventory_list_payload["items"][0]["id"] == inventory_id
 
+    categories_user_one = client.get("/api/v1/restaurant/inventory/categories", headers=headers_user_one)
+    assert categories_user_one.status_code == 200
+    assert categories_user_one.json()["items"][0]["name"] == "Sauce"
+
+    suppliers_user_one = client.get("/api/v1/restaurant/inventory/suppliers", headers=headers_user_one)
+    assert suppliers_user_one.status_code == 200
+    assert suppliers_user_one.json()["items"][0]["name"] == "Global Foods Inc."
+
+    categories_user_two = client.get("/api/v1/restaurant/inventory/categories", headers=headers_user_two)
+    assert categories_user_two.status_code == 200
+    assert categories_user_two.json()["items"] == []
+
     inventory_update_response = client.patch(
         f"/api/v1/restaurant/inventory/{inventory_id}",
         headers=headers_user_one,
@@ -655,6 +667,26 @@ def test_restaurant_endpoints_are_scoped_per_user(client, app):
     )
     assert inventory_update_response.status_code == 200
     assert inventory_update_response.json()["supplier_name"] == "Updated Supplier"
+
+    create_category_response = client.post(
+        "/api/v1/restaurant/inventory/categories",
+        headers=headers_user_one,
+        json={"name": "Cured meats"},
+    )
+    assert create_category_response.status_code == 201
+    assert create_category_response.json()["name"] == "Cured meats"
+
+    create_duplicate_category_response = client.post(
+        "/api/v1/restaurant/inventory/categories",
+        headers=headers_user_one,
+        json={"name": "  cured meats  "},
+    )
+    assert create_duplicate_category_response.status_code == 201
+    assert create_duplicate_category_response.json()["id"] == create_category_response.json()["id"]
+
+    suppliers_user_one_after_update = client.get("/api/v1/restaurant/inventory/suppliers", headers=headers_user_one)
+    assert suppliers_user_one_after_update.status_code == 200
+    assert {item["name"] for item in suppliers_user_one_after_update.json()["items"]} == {"Global Foods Inc.", "Updated Supplier"}
 
     inventory_stock_response = client.post(
         f"/api/v1/restaurant/inventory/{inventory_id}/stock-update",

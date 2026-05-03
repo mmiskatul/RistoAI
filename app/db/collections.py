@@ -26,6 +26,8 @@ class RestaurantCollections:
     CASH_DEPOSITS = "restaurant_cash_deposits"
     BANK_ACCOUNTS = "restaurant_bank_accounts"
     INVENTORY_ITEMS = "restaurant_inventory_items"
+    INVENTORY_CATEGORIES = "restaurant_inventory_categories"
+    INVENTORY_SUPPLIERS = "restaurant_inventory_suppliers"
     CHAT_MESSAGES = "restaurant_chat_messages"
     AI_INSIGHTS = "restaurant_ai_insights"
 
@@ -50,6 +52,8 @@ ALL_COLLECTIONS = {
     RestaurantCollections.CASH_DEPOSITS,
     RestaurantCollections.BANK_ACCOUNTS,
     RestaurantCollections.INVENTORY_ITEMS,
+    RestaurantCollections.INVENTORY_CATEGORIES,
+    RestaurantCollections.INVENTORY_SUPPLIERS,
     RestaurantCollections.CHAT_MESSAGES,
     RestaurantCollections.AI_INSIGHTS,
 }

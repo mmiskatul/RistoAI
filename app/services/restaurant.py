@@ -27,7 +27,9 @@ from app.repositories.restaurant_ops import (
     RestaurantExpenseRepository,
     RestaurantFinanceTransactionRepository,
     RestaurantInsightRepository,
+    RestaurantInventoryCategoryRepository,
     RestaurantInventoryRepository,
+    RestaurantInventorySupplierRepository,
     ScopedRepository,
 )
 from app.repositories.user import UserRepository
@@ -99,15 +101,22 @@ from app.schemas.restaurant import (
     InsightActionResponse,
     InsightDetailResponse,
     InsightSummaryResponse,
+    InventoryCategoryCreateRequest,
+    InventoryCategoryListResponse,
+    InventoryCategoryResponse,
+    InventoryCreateRequest,
     InventoryDetailResponse,
     InventoryHistoryItemResponse,
     InventoryItemResponse,
     InventoryListResponse,
-    InventoryValueResponse,
-    InventoryStockUpdateRequest,
-    InventoryUpdateRequest,
     InventoryListItemActionResponse,
+    InventoryStockUpdateRequest,
     InventorySupplierCardResponse,
+    InventorySupplierCreateRequest,
+    InventorySupplierListResponse,
+    InventorySupplierResponse,
+    InventoryUpdateRequest,
+    InventoryValueResponse,
     DailyDataRevenueBreakdownItemResponse,
     DailyDataCoversSummaryResponse,
     DailyDataRegisterSummaryResponse,
@@ -300,6 +309,8 @@ class RestaurantOperationsService(BaseService):
         monthly_record_repository: RestaurantMonthlyRecordRepository,
         finance_transaction_repository: RestaurantFinanceTransactionRepository,
         inventory_repository: RestaurantInventoryRepository,
+        inventory_category_repository: RestaurantInventoryCategoryRepository,
+        inventory_supplier_repository: RestaurantInventorySupplierRepository,
         chat_repository: RestaurantChatRepository,
         insight_repository: RestaurantInsightRepository,
         openai_service: OpenAIOperationsService,
@@ -316,6 +327,8 @@ class RestaurantOperationsService(BaseService):
         self.monthly_record_repository = monthly_record_repository
         self.finance_transaction_repository = finance_transaction_repository
         self.inventory_repository = inventory_repository
+        self.inventory_category_repository = inventory_category_repository
+        self.inventory_supplier_repository = inventory_supplier_repository
         self.chat_repository = chat_repository
         self.insight_repository = insight_repository
         self.openai_service = openai_service
@@ -1803,6 +1816,28 @@ class RestaurantOperationsService(BaseService):
             ],
         )
 
+    async def list_inventory_categories(self, current_user: dict) -> InventoryCategoryListResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        items = await self.inventory_category_repository.list_by_scope(scope_id=scope_id, limit=100)
+        return InventoryCategoryListResponse(items=[self._to_inventory_category_response(item) for item in items])
+
+    async def create_inventory_category(self, current_user: dict, payload: InventoryCategoryCreateRequest) -> InventoryCategoryResponse:
+        document = await self._upsert_inventory_category(current_user=current_user, name=payload.name)
+        if document is None:
+            raise ValidationException("Category name is required.")
+        return self._to_inventory_category_response(document)
+
+    async def list_inventory_suppliers(self, current_user: dict) -> InventorySupplierListResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        items = await self.inventory_supplier_repository.list_by_scope(scope_id=scope_id, limit=100)
+        return InventorySupplierListResponse(items=[self._to_inventory_supplier_response(item) for item in items])
+
+    async def create_inventory_supplier(self, current_user: dict, payload: InventorySupplierCreateRequest) -> InventorySupplierResponse:
+        document = await self._upsert_inventory_supplier(current_user=current_user, name=payload.name)
+        if document is None:
+            raise ValidationException("Supplier name is required.")
+        return self._to_inventory_supplier_response(document)
+
     async def get_cash_management(self, current_user: dict) -> CashManagementSummaryResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         (deposits, _), (daily_records, _), (finance_transactions, _) = await asyncio.gather(
@@ -2348,6 +2383,8 @@ class RestaurantOperationsService(BaseService):
         if payload.stock_quantity:
             history.append({"kind": "purchase_record", "quantity_delta": round(payload.stock_quantity * payload.unit_price, 2), "occurred_at": datetime.now(UTC)})
             history.append({"kind": "stock_added", "quantity_delta": payload.stock_quantity, "occurred_at": datetime.now(UTC)})
+        await self._upsert_inventory_category(current_user=current_user, name=payload.category)
+        await self._upsert_inventory_supplier(current_user=current_user, name=payload.supplier_name)
         document = await self.inventory_repository.create(
             {
                 "tenant_id": scope_id,
@@ -2411,6 +2448,8 @@ class RestaurantOperationsService(BaseService):
         updates["stock_status"] = self._resolve_stock_status(stock_quantity, alert_threshold)
         updated = await self.inventory_repository.update(item["_id"], updates)
         serialized_updated = self.serialize(updated)
+        await self._upsert_inventory_category(current_user=current_user, name=str(serialized_updated.get("category") or ""))
+        await self._upsert_inventory_supplier(current_user=current_user, name=str(serialized_updated.get("supplier_name") or ""))
         new_purchase_date = self._safe_parse_date(serialized_updated.get("purchase_date")) or previous_purchase_date or datetime.now(UTC).date()
         await self._upsert_inventory_linked_expense(
             scope_id=scope_id,
@@ -5450,6 +5489,52 @@ class RestaurantOperationsService(BaseService):
         return " ".join(value.strip().lower().split())
 
     @staticmethod
+    def _normalize_inventory_metadata_name(value: str | None) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
+    async def _upsert_inventory_category(self, *, current_user: dict, name: str | None) -> dict[str, Any] | None:
+        cleaned_name = str(name or "").strip()
+        normalized_name = self._normalize_inventory_metadata_name(cleaned_name)
+        if not normalized_name:
+            return None
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        existing = await self.inventory_category_repository.find_by_normalized_name(
+            scope_id=scope_id,
+            normalized_name=normalized_name,
+        )
+        if existing is not None:
+            return existing
+        return await self.inventory_category_repository.create(
+            {
+                "tenant_id": scope_id,
+                "name": cleaned_name,
+                "normalized_name": normalized_name,
+                "created_by_user_id": str(current_user["_id"]),
+            }
+        )
+
+    async def _upsert_inventory_supplier(self, *, current_user: dict, name: str | None) -> dict[str, Any] | None:
+        cleaned_name = str(name or "").strip()
+        normalized_name = self._normalize_inventory_metadata_name(cleaned_name)
+        if not normalized_name:
+            return None
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        existing = await self.inventory_supplier_repository.find_by_normalized_name(
+            scope_id=scope_id,
+            normalized_name=normalized_name,
+        )
+        if existing is not None:
+            return existing
+        return await self.inventory_supplier_repository.create(
+            {
+                "tenant_id": scope_id,
+                "name": cleaned_name,
+                "normalized_name": normalized_name,
+                "created_by_user_id": str(current_user["_id"]),
+            }
+        )
+
+    @staticmethod
     def _build_register_summary(payload: dict[str, Any]) -> DailyDataRegisterSummaryResponse:
         opening_cash = float(payload.get("opening_cash", 0) or 0)
         closing_cash = float(payload.get("closing_cash", 0) or 0)
@@ -5891,6 +5976,24 @@ class RestaurantOperationsService(BaseService):
             alert_threshold=serialized["alert_threshold"],
             stock_status=serialized["stock_status"],
             purchase_date=serialized.get("purchase_date"),
+            created_at=serialized["created_at"],
+            updated_at=serialized["updated_at"],
+        )
+
+    def _to_inventory_category_response(self, item: dict) -> InventoryCategoryResponse:
+        serialized = self.serialize(item)
+        return InventoryCategoryResponse(
+            id=serialized["id"],
+            name=str(serialized.get("name") or ""),
+            created_at=serialized["created_at"],
+            updated_at=serialized["updated_at"],
+        )
+
+    def _to_inventory_supplier_response(self, item: dict) -> InventorySupplierResponse:
+        serialized = self.serialize(item)
+        return InventorySupplierResponse(
+            id=serialized["id"],
+            name=str(serialized.get("name") or ""),
             created_at=serialized["created_at"],
             updated_at=serialized["updated_at"],
         )

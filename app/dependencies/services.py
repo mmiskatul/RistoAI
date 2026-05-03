@@ -20,6 +20,8 @@ from app.repositories.restaurant_ops import (
     RestaurantFinanceTransactionRepository,
     RestaurantInsightRepository,
     RestaurantInventoryRepository,
+    RestaurantInventoryCategoryRepository,
+    RestaurantInventorySupplierRepository,
 )
 from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.subscription_plan import SubscriptionPlanRepository
@@ -96,6 +98,8 @@ def build_restaurant_operations_service(db) -> RestaurantOperationsService:
         RestaurantMonthlyRecordRepository(db),
         RestaurantFinanceTransactionRepository(db),
         RestaurantInventoryRepository(db),
+        RestaurantInventoryCategoryRepository(db),
+        RestaurantInventorySupplierRepository(db),
         RestaurantChatRepository(db),
         RestaurantInsightRepository(db),
         OpenAIOperationsService(),

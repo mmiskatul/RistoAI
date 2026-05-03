@@ -402,6 +402,28 @@ class RestaurantInventoryRepository(ScopedRepository):
         return await self.get_multi(filters=filters, page=page, page_size=page_size)
 
 
+class RestaurantInventoryCategoryRepository(ScopedRepository):
+    collection_name = RestaurantCollections.INVENTORY_CATEGORIES
+
+    async def list_by_scope(self, *, scope_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        cursor = self.collection.find(self.scope_filters(scope_id)).sort([("name", ASCENDING)]).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def find_by_normalized_name(self, *, scope_id: str, normalized_name: str) -> dict[str, Any] | None:
+        return await self.get_one(self.scope_filters(scope_id, {"normalized_name": normalized_name}))
+
+
+class RestaurantInventorySupplierRepository(ScopedRepository):
+    collection_name = RestaurantCollections.INVENTORY_SUPPLIERS
+
+    async def list_by_scope(self, *, scope_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        cursor = self.collection.find(self.scope_filters(scope_id)).sort([("name", ASCENDING)]).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def find_by_normalized_name(self, *, scope_id: str, normalized_name: str) -> dict[str, Any] | None:
+        return await self.get_one(self.scope_filters(scope_id, {"normalized_name": normalized_name}))
+
+
 class RestaurantChatRepository(ScopedRepository):
     collection_name = RestaurantCollections.CHAT_MESSAGES
 

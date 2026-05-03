@@ -44,11 +44,17 @@ from app.schemas.restaurant import (
     ExpenseResponse,
     InsightDetailResponse,
     InsightSummaryResponse,
+    InventoryCategoryCreateRequest,
+    InventoryCategoryListResponse,
+    InventoryCategoryResponse,
     InventoryCreateRequest,
     InventoryDetailResponse,
     InventoryItemResponse,
     InventoryListResponse,
     InventoryStockUpdateRequest,
+    InventorySupplierCreateRequest,
+    InventorySupplierListResponse,
+    InventorySupplierResponse,
     InventoryUpdateRequest,
     InventoryValueResponse,
     RestaurantHomeResponse,
@@ -484,6 +490,40 @@ async def list_inventory(
         'list_inventory',
         lambda: service.list_inventory(current_user, page=page, page_size=page_size, search=search, status=status_filter, category=category),
     )
+
+
+@router.get('/inventory/categories', response_model=InventoryCategoryListResponse, tags=['Restaurant Inventory'], summary='Inventory Categories', description='Returns saved inventory categories for the authenticated restaurant.')
+async def list_inventory_categories(
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> InventoryCategoryListResponse:
+    return await service.list_inventory_categories(current_user)
+
+
+@router.post('/inventory/categories', response_model=InventoryCategoryResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Inventory'], summary='Create Inventory Category', description='Creates or reuses an inventory category for the authenticated restaurant.')
+async def create_inventory_category(
+    payload: InventoryCategoryCreateRequest,
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> InventoryCategoryResponse:
+    return await service.create_inventory_category(current_user, payload)
+
+
+@router.get('/inventory/suppliers', response_model=InventorySupplierListResponse, tags=['Restaurant Inventory'], summary='Inventory Suppliers', description='Returns saved inventory suppliers for the authenticated restaurant.')
+async def list_inventory_suppliers(
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> InventorySupplierListResponse:
+    return await service.list_inventory_suppliers(current_user)
+
+
+@router.post('/inventory/suppliers', response_model=InventorySupplierResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Inventory'], summary='Create Inventory Supplier', description='Creates or reuses an inventory supplier for the authenticated restaurant.')
+async def create_inventory_supplier(
+    payload: InventorySupplierCreateRequest,
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> InventorySupplierResponse:
+    return await service.create_inventory_supplier(current_user, payload)
 
 
 @router.get('/inventory/value', response_model=InventoryValueResponse, tags=['Restaurant Inventory'], summary='Inventory Value', description='Returns only the total inventory value for the inventory summary card.')

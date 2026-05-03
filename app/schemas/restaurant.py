@@ -711,6 +711,36 @@ class InventoryUpdateRequest(BaseSchema):
     purchase_date: date | None = None
 
 
+class InventoryCategoryCreateRequest(BaseSchema):
+    name: str = Field(min_length=2, max_length=80)
+
+
+class InventoryCategoryResponse(BaseSchema):
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+
+
+class InventoryCategoryListResponse(BaseSchema):
+    items: list[InventoryCategoryResponse] = Field(default_factory=list)
+
+
+class InventorySupplierCreateRequest(BaseSchema):
+    name: str = Field(min_length=2, max_length=120)
+
+
+class InventorySupplierResponse(BaseSchema):
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+
+
+class InventorySupplierListResponse(BaseSchema):
+    items: list[InventorySupplierResponse] = Field(default_factory=list)
+
+
 class InventoryStockUpdateRequest(BaseSchema):
     add_stock: float = Field(default=0, ge=0)
     remove_stock: float = Field(default=0, ge=0)

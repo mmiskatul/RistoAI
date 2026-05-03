@@ -208,6 +208,20 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         ],
     )
     await _create_indexes_safely(
+        db[RestaurantCollections.INVENTORY_CATEGORIES],
+        [
+            IndexModel([("tenant_id", ASCENDING), ("normalized_name", ASCENDING)], unique=True, name="uq_restaurant_inventory_categories_tenant_name"),
+            IndexModel([("tenant_id", ASCENDING), ("name", ASCENDING)], name="idx_restaurant_inventory_categories_tenant_label"),
+        ],
+    )
+    await _create_indexes_safely(
+        db[RestaurantCollections.INVENTORY_SUPPLIERS],
+        [
+            IndexModel([("tenant_id", ASCENDING), ("normalized_name", ASCENDING)], unique=True, name="uq_restaurant_inventory_suppliers_tenant_name"),
+            IndexModel([("tenant_id", ASCENDING), ("name", ASCENDING)], name="idx_restaurant_inventory_suppliers_tenant_label"),
+        ],
+    )
+    await _create_indexes_safely(
         db[RestaurantCollections.CHAT_MESSAGES],
         [
             IndexModel([("tenant_id", ASCENDING), ("created_at", ASCENDING)], name="idx_restaurant_chat_tenant_created"),
