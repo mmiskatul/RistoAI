@@ -2647,6 +2647,7 @@ class RestaurantOperationsService(BaseService):
                     language=analytics_language,
                     lunch_covers=lunch_covers,
                     dinner_covers=dinner_covers,
+                    fallback_records=daily_records,
                 ),
             ],
             "summary_stats": [
@@ -3241,8 +3242,28 @@ class RestaurantOperationsService(BaseService):
         }
 
     @staticmethod
-    def _build_peak_hour_metric(*, language: str, lunch_covers: int, dinner_covers: int) -> AnalyticsMetricTileResponse:
+    def _build_peak_hour_metric(
+        self,
+        *,
+        language: str,
+        lunch_covers: int,
+        dinner_covers: int,
+        fallback_records: list[dict] | None = None,
+    ) -> AnalyticsMetricTileResponse:
         total_covers = max(lunch_covers + dinner_covers, 0)
+        subtitle_suffix = ""
+        if total_covers <= 0 and fallback_records:
+            latest_cover_record = self._find_latest_record_with_cover_data(fallback_records)
+            if latest_cover_record is not None:
+                lunch_covers = int(latest_cover_record.get("lunch_covers", 0) or 0)
+                dinner_covers = int(latest_cover_record.get("dinner_covers", 0) or 0)
+                total_covers = max(lunch_covers + dinner_covers, 0)
+                subtitle_suffix = (
+                    " using latest available record"
+                    if language != "it"
+                    else " usando l'ultimo dato disponibile"
+                )
+
         if total_covers <= 0:
             return AnalyticsMetricTileResponse(
                 label="Peak Hour",
@@ -3259,9 +3280,9 @@ class RestaurantOperationsService(BaseService):
             label="Peak Hour",
             value="Cena" if language == "it" and is_dinner_peak else "Pranzo" if language == "it" else peak_service,
             subtitle=(
-                f"{peak_covers} covers, {peak_share}% of this period"
+                f"{peak_covers} covers, {peak_share}% of this period{subtitle_suffix}"
                 if language != "it"
-                else f"{peak_covers} coperti, {peak_share}% del periodo"
+                else f"{peak_covers} coperti, {peak_share}% del periodo{subtitle_suffix}"
             ),
         )
 
@@ -4477,6 +4498,20 @@ class RestaurantOperationsService(BaseService):
             if latest is None or candidate > latest:
                 latest = candidate
         return latest
+
+    def _find_latest_record_with_cover_data(self, records: list[dict]) -> dict[str, Any] | None:
+        latest_record: dict[str, Any] | None = None
+        latest_date: date | None = None
+        for item in self.serialize_list(records):
+            lunch_covers = int(item.get("lunch_covers", 0) or 0)
+            dinner_covers = int(item.get("dinner_covers", 0) or 0)
+            if lunch_covers + dinner_covers <= 0:
+                continue
+            candidate_date = self._safe_parse_date(item.get("business_date"))
+            if latest_date is None or candidate_date > latest_date:
+                latest_date = candidate_date
+                latest_record = item
+        return latest_record
 
     @staticmethod
     def _analytics_filter_label(period: str) -> str:

@@ -96,21 +96,7 @@ class Settings(BaseSettings):
         return "/openapi.json"
 
     @model_validator(mode="after")
-    def validate_smtp_settings(self) -> "Settings":
-        if self.smtp_use_tls and self.smtp_use_ssl:
-            raise ValueError("SMTP_USE_TLS and SMTP_USE_SSL cannot both be true")
-        if self.smtp_enabled:
-            required_fields = {
-                "SMTP_HOST": self.smtp_host,
-                "SMTP_USERNAME": self.smtp_username,
-                "SMTP_PASSWORD": self.smtp_password,
-                "SMTP_FROM_EMAIL": self.smtp_from_email,
-            }
-            missing_fields = [key for key, value in required_fields.items() if not value]
-            if missing_fields:
-                raise ValueError(
-                    f"SMTP is enabled but required settings are missing: {', '.join(missing_fields)}",
-                )
+    def validate_email_settings(self) -> "Settings":
         if self.resend_enabled and not self.resend_api_key:
             raise ValueError("RESEND is enabled but RESEND_API_KEY is missing")
         return self

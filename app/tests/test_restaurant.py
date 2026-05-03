@@ -1891,8 +1891,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert analytics_payload["insight_banner"]["title"] == business_insight_payload["title"]
     assert analytics_payload["metric_tiles"][0]["label"] == "Estimated Profit"
     assert analytics_payload["metric_tiles"][1]["label"] == "Peak Hour"
-    assert analytics_payload["metric_tiles"][1]["value"] == "1:00 PM"
-    assert analytics_payload["metric_tiles"][1]["subtitle"] == "53% dei coperti nel periodo"
+    assert analytics_payload["metric_tiles"][1]["value"] == "Lunch"
+    assert analytics_payload["metric_tiles"][1]["subtitle"] == "20 covers, 53% of this period"
     assert analytics_payload["summary_stats"][0]["label"] == "Revenue"
     assert analytics_payload["summary_stats"][0]["value"] == 1300
     assert analytics_payload["summary_stats"][1]["label"] == "Covers"
@@ -1921,6 +1921,68 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
 
     analytics_revenue_comparison_response = client.get("/api/v1/restaurant/analytics/revenue-comparison", headers=headers)
     assert analytics_revenue_comparison_response.status_code == 200
+
+
+def test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Fallback Owner",
+            "email": "fallback-owner@example.com",
+            "password": "FallbackOwner123",
+            "phone": "+1555000777",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today = datetime.now(UTC).date()
+    previous_day = today - timedelta(days=1)
+    older_day = today - timedelta(days=20)
+
+    older_entry_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "method_two": {
+                "business_date": older_day.isoformat(),
+                "pos_payments": 300,
+                "cash_payments": 100,
+                "bank_transfer_payments": 50,
+                "lunch_covers": 14,
+                "dinner_covers": 36,
+                "opening_cash": 100,
+                "closing_cash": 200,
+            },
+        },
+    )
+    assert older_entry_response.status_code == 201
+
+    current_period_entry_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_1",
+            "method_one": {
+                "business_date": previous_day.isoformat(),
+                "pos_payments": 250,
+                "cash_withdrawals": 0,
+                "cash_in": 20,
+                "cash_out": 0,
+                "expenses_in_cash": 0,
+                "notes": "No cover split",
+            },
+        },
+    )
+    assert current_period_entry_response.status_code == 201
+
+    analytics_response = client.get("/api/v1/restaurant/analytics/overview?period=weekly", headers=headers)
+    assert analytics_response.status_code == 200
+    analytics_payload = analytics_response.json()
+    assert analytics_payload["metric_tiles"][1]["label"] == "Peak Hour"
+    assert analytics_payload["metric_tiles"][1]["value"] == "Dinner"
+    assert analytics_payload["metric_tiles"][1]["subtitle"] == "36 covers, 72% of this period using latest available record"
     analytics_revenue_comparison_payload = analytics_revenue_comparison_response.json()
     assert analytics_revenue_comparison_payload["period"] == "weekly"
     assert analytics_revenue_comparison_payload["items"][0]["label"] == "This Week Revenue"
