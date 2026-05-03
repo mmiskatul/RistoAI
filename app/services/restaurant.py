@@ -2561,8 +2561,12 @@ class RestaurantOperationsService(BaseService):
         previous_revenue = round(current_revenue / 1.125, 2) if current_revenue else 0.0
         lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in serialized_records))
         dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in serialized_records))
+        analytics_language = self._resolve_chat_language(current_user)
         food_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "food" in str(item.get("category", "")).lower()), 2)
         staff_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "staff" in str(item.get("category", "")).lower()), 2)
+        revenue_base = max(float(context["revenue_total"]), 0.0)
+        food_cost_percent = round((food_cost_total / revenue_base) * 100, 1) if revenue_base > 0 else 0.0
+        staff_cost_percent = round((staff_cost_total / revenue_base) * 100, 1) if revenue_base > 0 else 0.0
         supplier_alerts = [
             AnalyticsSupplierAlertResponse(**item)
             for item in await self._build_supplier_alerts(
@@ -2584,7 +2588,11 @@ class RestaurantOperationsService(BaseService):
             "weekly_revenue": self._build_home_revenue_chart(filtered_daily_records, period=period, anchor_date=anchor_date),
             "metric_tiles": [
                 AnalyticsMetricTileResponse(label="Estimated Profit", value=estimated_profit, change_percent=8.2),
-                AnalyticsMetricTileResponse(label="Peak Hour", value="7:00 PM", subtitle="92% Capacity Avg"),
+                self._build_peak_hour_metric(
+                    language=analytics_language,
+                    lunch_covers=lunch_covers,
+                    dinner_covers=dinner_covers,
+                ),
             ],
             "summary_stats": [
                 AnalyticsSummaryStatResponse(label="Revenue", value=context["revenue_total"]),
@@ -2602,8 +2610,8 @@ class RestaurantOperationsService(BaseService):
                 AnalyticsSummaryStatResponse(label="Dinner", value=dinner_covers),
             ],
             "cost_breakdown": [
-                AnalyticsSummaryStatResponse(label="Food Cost", value=food_cost_total),
-                AnalyticsSummaryStatResponse(label="Staff Cost", value=staff_cost_total),
+                AnalyticsSummaryStatResponse(label="Food Cost", value=food_cost_percent),
+                AnalyticsSummaryStatResponse(label="Staff Cost", value=staff_cost_percent),
             ],
             "supplier_price_alerts": supplier_alerts,
         }
@@ -3139,6 +3147,30 @@ class RestaurantOperationsService(BaseService):
             "cash_collected_total": cash_collected_total,
             "cash_available": cash_available,
         }
+
+    @staticmethod
+    def _build_peak_hour_metric(*, language: str, lunch_covers: int, dinner_covers: int) -> AnalyticsMetricTileResponse:
+        total_covers = max(lunch_covers + dinner_covers, 0)
+        if total_covers <= 0:
+            return AnalyticsMetricTileResponse(
+                label="Peak Hour",
+                value="N/A",
+                subtitle="No cover data yet" if language != "it" else "Nessun dato coperti",
+            )
+
+        is_dinner_peak = dinner_covers >= lunch_covers
+        peak_covers = dinner_covers if is_dinner_peak else lunch_covers
+        peak_share = round((peak_covers / total_covers) * 100)
+
+        return AnalyticsMetricTileResponse(
+            label="Peak Hour",
+            value="7:00 PM" if is_dinner_peak else "1:00 PM",
+            subtitle=(
+                f"{peak_share}% of covers in this period"
+                if language != "it"
+                else f"{peak_share}% dei coperti nel periodo"
+            ),
+        )
 
     def _build_realtime_insight_context(
         self,

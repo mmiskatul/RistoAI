@@ -1859,11 +1859,23 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert analytics_payload["insight_banner"]["title"] == business_insight_payload["title"]
     assert analytics_payload["metric_tiles"][0]["label"] == "Estimated Profit"
     assert analytics_payload["metric_tiles"][1]["label"] == "Peak Hour"
+    assert analytics_payload["metric_tiles"][1]["value"] == "1:00 PM"
+    assert analytics_payload["metric_tiles"][1]["subtitle"] == "53% dei coperti nel periodo"
     assert analytics_payload["summary_stats"][0]["label"] == "Revenue"
     assert analytics_payload["summary_stats"][0]["value"] == 1300
+    assert analytics_payload["summary_stats"][1]["label"] == "Covers"
+    assert analytics_payload["summary_stats"][1]["value"] == 38
+    assert analytics_payload["summary_stats"][2]["label"] == "Avg Rev"
+    assert analytics_payload["summary_stats"][2]["value"] == 34.21
     assert analytics_payload["revenue_comparison"][0]["label"] == "This Week Revenue"
     assert analytics_payload["covers_activity"][0]["label"] == "Lunch"
+    assert analytics_payload["covers_activity"][0]["value"] == 20
+    assert analytics_payload["covers_activity"][1]["label"] == "Dinner"
+    assert analytics_payload["covers_activity"][1]["value"] == 18
     assert analytics_payload["cost_breakdown"][0]["label"] == "Food Cost"
+    assert analytics_payload["cost_breakdown"][0]["value"] == 19.2
+    assert analytics_payload["cost_breakdown"][1]["label"] == "Staff Cost"
+    assert analytics_payload["cost_breakdown"][1]["value"] == 0
     assert len(analytics_payload["weekly_revenue"]) == 7
     assert len(analytics_payload["supplier_price_alerts"]) >= 1
     assert analytics_payload["supplier_price_alerts"][0]["title"]
@@ -1886,12 +1898,18 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     analytics_covers_activity_payload = analytics_covers_activity_response.json()
     assert analytics_covers_activity_payload["period"] == "weekly"
     assert analytics_covers_activity_payload["items"][0]["label"] == "Lunch"
+    assert analytics_covers_activity_payload["items"][0]["value"] == 20
+    assert analytics_covers_activity_payload["items"][1]["label"] == "Dinner"
+    assert analytics_covers_activity_payload["items"][1]["value"] == 18
 
     analytics_cost_breakdown_response = client.get("/api/v1/restaurant/analytics/cost-breakdown", headers=headers)
     assert analytics_cost_breakdown_response.status_code == 200
     analytics_cost_breakdown_payload = analytics_cost_breakdown_response.json()
     assert analytics_cost_breakdown_payload["period"] == "weekly"
     assert analytics_cost_breakdown_payload["items"][0]["label"] == "Food Cost"
+    assert analytics_cost_breakdown_payload["items"][0]["value"] == 19.2
+    assert analytics_cost_breakdown_payload["items"][1]["label"] == "Staff Cost"
+    assert analytics_cost_breakdown_payload["items"][1]["value"] == 0
 
     analytics_supplier_alerts_response = client.get("/api/v1/restaurant/analytics/supplier-alerts", headers=headers)
     assert analytics_supplier_alerts_response.status_code == 200
