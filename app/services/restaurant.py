@@ -3253,14 +3253,15 @@ class RestaurantOperationsService(BaseService):
         is_dinner_peak = dinner_covers >= lunch_covers
         peak_covers = dinner_covers if is_dinner_peak else lunch_covers
         peak_share = round((peak_covers / total_covers) * 100)
+        peak_service = "Dinner" if is_dinner_peak else "Lunch"
 
         return AnalyticsMetricTileResponse(
             label="Peak Hour",
-            value="7:00 PM" if is_dinner_peak else "1:00 PM",
+            value="Cena" if language == "it" and is_dinner_peak else "Pranzo" if language == "it" else peak_service,
             subtitle=(
-                f"{peak_share}% of covers in this period"
+                f"{peak_covers} covers, {peak_share}% of this period"
                 if language != "it"
-                else f"{peak_share}% dei coperti nel periodo"
+                else f"{peak_covers} coperti, {peak_share}% del periodo"
             ),
         )
 
