@@ -3241,7 +3241,6 @@ class RestaurantOperationsService(BaseService):
             "cash_available": cash_available,
         }
 
-    @staticmethod
     def _build_peak_hour_metric(
         self,
         *,
