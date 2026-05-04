@@ -32,6 +32,7 @@ from app.repositories.restaurant_ops import (
     RestaurantInventorySupplierRepository,
     ScopedRepository,
 )
+from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.user import UserRepository
 from app.schemas.restaurant import (
     ActivityItemResponse,
@@ -314,6 +315,7 @@ class RestaurantOperationsService(BaseService):
         chat_repository: RestaurantChatRepository,
         insight_repository: RestaurantInsightRepository,
         openai_service: OpenAIOperationsService,
+        onboarding_repository: OnboardingProfileRepository | None = None,
         image_storage_service: ImageStorageService | None = None,
     ) -> None:
         self.user_repository = user_repository
@@ -331,6 +333,7 @@ class RestaurantOperationsService(BaseService):
         self.inventory_supplier_repository = inventory_supplier_repository
         self.chat_repository = chat_repository
         self.insight_repository = insight_repository
+        self.onboarding_repository = onboarding_repository
         self.openai_service = openai_service
         self.image_storage_service = image_storage_service
 
@@ -2950,9 +2953,17 @@ class RestaurantOperationsService(BaseService):
 
     async def get_profile(self, current_user: dict) -> RestaurantProfileResponse:
         serialized = self.serialize(current_user)
+        onboarding_profile = None
+        if self.onboarding_repository is not None:
+            onboarding_profile = await self.onboarding_repository.get_by_user_id(str(current_user["_id"]))
         preferred_language = serialized.get("preferred_language", "en")
         location = serialized.get("city_location") or serialized.get("location")
         restaurant_name = serialized.get("restaurant_name")
+        profile_image_url = (
+            serialized.get("profile_image_url")
+            or (onboarding_profile or {}).get("profile_image_url")
+            or serialized.get("avatar_url")
+        )
         return RestaurantProfileResponse(
             full_name=serialized["full_name"],
             email=serialized["email"],
@@ -2967,8 +2978,12 @@ class RestaurantOperationsService(BaseService):
             biggest_problem=serialized.get("biggest_problem"),
             improvement_focus=serialized.get("improvement_focus"),
             preferred_language=preferred_language,
-            profile_image_url=self._resolve_profile_image_url(
-                serialized.get("profile_image_url") or serialized.get("avatar_url")
+            profile_image_url=self._resolve_profile_image_url(profile_image_url),
+            interior_photo_url=self._resolve_profile_image_url(
+                (onboarding_profile or {}).get("interior_photo_url")
+            ),
+            exterior_photo_url=self._resolve_profile_image_url(
+                (onboarding_profile or {}).get("exterior_photo_url")
             ),
         )
 

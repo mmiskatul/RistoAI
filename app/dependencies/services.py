@@ -110,6 +110,7 @@ def build_restaurant_operations_service(db) -> RestaurantOperationsService:
         RestaurantChatRepository(db),
         RestaurantInsightRepository(db),
         OpenAIOperationsService(),
+        OnboardingProfileRepository(db),
         build_image_storage_service(settings),
     )
 

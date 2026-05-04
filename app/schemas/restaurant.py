@@ -962,6 +962,8 @@ class RestaurantProfileResponse(BaseSchema):
     improvement_focus: str | None = None
     preferred_language: str
     profile_image_url: str | None = None
+    interior_photo_url: str | None = None
+    exterior_photo_url: str | None = None
 
 
 class RestaurantProfileUpdateRequest(BaseSchema):
