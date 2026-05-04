@@ -532,6 +532,7 @@ class DailyDataMethodTwoRequest(BaseSchema):
     pos_payments: float = Field(default=0, ge=0)
     cash_payments: float = Field(default=0, ge=0)
     bank_transfer_payments: float = Field(default=0, ge=0)
+    expenses_in_cash: float = Field(default=0, ge=0)
     lunch_covers: int = Field(default=0, ge=0)
     dinner_covers: int = Field(default=0, ge=0)
     opening_cash: float = Field(default=0, ge=0)
@@ -581,6 +582,7 @@ class DailyDataRegisterSummaryResponse(BaseSchema):
     closing_cash: float = 0.0
     cash_payments: float = 0.0
     total_cash_on_hand: float = 0.0
+    cash_difference: float = 0.0
 
 
 class DailyDataSectionFieldResponse(BaseSchema):

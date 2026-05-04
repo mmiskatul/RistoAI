@@ -786,7 +786,19 @@ class RestaurantOperationsService(BaseService):
                 bank_account="Register Cash Out",
                 notes="Entered from daily data",
             )
-            for stale_subtype in ("cash_in", "cash_withdrawals", "expenses_in_cash"):
+            await self._upsert_source_linked_cash_deposit(
+                scope_id=scope_id,
+                current_user=current_user,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype="expenses_in_cash",
+                deposit_date=business_date,
+                amount=self._safe_float(record.get("expenses_in_cash")),
+                deposit_type="cash_expense",
+                bank_account="Expenses in Cash",
+                notes="Entered from daily data",
+            )
+            for stale_subtype in ("cash_in", "cash_withdrawals"):
                 await self.cash_repository.delete_source_linked_deposit(
                     scope_id=scope_id,
                     source_kind="manual_entry",
@@ -921,6 +933,7 @@ class RestaurantOperationsService(BaseService):
         add_transaction(transaction_type="cash_collection", amount=self._safe_float(record.get("cash_payments")), payment_channel="cash", reference_label="Cash Payments")
         add_transaction(transaction_type="bank_collection", amount=self._safe_float(record.get("bank_transfer_payments")), payment_channel="bank_transfer", reference_label="Bank Transfer Payments")
         add_transaction(transaction_type="withdrawal", amount=self._safe_float(record.get("cash_out")), payment_channel="cash", reference_label="Register Cash Out")
+        add_transaction(transaction_type="expense", amount=self._safe_float(record.get("expenses_in_cash")), payment_channel="cash", reference_label="Expenses in Cash")
         return transactions
 
     async def get_home(
@@ -1940,6 +1953,7 @@ class RestaurantOperationsService(BaseService):
                         DailyDataFormFieldResponse(key="pos_payments", label="POS Payments (+)", value_type="number", placeholder="0.00", section="payment_inputs"),
                         DailyDataFormFieldResponse(key="cash_payments", label="Cash Payments (+)", value_type="number", placeholder="0.00", section="payment_inputs"),
                         DailyDataFormFieldResponse(key="bank_transfer_payments", label="Invoices Paid by Bank Transfer (+)", value_type="number", placeholder="0.00", section="payment_inputs"),
+                        DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash (-)", value_type="number", placeholder="0.00", section="payment_inputs"),
                         DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Covers", value_type="integer", placeholder="0", section="customer_covers"),
                         DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Covers", value_type="integer", placeholder="0", section="customer_covers"),
                         DailyDataFormFieldResponse(key="opening_cash", label="Opening Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
@@ -1973,17 +1987,19 @@ class RestaurantOperationsService(BaseService):
             data = payload.method_two.model_dump(mode="json")
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
-            total_expenses = 0.0
+            total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
+            expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
+            cash_difference = round(data["closing_cash"] - expected_closing_cash, 2)
             record_payload = {
                 **data,
                 "cash_collected_total": round(data["cash_payments"] + data["pos_payments"], 2),
                 "cash_available": round(data["closing_cash"], 2),
                 "cash_withdrawals": 0.0,
                 "cash_in": data["cash_payments"],
-                "cash_out": max(data["opening_cash"] - data["closing_cash"], 0),
-                "expenses_in_cash": 0.0,
+                "cash_out": max(expected_closing_cash - data["closing_cash"], 0),
+                "cash_difference": cash_difference,
             }
         final_payload = {
             "tenant_id": scope_id,
@@ -2045,17 +2061,19 @@ class RestaurantOperationsService(BaseService):
             data = payload.method_two.model_dump(mode="json")
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
-            total_expenses = 0.0
+            total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
+            expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
+            cash_difference = round(data["closing_cash"] - expected_closing_cash, 2)
             record_payload = {
                 **data,
                 "cash_collected_total": round(data["cash_payments"] + data["pos_payments"], 2),
                 "cash_available": round(data["closing_cash"], 2),
                 "cash_withdrawals": 0.0,
                 "cash_in": data["cash_payments"],
-                "cash_out": max(data["opening_cash"] - data["closing_cash"], 0),
-                "expenses_in_cash": 0.0,
+                "cash_out": max(expected_closing_cash - data["closing_cash"], 0),
+                "cash_difference": cash_difference,
             }
         final_payload = {
             "tenant_id": scope_id,
@@ -4443,6 +4461,13 @@ class RestaurantOperationsService(BaseService):
                             "auto-transfer",
                         ),
                         ("cash_out", "cash_out", "Register Cash Out", "Auto-generated from daily register cash out", "auto-cash-out"),
+                        (
+                            "expenses_in_cash",
+                            "cash_expense",
+                            "Expenses in Cash",
+                            "Auto-generated from daily cash expenses",
+                            "auto-cash-expense",
+                        ),
                     ]
                 )
             else:
@@ -5639,11 +5664,13 @@ class RestaurantOperationsService(BaseService):
         opening_cash = float(payload.get("opening_cash", 0) or 0)
         closing_cash = float(payload.get("closing_cash", 0) or 0)
         cash_payments = float(payload.get("cash_payments", 0) or 0)
+        cash_difference = float(payload.get("cash_difference", 0) or 0)
         return DailyDataRegisterSummaryResponse(
             opening_cash=opening_cash,
             closing_cash=closing_cash,
             cash_payments=cash_payments,
             total_cash_on_hand=round(closing_cash + cash_payments, 2),
+            cash_difference=round(cash_difference, 2),
         )
 
     def _build_daily_data_sections(self, payload: dict[str, Any]) -> list[DailyDataSectionResponse]:
@@ -5680,6 +5707,18 @@ class RestaurantOperationsService(BaseService):
                                 + float(payload.get("bank_transfer_payments", 0) or 0),
                                 2,
                             ),
+                            value_type="currency",
+                        ),
+                    ],
+                ),
+                DailyDataSectionResponse(
+                    key="expense_section",
+                    title="Expense Section",
+                    fields=[
+                        DailyDataSectionFieldResponse(
+                            key="expenses_in_cash",
+                            label="Expenses in Cash",
+                            value=float(payload.get("expenses_in_cash", 0) or 0),
                             value_type="currency",
                         ),
                     ],
@@ -5728,6 +5767,12 @@ class RestaurantOperationsService(BaseService):
                             key="cash_payments",
                             label="Cash Payments in Register",
                             value=float(payload.get("cash_payments", 0) or 0),
+                            value_type="currency",
+                        ),
+                        DailyDataSectionFieldResponse(
+                            key="cash_difference",
+                            label="Daily Cash Difference",
+                            value=float(payload.get("cash_difference", 0) or 0),
                             value_type="currency",
                         ),
                     ],
@@ -5832,6 +5877,7 @@ class RestaurantOperationsService(BaseService):
         cash_out_total = round(sum(float(item.get("cash_out", 0) or 0) for item in records), 2)
         opening_cash_total = round(sum(float(item.get("opening_cash", 0) or 0) for item in records), 2)
         closing_cash_total = round(sum(float(item.get("closing_cash", 0) or 0) for item in records), 2)
+        cash_difference_total = round(sum(float(item.get("cash_difference", 0) or 0) for item in records), 2)
         lunch_covers_total = sum(int(item.get("lunch_covers", 0) or 0) for item in records)
         dinner_covers_total = sum(int(item.get("dinner_covers", 0) or 0) for item in records)
         additional_manual_expenses_total = round(
@@ -5895,6 +5941,7 @@ class RestaurantOperationsService(BaseService):
                     DailyDataSectionFieldResponse(key="closing_cash", label="Closing Cash", value=closing_cash_total, value_type="currency"),
                     DailyDataSectionFieldResponse(key="cash_payments_register", label="Cash Payments in Register", value=float(bucket.get("cash_payments", 0) or 0), value_type="currency"),
                     DailyDataSectionFieldResponse(key="cash_on_hand", label="Total Cash On Hand", value=float(bucket.get("closing_cash", 0) or 0) + float(bucket.get("cash_payments", 0) or 0), value_type="currency"),
+                    DailyDataSectionFieldResponse(key="cash_difference", label="Daily Cash Difference", value=cash_difference_total, value_type="currency"),
                 ],
             ),
         ]
