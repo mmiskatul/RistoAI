@@ -36,10 +36,13 @@ class OnboardingService(BaseService):
         current_user: dict,
         payload: OnboardingProfileUpsertRequest,
         *,
+        profile_image: UploadFile | None = None,
         interior_photo: UploadFile | None = None,
         exterior_photo: UploadFile | None = None,
     ) -> OnboardingProfileResponse:
         data = payload.model_dump(mode="json")
+        if profile_image:
+            data["profile_image_url"] = await self._upload_image(current_user, profile_image, field_name="profile_image_url")
         if interior_photo:
             data["interior_photo_url"] = await self._upload_image(current_user, interior_photo, field_name="interior_photo_url")
         if exterior_photo:
@@ -75,8 +78,8 @@ class OnboardingService(BaseService):
         city_location: str,
     ) -> OnboardingProfileResponse:
         next_profile_image = (
-            payload.get("interior_photo_url")
-            or payload.get("exterior_photo_url")
+            payload.get("profile_image_url")
+            or current_user.get("profile_image_url")
             or current_user.get("profile_image_url")
             or current_user.get("avatar_url")
         )
@@ -109,6 +112,7 @@ class OnboardingService(BaseService):
     def _to_response(self, profile: dict) -> OnboardingProfileResponse:
         serialized = self.serialize(profile)
         if self.image_storage_service:
+            serialized["profile_image_url"] = self.image_storage_service.resolve_public_url(serialized.get("profile_image_url"))
             serialized["interior_photo_url"] = self.image_storage_service.resolve_public_url(serialized.get("interior_photo_url"))
             serialized["exterior_photo_url"] = self.image_storage_service.resolve_public_url(serialized.get("exterior_photo_url"))
         return OnboardingProfileResponse(**serialized)

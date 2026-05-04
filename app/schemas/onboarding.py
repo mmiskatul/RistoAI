@@ -11,6 +11,7 @@ class OnboardingProfileUpsertRequest(BaseSchema):
     city_location: str = Field(min_length=1, max_length=120)
     number_of_seats: int = Field(ge=1, le=10000)
     average_spend_per_customer: float = Field(ge=0, le=100000)
+    profile_image_url: AnyHttpUrl | None = None
     interior_photo_url: AnyHttpUrl | None = None
     exterior_photo_url: AnyHttpUrl | None = None
     main_business_goal: str = Field(min_length=1, max_length=120)
@@ -30,6 +31,7 @@ class OnboardingProfileResponse(MongoReadSchema):
     city_location: str
     number_of_seats: int
     average_spend_per_customer: float
+    profile_image_url: str | None = None
     interior_photo_url: str | None = None
     exterior_photo_url: str | None = None
     main_business_goal: str

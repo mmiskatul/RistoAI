@@ -28,8 +28,10 @@ async def save_onboarding_profile(
     main_business_goal: str = Form(..., min_length=1, max_length=120),
     biggest_problem: str = Form(..., min_length=1, max_length=1000),
     improvement_focus: str = Form(..., min_length=1, max_length=1000),
+    profile_image: UploadFile | None = File(default=None),
     interior_photo: UploadFile | None = File(default=None),
     exterior_photo: UploadFile | None = File(default=None),
+    profile_image_url: str | None = Form(default=None),
     interior_photo_url: str | None = Form(default=None),
     exterior_photo_url: str | None = Form(default=None),
     current_user: dict = Depends(get_current_user),
@@ -44,12 +46,14 @@ async def save_onboarding_profile(
         main_business_goal=main_business_goal,
         biggest_problem=biggest_problem,
         improvement_focus=improvement_focus,
+        profile_image_url=profile_image_url,
         interior_photo_url=interior_photo_url,
         exterior_photo_url=exterior_photo_url,
     )
     return await service.save_profile_with_uploads(
         current_user,
         payload,
+        profile_image=profile_image,
         interior_photo=interior_photo,
         exterior_photo=exterior_photo,
     )
