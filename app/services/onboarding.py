@@ -80,7 +80,6 @@ class OnboardingService(BaseService):
         next_profile_image = (
             payload.get("profile_image_url")
             or current_user.get("profile_image_url")
-            or current_user.get("profile_image_url")
             or current_user.get("avatar_url")
         )
         profile = await self.onboarding_repository.upsert_by_user_id(

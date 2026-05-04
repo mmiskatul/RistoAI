@@ -26,6 +26,7 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
         headers=headers,
         data=payload,
         files={
+            'profile_image': ('profile.jpg', b'profile-image-bytes', 'image/jpeg'),
             'interior_photo': ('interior.jpg', b'interior-image-bytes', 'image/jpeg'),
             'exterior_photo': ('exterior.png', b'exterior-image-bytes', 'image/png'),
         },
@@ -34,6 +35,8 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
     body = save_response.json()
     assert body['restaurant_name'] == payload['restaurant_name']
     assert body['onboarding_completed'] is True
+    assert body['profile_image_url'].startswith('https://')
+    assert '/onboarding/' in body['profile_image_url']
     assert body['interior_photo_url'].startswith('https://')
     assert '/onboarding/' in body['interior_photo_url']
     assert body['exterior_photo_url'].startswith('https://')
@@ -41,6 +44,8 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     stored_profile = asyncio.run(db['onboarding_profiles'].find_one({'user_id': body['user_id']}))
+    assert stored_profile['profile_image_url'].startswith('https://')
+    assert '/onboarding/' in stored_profile['profile_image_url']
     assert stored_profile['interior_photo_url'].startswith('https://')
     assert '/onboarding/' in stored_profile['interior_photo_url']
     assert stored_profile['exterior_photo_url'].startswith('https://')
@@ -67,8 +72,7 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
     assert profile_body['main_business_goal'] == payload['main_business_goal']
     assert profile_body['biggest_problem'] == payload['biggest_problem']
     assert profile_body['improvement_focus'] == payload['improvement_focus']
-    assert profile_body['profile_image_url'].startswith('https://')
-    assert '/onboarding/' in profile_body['profile_image_url']
+    assert profile_body['profile_image_url'] == body['profile_image_url']
 
     stored_user = asyncio.run(db['users'].find_one({'email': owner_credentials['email'].lower()}))
     assert stored_user['restaurant_name'] == payload['restaurant_name']
@@ -77,8 +81,8 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
     assert stored_user['location'] == payload['city_location']
     assert stored_user['number_of_seats'] == payload['number_of_seats']
     assert stored_user['average_spend_per_customer'] == payload['average_spend_per_customer']
-    assert stored_user['profile_image_url'] == stored_profile['interior_photo_url']
-    assert stored_user['avatar_url'] == stored_profile['interior_photo_url']
+    assert stored_user['profile_image_url'] == stored_profile['profile_image_url']
+    assert stored_user['avatar_url'] == stored_profile['profile_image_url']
     assert stored_user['onboarding_completed'] is True
 
 
