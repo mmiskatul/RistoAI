@@ -2509,8 +2509,22 @@ class RestaurantOperationsService(BaseService):
         await self._send_low_stock_push_if_needed(current_user, serialized_updated)
         return self._to_inventory_detail_response(updated)
 
-    async def get_analytics(self, current_user: dict, *, period: str = "weekly", from_date: date | None = None, to_date: date | None = None) -> AnalyticsOverviewResponse:
-        analytics_bundle = await self._build_analytics_bundle(current_user, period=period, from_date=from_date, to_date=to_date)
+    async def get_analytics(
+        self,
+        current_user: dict,
+        *,
+        period: str = "weekly",
+        from_date: date | None = None,
+        to_date: date | None = None,
+        include_insight: bool = True,
+    ) -> AnalyticsOverviewResponse:
+        analytics_bundle = await self._build_analytics_bundle(
+            current_user,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            include_insight=include_insight,
+        )
         return AnalyticsOverviewResponse(
             insight_banner=analytics_bundle["insight_banner"],
             revenue_total=analytics_bundle["revenue_total"],
@@ -2528,14 +2542,34 @@ class RestaurantOperationsService(BaseService):
             supplier_price_alerts=analytics_bundle["supplier_price_alerts"],
         )
 
-    async def get_analytics_business_insight(self, current_user: dict) -> AnalyticsInsightBannerResponse:
-        scope_id = ScopedRepository.resolve_scope_id(current_user)
-        daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
-        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=90)
+    async def get_analytics_business_insight(
+        self,
+        current_user: dict,
+        *,
+        period: str = "weekly",
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> AnalyticsInsightBannerResponse:
+        _, daily_records, expenses, _ = await self._load_analytics_dependencies(current_user)
+        anchor_date = self._resolve_latest_business_date(daily_records)
+        filtered_daily_records = self._filter_home_daily_records(
+            daily_records,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
+        filtered_expenses = self._filter_home_expenses(
+            expenses,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
         return await self._build_analytics_insight_banner(
             current_user=current_user,
-            serialized_records=self.serialize_list(daily_records),
-            serialized_expenses=self.serialize_list(expenses),
+            serialized_records=filtered_daily_records,
+            serialized_expenses=filtered_expenses,
         )
 
     async def get_analytics_metric_tiles(self, current_user: dict, *, period: str = "weekly", from_date: date | None = None, to_date: date | None = None) -> AnalyticsMetricTilesResponse:
@@ -2586,7 +2620,15 @@ class RestaurantOperationsService(BaseService):
         documents, _ = await self.document_repository.list_by_scope(scope_id=scope_id, page=1, page_size=365)
         return scope_id, daily_records, expenses, documents
 
-    async def _build_analytics_bundle(self, current_user: dict, *, period: str, from_date: date | None, to_date: date | None) -> dict[str, Any]:
+    async def _build_analytics_bundle(
+        self,
+        current_user: dict,
+        *,
+        period: str,
+        from_date: date | None,
+        to_date: date | None,
+        include_insight: bool = True,
+    ) -> dict[str, Any]:
         _, daily_records, expenses, documents = await self._load_analytics_dependencies(current_user)
         anchor_date = self._resolve_latest_business_date(daily_records)
         filtered_daily_records = self._filter_home_daily_records(
@@ -2639,10 +2681,14 @@ class RestaurantOperationsService(BaseService):
         ]
 
         return {
-            "insight_banner": await self._build_analytics_insight_banner(
-                current_user=current_user,
-                serialized_records=serialized_records,
-                serialized_expenses=serialized_expenses,
+            "insight_banner": (
+                await self._build_analytics_insight_banner(
+                    current_user=current_user,
+                    serialized_records=serialized_records,
+                    serialized_expenses=serialized_expenses,
+                )
+                if include_insight
+                else None
             ),
             "revenue_total": float(context["revenue_total"]),
             "invoice_document_total": round(sum(float(item.get("total_amount", 0)) for item in filtered_documents), 2),

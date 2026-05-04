@@ -833,7 +833,7 @@ class AnalyticsSupplierAlertResponse(BaseSchema):
 
 
 class AnalyticsOverviewResponse(BaseSchema):
-    insight_banner: AnalyticsInsightBannerResponse
+    insight_banner: AnalyticsInsightBannerResponse | None = None
     revenue_total: float
     operating_revenue_total: float
     invoice_document_total: float = 0.0

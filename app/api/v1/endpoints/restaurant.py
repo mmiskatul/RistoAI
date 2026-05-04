@@ -567,18 +567,36 @@ async def get_analytics(
     period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
     from_date: date | None = Query(default=None),
     to_date: date | None = Query(default=None),
+    include_insight: bool = Query(default=True),
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> AnalyticsOverviewResponse:
     return await _run_endpoint(
         'get_analytics',
-        lambda: service.get_analytics(current_user, period=period, from_date=from_date, to_date=to_date),
+        lambda: service.get_analytics(
+            current_user,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            include_insight=include_insight,
+        ),
     )
 
 
 @router.get('/analytics/business-insight', response_model=AnalyticsInsightBannerResponse, tags=['Restaurant Analytics'], summary='Analytics Business Insight', description='Returns the top analytics insight banner generated from restaurant data.')
-async def get_analytics_business_insight(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> AnalyticsInsightBannerResponse:
-    return await service.get_analytics_business_insight(current_user)
+async def get_analytics_business_insight(
+    period: str = Query(default='weekly', pattern='^(weekly|monthly)$'),
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> AnalyticsInsightBannerResponse:
+    return await service.get_analytics_business_insight(
+        current_user,
+        period=period,
+        from_date=from_date,
+        to_date=to_date,
+    )
 
 
 @router.get('/analytics/metric-tiles', response_model=AnalyticsMetricTilesResponse, tags=['Restaurant Analytics'], summary='Analytics Metric Tiles', description='Returns the top analytics metric cards section.')
