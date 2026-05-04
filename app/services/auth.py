@@ -8,6 +8,7 @@ from app.core.enums import AccountStatus, AppLanguage, SubscriptionPlan, Subscri
 from app.core.exceptions import AuthenticationException, ConflictException, ValidationException
 from app.core.security import password_manager, token_manager
 from app.repositories.auth_code import AuthCodeRepository
+from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
 from app.repositories.user_subscription import UserSubscriptionRepository
@@ -45,12 +46,14 @@ class AuthService(BaseService):
         email_service: EmailService,
         subscription_plan_repository: SubscriptionPlanRepository,
         user_subscription_repository: UserSubscriptionRepository,
+        onboarding_repository: OnboardingProfileRepository,
     ) -> None:
         self.user_repository = user_repository
         self.auth_code_repository = auth_code_repository
         self.email_service = email_service
         self.subscription_plan_repository = subscription_plan_repository
         self.user_subscription_repository = user_subscription_repository
+        self.onboarding_repository = onboarding_repository
         self.settings = get_settings()
 
     async def register_restaurant(self, payload: RegisterRequest) -> AuthChallengeResponse:
@@ -75,6 +78,7 @@ class AuthService(BaseService):
                     'account_status': user.get('account_status'),
                     'subscription_started_at': user.get('subscription_started_at'),
                     'subscription_expires_at': user.get('subscription_expires_at'),
+                    'onboarding_completed': user.get('onboarding_completed', False),
                 },
             )
         else:
@@ -95,6 +99,7 @@ class AuthService(BaseService):
                     'account_status': None,
                     'subscription_started_at': None,
                     'subscription_expires_at': None,
+                    'onboarding_completed': False,
                 }
             )
 
@@ -110,19 +115,19 @@ class AuthService(BaseService):
         user = await self.user_repository.update(user['_id'], {'email_verified': True, 'is_active': True})
         if not user.get('subscription_plan_name'):
             user = await self._activate_default_restaurant_trial(user)
-        return self._build_auth_response(user)
+        return await self._build_auth_response(user)
 
     async def login_restaurant(self, payload: LoginRequest) -> AuthResponse:
         user = await self._authenticate_login(payload, allow_suspended_restaurant=True)
         if user['role'] not in self.RESTAURANT_AUTH_ROLES:
             raise AuthenticationException('Use the admin login endpoint for this account')
-        return self._build_auth_response(user)
+        return await self._build_auth_response(user)
 
     async def login_admin(self, payload: LoginRequest) -> AuthResponse:
         user = await self._authenticate_login(payload)
         if user['role'] not in self.ADMIN_AUTH_ROLES:
             raise AuthenticationException('Use the restaurant login endpoint for this account')
-        return self._build_auth_response(user)
+        return await self._build_auth_response(user)
 
     async def forgot_password_restaurant(self, payload: ForgotPasswordRequest) -> AuthChallengeResponse:
         user = await self._get_password_reset_user(payload.email, self.RESTAURANT_AUTH_ROLES, 'This account is not a restaurant account')
@@ -154,7 +159,7 @@ class AuthService(BaseService):
         return self._build_tokens(str(user['_id']), str(user['role']))
 
     async def get_me(self, current_user: dict) -> AuthUserResponse:
-        return self._to_auth_user_response(current_user)
+        return await self._to_auth_user_response(current_user)
 
     async def get_language_preference(self, current_user: dict) -> LanguagePreferenceResponse:
         return LanguagePreferenceResponse(preferred_language=current_user.get('preferred_language', AppLanguage.ENGLISH))
@@ -279,15 +284,16 @@ class AuthService(BaseService):
         return updated_user
 
 
-    def _build_auth_response(self, user: dict) -> AuthResponse:
-        public_user = self._to_auth_user_response(user)
+    async def _build_auth_response(self, user: dict) -> AuthResponse:
+        public_user = await self._to_auth_user_response(user)
         return AuthResponse(
             user=public_user,
             tokens=self._build_tokens(public_user.id, public_user.role),
         )
 
-    def _to_auth_user_response(self, user: dict) -> AuthUserResponse:
+    async def _to_auth_user_response(self, user: dict) -> AuthUserResponse:
         serialized = self.serialize(user)
+        onboarding_completed = await self._is_onboarding_completed(serialized)
         return AuthUserResponse(
             id=serialized['id'],
             email=serialized['email'],
@@ -308,9 +314,18 @@ class AuthService(BaseService):
             subscription_started_at=serialized.get('subscription_started_at'),
             subscription_expires_at=serialized.get('subscription_expires_at'),
             subscription_selection_required=self._requires_subscription_selection(serialized),
+            onboarding_completed=onboarding_completed,
             created_at=serialized['created_at'],
             updated_at=serialized['updated_at'],
         )
+
+    async def _is_onboarding_completed(self, serialized_user: dict) -> bool:
+        if serialized_user.get('role') not in self.RESTAURANT_AUTH_ROLES:
+            return True
+        if serialized_user.get('onboarding_completed') is True:
+            return True
+        profile = await self.onboarding_repository.get_by_user_id(str(serialized_user['id']))
+        return bool(profile and profile.get('onboarding_completed') is True)
 
     def _requires_subscription_selection(self, serialized_user: dict) -> bool:
         return serialized_user['role'] in self.RESTAURANT_AUTH_ROLES and not serialized_user.get('subscription_plan_name')

@@ -136,6 +136,7 @@ class AuthUserResponse(BaseSchema):
     subscription_started_at: datetime | None = None
     subscription_expires_at: datetime | None = None
     subscription_selection_required: bool
+    onboarding_completed: bool = False
     created_at: str
     updated_at: str
 

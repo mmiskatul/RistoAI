@@ -10,6 +10,7 @@ from starlette.requests import Request
 from app.core.enums import SubscriptionStatus, UserRole
 from app.core.security import token_manager
 from app.db.mongodb import get_database
+from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.user import UserRepository
 
 ALLOWED_PATH_PREFIXES = (
@@ -23,6 +24,11 @@ ALLOWED_PATH_PREFIXES = (
     '/api/v1/dashboard',
     '/api/v1/users',
     '/api/v1/support',
+)
+ONBOARDING_ALLOWED_PATH_PREFIXES = (
+    '/api/v1/onboarding',
+    '/api/v1/auth',
+    '/api/v1/subscriptions/user',
 )
 RESTAURANT_ROLES = {UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF}
 BLOCKED_SUBSCRIPTION_STATUSES = {
@@ -84,11 +90,39 @@ class SubscriptionGuardMiddleware(BaseHTTPMiddleware):
                 },
             )
 
+        if (
+            user.get('role') in RESTAURANT_ROLES
+            and not await self._has_completed_onboarding(db, user)
+            and not self._is_onboarding_allowed_path(request.url.path)
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    'success': False,
+                    'error': {
+                        'code': 'onboarding_required',
+                        'message': 'Complete onboarding before accessing this resource',
+                        'details': {'onboarding_required': True},
+                    },
+                },
+            )
+
         return await call_next(request)
 
     @staticmethod
     def _is_allowed_path(path: str) -> bool:
         return any(path.startswith(prefix) for prefix in ALLOWED_PATH_PREFIXES)
+
+    @staticmethod
+    def _is_onboarding_allowed_path(path: str) -> bool:
+        return any(path.startswith(prefix) for prefix in ONBOARDING_ALLOWED_PATH_PREFIXES)
+
+    @staticmethod
+    async def _has_completed_onboarding(db, user: dict) -> bool:
+        if user.get('onboarding_completed') is True:
+            return True
+        profile = await OnboardingProfileRepository(db).get_by_user_id(str(user['_id']))
+        return bool(profile and profile.get('onboarding_completed') is True)
 
     @staticmethod
     async def _resolve_database(request: Request):

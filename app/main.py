@@ -102,6 +102,7 @@ def create_fastapi_app(*, testing: bool = False) -> FastAPI:
     settings.testing = testing
     if testing:
         settings.smtp_enabled = False
+        settings.resend_enabled = False
     configure_logging(settings)
 
     @asynccontextmanager

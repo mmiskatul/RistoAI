@@ -54,6 +54,7 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
     assert me_response.status_code == 200
     assert me_response.json()['restaurant_name'] == payload['restaurant_name']
     assert me_response.json()['location'] == payload['city_location']
+    assert me_response.json()['onboarding_completed'] is True
 
     profile_response = client.get('/api/v1/restaurant/settings/profile', headers=headers)
     assert profile_response.status_code == 200
@@ -78,3 +79,39 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
     assert stored_user['average_spend_per_customer'] == payload['average_spend_per_customer']
     assert stored_user['profile_image_url'] == stored_profile['interior_photo_url']
     assert stored_user['avatar_url'] == stored_profile['interior_photo_url']
+    assert stored_user['onboarding_completed'] is True
+
+
+def test_restaurant_routes_require_completed_onboarding(client, app, owner_credentials) -> None:
+    seed_subscription_plan(app)
+    headers = register_and_login(client, owner_credentials)
+    select_subscription_plan(client, headers)
+
+    me_before = client.get('/api/v1/auth/me', headers=headers)
+    assert me_before.status_code == 200
+    assert me_before.json()['onboarding_completed'] is False
+
+    blocked_response = client.get('/api/v1/restaurant/settings/profile', headers=headers)
+    assert blocked_response.status_code == 403
+    assert blocked_response.json()['error']['code'] == 'onboarding_required'
+
+    payload = {
+        'restaurant_name': 'The Italian Bistro',
+        'restaurant_type': 'Fine Dining',
+        'city_location': 'New York, NY',
+        'number_of_seats': 45,
+        'average_spend_per_customer': 25.0,
+        'main_business_goal': 'Increase revenue',
+        'biggest_problem': 'We struggle with slow weekday traffic and inconsistent table turnover.',
+        'improvement_focus': 'Improve staff scheduling and reduce wasted inventory.',
+    }
+    save_response = client.post('/api/v1/onboarding/profile', headers=headers, data=payload)
+    assert save_response.status_code == 200
+
+    me_after = client.get('/api/v1/auth/me', headers=headers)
+    assert me_after.status_code == 200
+    assert me_after.json()['onboarding_completed'] is True
+
+    allowed_response = client.get('/api/v1/restaurant/settings/profile', headers=headers)
+    assert allowed_response.status_code == 200
+    assert allowed_response.json()['restaurant_name'] == payload['restaurant_name']

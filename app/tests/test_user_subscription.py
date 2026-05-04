@@ -105,8 +105,8 @@ def test_user_discount_preview_returns_discount_amounts():
     payload = response.json()
     assert payload['coupon_code'] == 'SAVE20'
     assert payload['original_amount'] == 30.0
-    assert payload['discount_amount'] == 5.8
-    assert payload['final_amount'] == 23.2
+    assert payload['discount_amount'] == 6.0
+    assert payload['final_amount'] == 24.0
 
 
 def test_user_discount_preview_rejects_invalid_coupon():

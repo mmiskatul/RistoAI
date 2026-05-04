@@ -43,7 +43,14 @@ from app.services.user_management import UserManagementService
 
 
 async def get_auth_service(db=Depends(get_database)) -> AuthService:
-    return AuthService(UserRepository(db), AuthCodeRepository(db), EmailService(get_settings()), SubscriptionPlanRepository(db), UserSubscriptionRepository(db))
+    return AuthService(
+        UserRepository(db),
+        AuthCodeRepository(db),
+        EmailService(get_settings()),
+        SubscriptionPlanRepository(db),
+        UserSubscriptionRepository(db),
+        OnboardingProfileRepository(db),
+    )
 
 
 async def get_onboarding_service(db=Depends(get_database)) -> OnboardingService:

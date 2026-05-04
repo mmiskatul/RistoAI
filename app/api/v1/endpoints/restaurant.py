@@ -360,8 +360,9 @@ async def update_cash_deposit(deposit_id: str, payload: CashDepositUpdateRequest
 
 
 @router.delete('/cash/deposits/{deposit_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Cash Management'], summary='Delete Bank Deposit', description='Deletes a saved cash deposit or bank drop record.')
-async def delete_cash_deposit(deposit_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> None:
+async def delete_cash_deposit(deposit_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
     await service.delete_cash_deposit(current_user, deposit_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get('/cash/overview', response_model=CashManagementSummaryResponse, tags=['Restaurant Cash Management'], summary='Cash Overview', description='Returns cash management summary cards and recent deposits.')

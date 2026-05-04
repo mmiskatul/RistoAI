@@ -101,6 +101,7 @@ class OnboardingService(BaseService):
                 "improvement_focus": payload.get("improvement_focus"),
                 "profile_image_url": next_profile_image,
                 "avatar_url": next_profile_image,
+                "onboarding_completed": True,
             },
         )
         return self._to_response(profile)
