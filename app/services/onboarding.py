@@ -5,13 +5,109 @@ from fastapi import UploadFile
 from app.core.exceptions import ValidationException
 from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.user import UserRepository
-from app.schemas.onboarding import OnboardingProfileResponse, OnboardingProfileUpsertRequest
+from app.schemas.onboarding import (
+    OnboardingFeatureScreenListResponse,
+    OnboardingFeatureScreenResponse,
+    OnboardingProfileResponse,
+    OnboardingProfileUpsertRequest,
+)
 from app.services.base import BaseService
 from app.services.image_storage import ImageStorageService, UploadedImage
 
 
 class OnboardingService(BaseService):
     """Service Layer Pattern: encapsulates onboarding persistence and response mapping."""
+
+    FEATURE_SCREENS = [
+        {
+            "key": "profit_tracking",
+            "icon": "trending-up",
+            "en": {
+                "title": "Understand What Drives Profit",
+                "description": "Risto AI connects your daily sales and costs so you can see why profit moves, not just whether it went up or down.",
+                "points": [
+                    "Monitor estimated profit after operating costs.",
+                    "Find slow periods and revenue opportunities.",
+                    "Use insights to adjust pricing, spending, and stock.",
+                ],
+            },
+            "it": {
+                "title": "Capisci cosa guida il profitto",
+                "description": "Risto AI collega vendite e costi giornalieri per mostrarti perche il profitto cambia, non solo se sale o scende.",
+                "points": [
+                    "Monitora il profitto stimato dopo i costi operativi.",
+                    "Trova periodi lenti e opportunita di ricavo.",
+                    "Usa gli insight per regolare prezzi, spese e stock.",
+                ],
+            },
+        },
+        {
+            "key": "invoice_photo_upload",
+            "icon": "camera",
+            "en": {
+                "title": "Turn Invoices Into Records",
+                "description": "Photo upload helps convert supplier paperwork into structured data for expenses, inventory checks, and VAT review.",
+                "points": [
+                    "Extract totals, VAT, dates, and invoice numbers.",
+                    "Keep document history organized by supplier.",
+                    "Use saved invoice data across reporting screens.",
+                ],
+            },
+            "it": {
+                "title": "Trasforma le fatture in dati",
+                "description": "Il caricamento foto converte i documenti fornitore in dati strutturati per spese, inventario e controllo IVA.",
+                "points": [
+                    "Estrai totali, IVA, date e numeri fattura.",
+                    "Mantieni lo storico documenti organizzato per fornitore.",
+                    "Usa i dati salvati nelle schermate di report.",
+                ],
+            },
+        },
+        {
+            "key": "inventory",
+            "icon": "archive",
+            "en": {
+                "title": "Know What Is In Stock",
+                "description": "Inventory tools help you understand what you have, what it costs, and when it needs attention.",
+                "points": [
+                    "Update stock after purchases or usage.",
+                    "Group items by category and supplier.",
+                    "Reduce waste by catching stock changes early.",
+                ],
+            },
+            "it": {
+                "title": "Sai sempre cosa hai in stock",
+                "description": "Gli strumenti inventario aiutano a capire cosa hai, quanto costa e quando serve intervenire.",
+                "points": [
+                    "Aggiorna lo stock dopo acquisti o utilizzo.",
+                    "Raggruppa articoli per categoria e fornitore.",
+                    "Riduci gli sprechi notando subito i cambiamenti.",
+                ],
+            },
+        },
+        {
+            "key": "vat_management",
+            "icon": "file-text",
+            "en": {
+                "title": "Keep VAT Visible",
+                "description": "VAT management connects daily data, expenses, and invoice details so tax-related numbers stay easy to review.",
+                "points": [
+                    "Keep VAT figures linked to real business activity.",
+                    "Review estimated balances before filing.",
+                    "Use invoice data to support VAT records.",
+                ],
+            },
+            "it": {
+                "title": "Tieni l IVA sempre visibile",
+                "description": "La gestione IVA collega dati giornalieri, spese e fatture per rendere i numeri fiscali facili da controllare.",
+                "points": [
+                    "Collega i valori IVA all attivita reale.",
+                    "Controlla i saldi stimati prima della dichiarazione.",
+                    "Usa i dati fattura per supportare i registri IVA.",
+                ],
+            },
+        },
+    ]
 
     def __init__(
         self,
@@ -59,6 +155,22 @@ class OnboardingService(BaseService):
         if not profile:
             return None
         return self._to_response(profile)
+
+    def get_feature_screens(self, language: str | None = None) -> OnboardingFeatureScreenListResponse:
+        resolved_language = "it" if str(language or "").lower().startswith("it") else "en"
+        screens = []
+        for screen in self.FEATURE_SCREENS:
+            copy = screen[resolved_language]
+            screens.append(
+                OnboardingFeatureScreenResponse(
+                    key=str(screen["key"]),
+                    icon=str(screen["icon"]),
+                    title=str(copy["title"]),
+                    description=str(copy["description"]),
+                    points=list(copy["points"]),
+                )
+            )
+        return OnboardingFeatureScreenListResponse(language=resolved_language, screens=screens)
 
     async def _upload_image(self, current_user: dict, file: UploadFile, *, field_name: str) -> str:
         if not self.image_storage_service:

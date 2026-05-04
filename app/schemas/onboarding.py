@@ -38,3 +38,16 @@ class OnboardingProfileResponse(MongoReadSchema):
     biggest_problem: str
     improvement_focus: str
     onboarding_completed: bool
+
+
+class OnboardingFeatureScreenResponse(BaseSchema):
+    key: str
+    icon: str
+    title: str
+    description: str
+    points: list[str]
+
+
+class OnboardingFeatureScreenListResponse(BaseSchema):
+    language: str
+    screens: list[OnboardingFeatureScreenResponse]

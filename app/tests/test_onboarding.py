@@ -6,6 +6,22 @@ from app.tests.helpers import register_and_login, seed_subscription_plan, select
 from app.db.mongodb import get_database
 
 
+def test_onboarding_feature_screens_are_localized(client) -> None:
+    response = client.get('/api/v1/onboarding/feature-screens', headers={'Accept-Language': 'it'})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['language'] == 'it'
+    assert [item['key'] for item in body['screens']] == [
+        'profit_tracking',
+        'invoice_photo_upload',
+        'inventory',
+        'vat_management',
+    ]
+    assert body['screens'][0]['title'] == 'Capisci cosa guida il profitto'
+    assert len(body['screens'][0]['points']) == 3
+
+
 def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None:
     seed_subscription_plan(app)
     headers = register_and_login(client, owner_credentials)

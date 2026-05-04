@@ -1,13 +1,25 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, UploadFile, status
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.services import get_onboarding_service
-from app.schemas.onboarding import OnboardingProfileResponse, OnboardingProfileUpsertRequest
+from app.schemas.onboarding import (
+    OnboardingFeatureScreenListResponse,
+    OnboardingProfileResponse,
+    OnboardingProfileUpsertRequest,
+)
 from app.services.onboarding import OnboardingService
 
 router = APIRouter()
+
+
+@router.get("/feature-screens", response_model=OnboardingFeatureScreenListResponse)
+async def get_onboarding_feature_screens(
+    accept_language: str | None = Header(default=None, alias="Accept-Language"),
+    service: OnboardingService = Depends(get_onboarding_service),
+) -> OnboardingFeatureScreenListResponse:
+    return service.get_feature_screens(accept_language)
 
 
 @router.get("/profile", response_model=OnboardingProfileResponse | None)
