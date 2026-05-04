@@ -1692,7 +1692,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
         },
     )
     assert cash_deposit_response.status_code == 201
-    assert cash_deposit_response.json()["amount_formatted"] == "$450.00"
+    assert cash_deposit_response.json()["amount_formatted"] == "€450.00"
     assert cash_deposit_response.json()["type"] == "bank_deposit"
     assert cash_deposit_response.json()["deposit_date_formatted"] == previous_day.strftime("%b %d, %Y")
     assert cash_deposit_response.json()["display_title"] == "Chase Bank - Main"

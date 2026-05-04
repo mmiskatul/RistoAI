@@ -339,7 +339,7 @@ def test_dashboard_analytics_returns_platform_metrics_for_admin():
     assert stat_cards['total_users']['value'] == 3.0
     assert stat_cards['active_subscriptions']['value'] == 2.0
     assert stat_cards['monthly_revenue']['value'] == 53.17
-    assert stat_cards['monthly_revenue']['value_formatted'] == '$53.17'
+    assert stat_cards['monthly_revenue']['value_formatted'] == '€53.17'
     assert stat_cards['trial_conversion']['value'] == 66.67
     assert len(payload['user_growth']) == 7
     assert len(payload['revenue_growth']) == 7

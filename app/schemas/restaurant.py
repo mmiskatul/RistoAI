@@ -459,7 +459,7 @@ class CashDepositResponse(BaseSchema):
     @computed_field
     @property
     def amount_formatted(self) -> str:
-        return f"${self.amount:,.2f}" if self.amount >= 0 else f"-${abs(self.amount):,.2f}"
+        return f"€{self.amount:,.2f}" if self.amount >= 0 else f"-€{abs(self.amount):,.2f}"
 
     @computed_field
     @property
