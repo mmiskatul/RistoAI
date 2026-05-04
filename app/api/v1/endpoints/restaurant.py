@@ -330,8 +330,14 @@ async def create_expense(payload: ExpenseCreateRequest, current_user: dict = Dep
 
 
 @router.get('/expenses', response_model=ExpenseListResponse, tags=['Restaurant Expenses'], summary='List Expenses', description='Lists expenses and expense summary cards for the expenses screen.')
-async def list_expenses(page: int = Query(default=1, ge=1), page_size: int = Query(default=20, ge=1, le=100), current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ExpenseListResponse:
-    return await service.list_expenses(current_user, page=page, page_size=page_size)
+async def list_expenses(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    reference_date: date | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> ExpenseListResponse:
+    return await service.list_expenses(current_user, page=page, page_size=page_size, reference_date=reference_date)
 
 
 @router.get('/expenses/{expense_id}', response_model=ExpenseResponse, tags=['Restaurant Expenses'], summary='Expense Detail', description='Returns one saved manual expense record.')

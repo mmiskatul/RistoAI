@@ -1615,7 +1615,7 @@ class RestaurantOperationsService(BaseService):
         await self._send_activity_push_for_expense(current_user, serialized_expense)
         return self._to_expense_response(document)
 
-    async def list_expenses(self, current_user: dict, *, page: int, page_size: int) -> ExpenseListResponse:
+    async def list_expenses(self, current_user: dict, *, page: int, page_size: int, reference_date: date | None = None) -> ExpenseListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         items, _ = await self.expense_repository.list_by_scope(
             scope_id=scope_id,
@@ -1623,7 +1623,7 @@ class RestaurantOperationsService(BaseService):
             page_size=max(page_size, 500),
         )
         serialized_items = self.serialize_list(items)
-        today = self._resolve_anchor_date(*(item.get("expense_date") for item in serialized_items))
+        today = reference_date or self._resolve_anchor_date(*(item.get("expense_date") for item in serialized_items))
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
         year_start = today.replace(month=1, day=1)
@@ -2130,6 +2130,26 @@ class RestaurantOperationsService(BaseService):
             )
 
         if view == "week":
+            if reference_date is not None:
+                detail = await self._get_daily_data_period_detail(current_user, view="week", reference_date=reference_date)
+                return DailyDataListResponse(
+                    items=[
+                        DailyDataListItemResponse(
+                            id=f"week:{reference_date.isoformat()}",
+                            record_id=None,
+                            business_date=detail.business_date,
+                            total_revenue=detail.total_revenue,
+                            operating_revenue=detail.operating_revenue,
+                            total_expenses=detail.total_expenses,
+                            operating_expenses=detail.operating_expenses,
+                            invoice_document_total=detail.invoice_document_total,
+                            total_covers=detail.total_covers,
+                            avg_revenue_per_cover=detail.avg_revenue_per_cover,
+                            created_at=datetime.now(UTC).isoformat(),
+                        )
+                    ],
+                    **build_pagination_meta(total=1, page=page, page_size=page_size),
+                )
             items, total = await self.weekly_record_repository.list_by_scope(
                 scope_id=scope_id,
                 page=page,
@@ -2142,6 +2162,26 @@ class RestaurantOperationsService(BaseService):
             )
 
         if view == "month":
+            if reference_date is not None:
+                detail = await self._get_daily_data_period_detail(current_user, view="month", reference_date=reference_date)
+                return DailyDataListResponse(
+                    items=[
+                        DailyDataListItemResponse(
+                            id=f"month:{reference_date.isoformat()}",
+                            record_id=None,
+                            business_date=detail.business_date,
+                            total_revenue=detail.total_revenue,
+                            operating_revenue=detail.operating_revenue,
+                            total_expenses=detail.total_expenses,
+                            operating_expenses=detail.operating_expenses,
+                            invoice_document_total=detail.invoice_document_total,
+                            total_covers=detail.total_covers,
+                            avg_revenue_per_cover=detail.avg_revenue_per_cover,
+                            created_at=datetime.now(UTC).isoformat(),
+                        )
+                    ],
+                    **build_pagination_meta(total=1, page=page, page_size=page_size),
+                )
             items, total = await self.monthly_record_repository.list_by_scope(
                 scope_id=scope_id,
                 page=page,
