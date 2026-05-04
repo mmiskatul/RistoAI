@@ -1924,6 +1924,10 @@ class RestaurantOperationsService(BaseService):
                         DailyDataFormFieldResponse(key="cash_withdrawals", label="Cash Withdrawals", value_type="number", placeholder="0.00", section="cash_tracking"),
                         DailyDataFormFieldResponse(key="cash_out", label="Cash Out / Transfers", value_type="number", placeholder="0.00", section="cash_tracking"),
                         DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash", value_type="number", placeholder="0.00", section="cash_tracking"),
+                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Covers", value_type="integer", placeholder="0", section="customer_covers"),
+                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Covers", value_type="integer", placeholder="0", section="customer_covers"),
+                        DailyDataFormFieldResponse(key="opening_cash", label="Opening Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
+                        DailyDataFormFieldResponse(key="closing_cash", label="Closing Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                         DailyDataFormFieldResponse(key="notes", label="Add Note", value_type="string", placeholder="Optional note", section="cash_tracking"),
                     ],
                 ),
@@ -1954,14 +1958,14 @@ class RestaurantOperationsService(BaseService):
             business_date = payload.method_one.business_date
             total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = 0
-            dinner_covers = 0
+            lunch_covers = data["lunch_covers"]
+            dinner_covers = data["dinner_covers"]
+            closing_cash = data["closing_cash"] if data["closing_cash"] > 0 else max(data["cash_in"] - data["cash_out"], 0)
             record_payload = {
                 **data,
                 "cash_collected_total": round(data["cash_in"] + data["pos_payments"], 2),
                 "cash_available": max(data["cash_in"] - data["cash_out"] - data["cash_withdrawals"] - data["expenses_in_cash"], 0),
-                "closing_cash": max(data["cash_in"] - data["cash_out"], 0),
-                "opening_cash": 0,
+                "closing_cash": closing_cash,
             }
         else:
             if payload.method_two is None:
@@ -2026,14 +2030,14 @@ class RestaurantOperationsService(BaseService):
             business_date = payload.method_one.business_date
             total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = 0
-            dinner_covers = 0
+            lunch_covers = data["lunch_covers"]
+            dinner_covers = data["dinner_covers"]
+            closing_cash = data["closing_cash"] if data["closing_cash"] > 0 else max(data["cash_in"] - data["cash_out"], 0)
             record_payload = {
                 **data,
                 "cash_collected_total": round(data["cash_in"] + data["pos_payments"], 2),
                 "cash_available": max(data["cash_in"] - data["cash_out"] - data["cash_withdrawals"] - data["expenses_in_cash"], 0),
-                "closing_cash": max(data["cash_in"] - data["cash_out"], 0),
-                "opening_cash": 0,
+                "closing_cash": closing_cash,
             }
         else:
             if payload.method_two is None:

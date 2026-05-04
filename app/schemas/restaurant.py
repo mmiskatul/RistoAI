@@ -520,6 +520,10 @@ class DailyDataMethodOneRequest(BaseSchema):
     cash_in: float = Field(default=0, ge=0)
     cash_out: float = Field(default=0, ge=0)
     expenses_in_cash: float = Field(default=0, ge=0)
+    lunch_covers: int = Field(default=0, ge=0)
+    dinner_covers: int = Field(default=0, ge=0)
+    opening_cash: float = Field(default=0, ge=0)
+    closing_cash: float = Field(default=0, ge=0)
     notes: str | None = Field(default=None, max_length=500)
 
 
