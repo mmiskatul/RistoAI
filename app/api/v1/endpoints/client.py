@@ -165,6 +165,12 @@ async def get_inventory_item(item_id: str, current_user: dict = Depends(get_curr
     return await service.get_inventory_item(current_user, item_id)
 
 
+@router.delete("/inventory/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_inventory_item(item_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
+    await service.delete_inventory_item(current_user, item_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/inventory/{item_id}/stock-update", response_model=InventoryDetailResponse)
 async def update_inventory_stock(item_id: str, payload: InventoryStockUpdateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> InventoryDetailResponse:
     return await service.update_inventory_stock(current_user, item_id, payload)
