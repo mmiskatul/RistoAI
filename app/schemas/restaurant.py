@@ -942,6 +942,10 @@ class ChatConversationResponse(BaseSchema):
     messages: list[ChatMessageResponse]
 
 
+class ChatVoiceTranscriptionResponse(BaseSchema):
+    text: str
+
+
 class SettingsLanguageOptionResponse(BaseSchema):
     code: str
     label: str

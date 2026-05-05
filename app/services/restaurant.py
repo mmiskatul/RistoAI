@@ -2851,6 +2851,28 @@ class RestaurantOperationsService(BaseService):
     async def create_chat_message(self, current_user: dict, payload: ChatMessageCreateRequest) -> ChatConversationResponse:
         return await self._create_chat_conversation(current_user=current_user, payload=payload)
 
+    async def transcribe_chat_voice(
+        self,
+        current_user: dict,
+        *,
+        file_name: str,
+        content_type: str,
+        file_bytes: bytes,
+        language: str | None = None,
+    ) -> str:
+        if not file_bytes:
+            raise ValidationException("Voice recording is empty")
+
+        transcript = await self.openai_service.transcribe_audio(
+            file_name=file_name,
+            content_type=content_type,
+            file_bytes=file_bytes,
+            language=self._resolve_chat_language(current_user, language),
+        )
+        if not transcript:
+            raise ValidationException("Could not transcribe this voice message. Please try again.")
+        return transcript
+
     async def _load_chat_generation_context(self, *, scope_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         recent_task = self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=8)
         daily_records_task = self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=14)

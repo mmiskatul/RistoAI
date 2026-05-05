@@ -28,6 +28,7 @@ from app.schemas.restaurant import (
     ChatConversationResponse,
     ChatMessageCreateRequest,
     ChatMessageUpdateRequest,
+    ChatVoiceTranscriptionResponse,
     DailyDataCollectionResponse,
     DailyDataCreateRequest,
     DailyDataDetailResponse,
@@ -225,6 +226,15 @@ ALLOWED_DOCUMENT_CONTENT_TYPES = {
 
 
 ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES = ALLOWED_DOCUMENT_CONTENT_TYPES | {'text/plain'}
+ALLOWED_VOICE_CONTENT_TYPES = {
+    'audio/mp4',
+    'audio/m4a',
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/wav',
+    'audio/webm',
+    'video/mp4',
+}
 
 
 UPLOAD_CONTENT_TYPE_ALIASES = {
@@ -248,6 +258,18 @@ def _resolve_supported_upload_content_type(file: UploadFile, *, allow_text: bool
 
     supported_label = 'PDF, CSV, TXT, and image files' if allow_text else 'PDF, CSV, and image files'
     raise ValidationException(f'Only {supported_label} are supported')
+
+
+def _resolve_supported_voice_content_type(file: UploadFile) -> str:
+    content_type = UPLOAD_CONTENT_TYPE_ALIASES.get((file.content_type or '').lower(), (file.content_type or '').lower())
+    if not content_type or content_type == 'application/octet-stream':
+        guessed_content_type = guess_type(file.filename or '')[0] or ''
+        content_type = UPLOAD_CONTENT_TYPE_ALIASES.get(guessed_content_type.lower(), guessed_content_type.lower())
+
+    if content_type in ALLOWED_VOICE_CONTENT_TYPES:
+        return content_type
+
+    raise ValidationException('Only MP3, MP4, M4A, WAV, or WEBM voice recordings are supported')
 
 
 @router.post('/documents/upload-extract', response_model=DocumentExtractionResponse, status_code=status.HTTP_200_OK, tags=['Restaurant Invoice AI'], summary='Upload And Extract Invoice', description='Uploads an invoice file and returns extracted preview JSON without saving to the database.')
@@ -703,6 +725,29 @@ async def list_chat_messages(current_user: dict = Depends(get_current_user), ser
 @router.post('/chat/messages', response_model=ChatConversationResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Chat'], summary='Create Chat Message', description='Sends a user message and returns the updated AI chat conversation.')
 async def create_chat_message(payload: ChatMessageCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> ChatConversationResponse:
     return await _run_endpoint('create_chat_message', lambda: service.create_chat_message(current_user, payload))
+
+
+@router.post('/chat/voice-transcription', response_model=ChatVoiceTranscriptionResponse, status_code=status.HTTP_200_OK, tags=['Restaurant Chat'], summary='Transcribe Voice Message', description='Uploads a voice recording and returns text that can be sent as a normal chat message.')
+async def transcribe_chat_voice(
+    language: str | None = Form(default=None),
+    accept_language: str | None = Header(default=None, alias='Accept-Language'),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+    service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
+) -> ChatVoiceTranscriptionResponse:
+    async def _execute() -> ChatVoiceTranscriptionResponse:
+        content_type = _resolve_supported_voice_content_type(file)
+        file_bytes = await file.read()
+        text = await service.transcribe_chat_voice(
+            current_user,
+            file_name=file.filename or 'voice-message.m4a',
+            content_type=content_type,
+            file_bytes=file_bytes,
+            language=language or accept_language,
+        )
+        return ChatVoiceTranscriptionResponse(text=text)
+
+    return await _run_endpoint('transcribe_chat_voice', _execute)
 
 
 @router.patch('/chat/messages/{message_id}', response_model=ChatConversationResponse, tags=['Restaurant Chat'], summary='Edit Chat Message', description='Updates a user message and stores a regenerated AI response linked to the edited message.')

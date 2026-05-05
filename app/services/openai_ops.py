@@ -694,6 +694,41 @@ class OpenAIOperationsService:
 
         return await self._run_cached_generation(cache_key, _generate)
 
+    async def transcribe_audio(
+        self,
+        *,
+        file_name: str,
+        content_type: str,
+        file_bytes: bytes,
+        language: str | None = None,
+    ) -> str:
+        if not file_bytes:
+            return ""
+        if not self.enabled:
+            return ""
+
+        form_data: dict[str, str] = {
+            "model": self.settings.openai_transcription_model,
+        }
+        resolved_language = self._resolve_language(language)
+        if resolved_language in {"en", "it"}:
+            form_data["language"] = resolved_language
+
+        try:
+            async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=60.0) as client:
+                response = await client.post(
+                    "/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {self.settings.openai_api_key}"},
+                    data=form_data,
+                    files={"file": (file_name, file_bytes, content_type)},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return str(payload.get("text") or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("OpenAI audio transcription failed", exc_info=exc)
+            return ""
+
     async def _responses_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=45.0) as client:
             headers = {
