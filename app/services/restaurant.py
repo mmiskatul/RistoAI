@@ -1094,7 +1094,7 @@ class RestaurantOperationsService(BaseService):
         )
         return RestaurantHomeInsightResponse(period=period, insight=insights[0] if insights else None)
 
-    async def get_home_recent_activity(self, current_user: dict) -> RestaurantHomeRecentActivityResponse:
+    async def get_home_recent_activity(self, current_user: dict, *, limit: int = 6, diverse: bool = True) -> RestaurantHomeRecentActivityResponse:
         scope_id, _, expenses, documents, cash_deposits, inventory_items = await self._load_home_dependencies(current_user)
         return RestaurantHomeRecentActivityResponse(
             items=self._build_recent_activity(
@@ -1104,6 +1104,8 @@ class RestaurantOperationsService(BaseService):
                 documents=self.serialize_list(documents),
                 cash_deposits=self.serialize_list(cash_deposits),
                 inventory_items=self.serialize_list(inventory_items),
+                max_items=limit,
+                prefer_distinct_kinds=diverse,
             )
         )
 
@@ -4756,10 +4758,13 @@ class RestaurantOperationsService(BaseService):
         documents: list[dict],
         cash_deposits: list[dict],
         inventory_items: list[dict],
+        max_items: int = 6,
+        prefer_distinct_kinds: bool = True,
     ) -> list[ActivityItemResponse]:
         activity_language = self._resolve_chat_language(current_user)
+        max_items = max(1, min(max_items, 50))
         items: list[ActivityItemResponse] = []
-        for item in daily_records[:3]:
+        for item in daily_records[:max_items]:
             formatted_business_date = self._format_activity_date(item.get("business_date"), language=activity_language)
             total_revenue = float(item.get("total_revenue", 0) or 0)
             total_covers = int(item.get("total_covers", 0) or 0)
@@ -4781,7 +4786,7 @@ class RestaurantOperationsService(BaseService):
                     route=f"/(tabs)/home/daily-record-details?dataId={item['id']}",
                 )
             )
-        for item in self.serialize_list(documents[:3]):
+        for item in self.serialize_list(documents[:max_items]):
             items.append(
                 ActivityItemResponse(
                     kind="invoice",
@@ -4807,7 +4812,7 @@ class RestaurantOperationsService(BaseService):
                 str(item.get("expense_date") or ""),
             ),
             reverse=True,
-        )[:3]
+        )[:max_items]
         for item in recent_expenses:
             expense_date = self._safe_parse_date(item.get("expense_date"))
             reference_date = expense_date.isoformat() if expense_date else ""
@@ -4848,7 +4853,7 @@ class RestaurantOperationsService(BaseService):
             ),
             reverse=True,
         )
-        for item in serialized_cash_deposits[:3]:
+        for item in serialized_cash_deposits[:max_items]:
             transaction_type = str(item.get("type") or "bank_deposit")
             cash_title = (
                 {
@@ -4886,7 +4891,7 @@ class RestaurantOperationsService(BaseService):
                     route=f"/(tabs)/home/cash-transaction-details?id={item['id']}",
                 )
             )
-        for item in self.serialize_list(inventory_items[:3]):
+        for item in self.serialize_list(inventory_items[:max_items]):
             items.append(
                 ActivityItemResponse(
                     kind="inventory",
@@ -4903,6 +4908,8 @@ class RestaurantOperationsService(BaseService):
         for item in items:
             item.timestamp = str(item.timestamp)
         sorted_items = sorted(items, key=lambda value: value.timestamp, reverse=True)
+        if not prefer_distinct_kinds:
+            return sorted_items[:max_items]
         selected: list[ActivityItemResponse] = []
         selected_ids: set[str] = set()
         selected_kinds: set[str] = set()
@@ -4912,13 +4919,13 @@ class RestaurantOperationsService(BaseService):
             selected.append(item)
             selected_ids.add(item.entity_id)
             selected_kinds.add(item.kind)
-            if len(selected) >= 6:
+            if len(selected) >= max_items:
                 return selected
         for item in sorted_items:
             if item.entity_id in selected_ids:
                 continue
             selected.append(item)
-            if len(selected) >= 6:
+            if len(selected) >= max_items:
                 break
         return selected
 

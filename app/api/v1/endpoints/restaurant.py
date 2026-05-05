@@ -178,10 +178,12 @@ async def get_home_insight(
 
 @router.get('/home/recent-activity', response_model=RestaurantHomeRecentActivityResponse, tags=['Restaurant Home'], summary='Home Recent Activity Section', description='Restaurant dashboard recent activity section for the mobile home screen.')
 async def get_home_recent_activity(
+    limit: int = Query(default=6, ge=1, le=50),
+    diverse: bool = Query(default=True),
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> RestaurantHomeRecentActivityResponse:
-    return await service.get_home_recent_activity(current_user)
+    return await service.get_home_recent_activity(current_user, limit=limit, diverse=diverse)
 
 
 @router.get('/notifications/feed', response_model=RestaurantNotificationFeedResponse, tags=['Restaurant Notifications'], summary='Business Notification Feed', description='Recent business notifications for restaurant cash, expenses, documents, daily data, and inventory changes.')
