@@ -119,7 +119,7 @@ class SubscriptionService(BaseService):
         plans = await self.subscription_plan_repository.get_visible_plans()
         return UserSubscriptionPlanListResponse(
             selection_required=self._selection_required(current_user),
-            plans=[self._to_user_plan_response(plan) for plan in plans],
+            plans=[self._to_user_plan_response(plan, current_user=current_user) for plan in plans],
             current_subscription=self._to_user_current_subscription(current_user),
         )
 
@@ -622,8 +622,14 @@ class SubscriptionService(BaseService):
         serialized = self.serialize(coupon)
         return CouponResponse(**serialized)
 
-    def _to_user_plan_response(self, plan: dict) -> UserSubscriptionPlanResponse:
+    def _to_user_plan_response(self, plan: dict, *, current_user: dict | None = None) -> UserSubscriptionPlanResponse:
         serialized = self.serialize(plan)
+        current_status = current_user.get('subscription_status') if current_user else None
+        is_current = (
+            bool(current_user)
+            and current_user.get('subscription_plan_name') == serialized['name']
+            and current_status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL}
+        )
         return UserSubscriptionPlanResponse(
             id=serialized['id'],
             name=serialized['name'],
@@ -632,6 +638,7 @@ class SubscriptionService(BaseService):
             trial_days=serialized['trial_days'],
             features=serialized['features'],
             is_best_plan=serialized['is_best_plan'],
+            is_current=is_current,
         )
 
     def _to_user_current_subscription(self, user: dict) -> UserCurrentSubscriptionResponse:

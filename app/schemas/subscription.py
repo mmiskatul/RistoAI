@@ -204,6 +204,7 @@ class UserSubscriptionPlanResponse(BaseSchema):
     trial_days: int
     features: list[str]
     is_best_plan: bool
+    is_current: bool = False
 
 
 class UserCurrentSubscriptionResponse(BaseSchema):
