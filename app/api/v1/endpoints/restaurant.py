@@ -225,7 +225,21 @@ ALLOWED_DOCUMENT_CONTENT_TYPES = {
 }
 
 
-ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES = ALLOWED_DOCUMENT_CONTENT_TYPES | {'text/plain'}
+ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES = ALLOWED_DOCUMENT_CONTENT_TYPES | {
+    'text/plain',
+    'application/json',
+    'application/xml',
+    'text/xml',
+    'text/markdown',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/rtf',
+    'text/rtf',
+}
 ALLOWED_VOICE_CONTENT_TYPES = {
     'audio/mp4',
     'audio/m4a',
@@ -243,6 +257,11 @@ UPLOAD_CONTENT_TYPE_ALIASES = {
     'image/pjpeg': 'image/jpeg',
     'text/comma-separated-values': 'text/csv',
     'text/x-csv': 'text/csv',
+    'application/x-csv': 'text/csv',
+    'application/vnd.ms-excel.sheet.macroenabled.12': 'application/vnd.ms-excel',
+    'application/wps-office.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/wps-office.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/wps-office.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 }
 
 
@@ -256,7 +275,7 @@ def _resolve_supported_upload_content_type(file: UploadFile, *, allow_text: bool
     if content_type in allowed_content_types or content_type.startswith('image/'):
         return content_type
 
-    supported_label = 'PDF, CSV, TXT, and image files' if allow_text else 'PDF, CSV, and image files'
+    supported_label = 'PDF, CSV, TXT, images, Word, Excel, PowerPoint, JSON, XML, Markdown, and RTF files' if allow_text else 'PDF, CSV, and image files'
     raise ValidationException(f'Only {supported_label} are supported')
 
 

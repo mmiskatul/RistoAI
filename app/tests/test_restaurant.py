@@ -2102,6 +2102,25 @@ def test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record(client
     assert attachment_messages[-1]["attachment_summary_translations"]["it"]
     assert chat_attachment_payload["messages"][-1]["role"] == "assistant"
 
+    spreadsheet_attachment_response = client.post(
+        "/api/v1/restaurant/chat/messages/attachments",
+        headers=headers,
+        data={"message": "Please review this spreadsheet", "language": "en"},
+        files={
+            "file": (
+                "supplier-costs.xlsx",
+                b"fake-spreadsheet-bytes",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert spreadsheet_attachment_response.status_code == 201
+    spreadsheet_messages = [
+        message for message in spreadsheet_attachment_response.json()["messages"] if message.get("attachment_name")
+    ]
+    assert spreadsheet_messages[-1]["attachment_name"] == "supplier-costs.xlsx"
+    assert spreadsheet_messages[-1]["role"] == "user"
+
 
     settings_response = client.get("/api/v1/restaurant/settings/profile", headers=headers)
     assert settings_response.status_code == 200
