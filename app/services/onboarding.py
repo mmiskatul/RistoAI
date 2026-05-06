@@ -4,6 +4,7 @@ import asyncio
 
 from fastapi import UploadFile
 
+from app.utils.datetime import utc_now
 from app.core.exceptions import ValidationException
 from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.user import UserRepository
@@ -230,8 +231,22 @@ class OnboardingService(BaseService):
 
     def _to_response(self, profile: dict) -> OnboardingProfileResponse:
         serialized = self.serialize(profile)
+        response_payload = {
+            **serialized,
+            "restaurant_name": serialized.get("restaurant_name") or "",
+            "restaurant_type": serialized.get("restaurant_type") or "",
+            "city_location": serialized.get("city_location") or "",
+            "number_of_seats": int(serialized.get("number_of_seats") or 0),
+            "average_spend_per_customer": float(serialized.get("average_spend_per_customer") or 0),
+            "main_business_goal": serialized.get("main_business_goal") or "",
+            "biggest_problem": serialized.get("biggest_problem") or "",
+            "improvement_focus": serialized.get("improvement_focus") or "",
+            "onboarding_completed": bool(serialized.get("onboarding_completed")),
+            "created_at": serialized.get("created_at") or utc_now().isoformat(),
+            "updated_at": serialized.get("updated_at") or utc_now().isoformat(),
+        }
         if self.image_storage_service:
-            serialized["profile_image_url"] = self.image_storage_service.resolve_public_url(serialized.get("profile_image_url"))
-            serialized["interior_photo_url"] = self.image_storage_service.resolve_public_url(serialized.get("interior_photo_url"))
-            serialized["exterior_photo_url"] = self.image_storage_service.resolve_public_url(serialized.get("exterior_photo_url"))
-        return OnboardingProfileResponse(**serialized)
+            response_payload["profile_image_url"] = self.image_storage_service.resolve_public_url(serialized.get("profile_image_url"))
+            response_payload["interior_photo_url"] = self.image_storage_service.resolve_public_url(serialized.get("interior_photo_url"))
+            response_payload["exterior_photo_url"] = self.image_storage_service.resolve_public_url(serialized.get("exterior_photo_url"))
+        return OnboardingProfileResponse(**response_payload)

@@ -135,6 +135,35 @@ def test_onboarding_allows_image_upload_before_completion(client, app, owner_cre
     assert save_response.json()['exterior_photo_url'] == image_url
 
 
+def test_get_onboarding_profile_handles_legacy_incomplete_records(client, app, owner_credentials) -> None:
+    seed_subscription_plan(app)
+    headers = register_and_login(client, owner_credentials)
+    select_subscription_plan(client, headers)
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    user_id = client.get('/api/v1/auth/me', headers=headers).json()['id']
+    asyncio.run(
+        db['onboarding_profiles'].insert_one(
+                {
+                    'user_id': user_id,
+                    'restaurant_name': 'Legacy Restaurant',
+                    'onboarding_completed': False,
+                }
+            )
+    )
+
+    response = client.get('/api/v1/onboarding/profile', headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['restaurant_name'] == 'Legacy Restaurant'
+    assert payload['restaurant_type'] == ''
+    assert payload['city_location'] == ''
+    assert payload['number_of_seats'] == 0
+    assert payload['average_spend_per_customer'] == 0
+    assert payload['onboarding_completed'] is False
+
+
 def test_restaurant_routes_require_completed_onboarding(client, app, owner_credentials) -> None:
     seed_subscription_plan(app)
     headers = register_and_login(client, owner_credentials)
