@@ -29,6 +29,7 @@ ONBOARDING_ALLOWED_PATH_PREFIXES = (
     '/api/v1/onboarding',
     '/api/v1/auth',
     '/api/v1/subscriptions/user',
+    '/api/v1/upload',
 )
 RESTAURANT_ROLES = {UserRole.RESTAURANT_OWNER, UserRole.MANAGER, UserRole.STAFF}
 BLOCKED_SUBSCRIPTION_STATUSES = {

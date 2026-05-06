@@ -102,6 +102,39 @@ def test_save_and_get_onboarding_profile(client, app, owner_credentials) -> None
     assert stored_user['onboarding_completed'] is True
 
 
+def test_onboarding_allows_image_upload_before_completion(client, app, owner_credentials) -> None:
+    seed_subscription_plan(app)
+    headers = register_and_login(client, owner_credentials)
+    select_subscription_plan(client, headers)
+
+    upload_response = client.post(
+        '/api/v1/upload/image',
+        headers=headers,
+        files={'file': ('interior.jpg', b'interior-image-bytes', 'image/jpeg')},
+    )
+    assert upload_response.status_code == 201
+    image_url = upload_response.json()['url']
+    assert image_url.startswith('https://')
+
+    payload = {
+        'restaurant_name': 'The Italian Bistro',
+        'restaurant_type': 'Fine Dining',
+        'city_location': 'New York, NY',
+        'number_of_seats': 45,
+        'average_spend_per_customer': 25.0,
+        'main_business_goal': 'Increase revenue',
+        'biggest_problem': 'We struggle with slow weekday traffic and inconsistent table turnover.',
+        'improvement_focus': 'Improve staff scheduling and reduce wasted inventory.',
+        'interior_photo_url': image_url,
+        'exterior_photo_url': image_url,
+    }
+    save_response = client.post('/api/v1/onboarding/profile', headers=headers, data=payload)
+
+    assert save_response.status_code == 200
+    assert save_response.json()['interior_photo_url'] == image_url
+    assert save_response.json()['exterior_photo_url'] == image_url
+
+
 def test_restaurant_routes_require_completed_onboarding(client, app, owner_credentials) -> None:
     seed_subscription_plan(app)
     headers = register_and_login(client, owner_credentials)
