@@ -243,9 +243,13 @@ ALLOWED_CHAT_ATTACHMENT_CONTENT_TYPES = ALLOWED_DOCUMENT_CONTENT_TYPES | {
 ALLOWED_VOICE_CONTENT_TYPES = {
     'audio/mp4',
     'audio/m4a',
+    'audio/x-m4a',
+    'audio/aac',
+    'audio/x-aac',
     'audio/mpeg',
     'audio/mp3',
     'audio/wav',
+    'audio/x-wav',
     'audio/webm',
     'video/mp4',
 }
@@ -262,6 +266,10 @@ UPLOAD_CONTENT_TYPE_ALIASES = {
     'application/wps-office.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/wps-office.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/wps-office.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'audio/x-m4a': 'audio/mp4',
+    'audio/aac': 'audio/mp4',
+    'audio/x-aac': 'audio/mp4',
+    'audio/x-wav': 'audio/wav',
 }
 
 
