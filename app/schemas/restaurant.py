@@ -483,6 +483,7 @@ class CashDepositResponse(BaseSchema):
 class CashPeriodSummaryResponse(BaseSchema):
     total_collected: float
     cash_available: float
+    pos_payments: float
     withdrawals_total: float
     bank_deposits: float
 
@@ -490,6 +491,7 @@ class CashPeriodSummaryResponse(BaseSchema):
 class CashPeriodStatusResponse(BaseSchema):
     total_collected: str
     cash_available: str
+    pos_payments: str
     withdrawals: str
     bank_deposits: str
     cash_deposits: str

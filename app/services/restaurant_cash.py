@@ -11,6 +11,7 @@ class CashLedgerSummary:
     total_collected: float
     base_cash_available: float
     cash_available: float
+    pos_payments_total: float
     withdrawals_total: float
     direct_bank_collection_total: float
     manual_bank_deposits_total: float
@@ -25,20 +26,6 @@ class CashLedgerSummary:
     deposits_collection_total: float
 
 
-def _resolve_total_collection(item: dict[str, Any]) -> float:
-    legacy_cash_total = float(item.get("cash_collected_total", 0) or 0)
-    fallback_cash_total = max(
-        float(item.get("cash_payments", 0) or 0),
-        float(item.get("cash_in", 0) or 0),
-    )
-    pos_total = float(item.get("pos_payments", 0) or 0)
-
-    # Older records stored only the cash portion in cash_collected_total.
-    if legacy_cash_total >= fallback_cash_total + pos_total:
-        return legacy_cash_total
-    return fallback_cash_total + pos_total
-
-
 def calculate_cash_ledger(
     *,
     daily_records: Iterable[dict[str, Any]],
@@ -47,16 +34,17 @@ def calculate_cash_ledger(
     daily_items = list(daily_records)
     transaction_items = list(finance_transactions)
 
-    total_collected = round(
-        sum(_resolve_total_collection(item) for item in daily_items),
-        2,
-    )
+    cash_in_total = round(sum(float(item.get("cash_in", item.get("cash_payments", 0)) or 0) for item in daily_items), 2)
+    pos_payments_total = round(sum(float(item.get("pos_payments", 0) or 0) for item in daily_items), 2)
+    cash_out_total = round(sum(float(item.get("cash_out", 0) or 0) for item in daily_items), 2)
+    cash_withdrawals_total = round(sum(float(item.get("cash_withdrawals", 0) or 0) for item in daily_items), 2)
+    manual_entry_expenses_total = round(sum(float(item.get("total_expenses", 0) or 0) for item in daily_items), 2)
     base_cash_available = round(
-        sum(float(item.get("cash_available", item.get("closing_cash", 0) + item.get("cash_in", 0) - item.get("cash_out", 0))) for item in daily_items),
+        max(cash_in_total - cash_out_total - cash_withdrawals_total - manual_entry_expenses_total, 0.0),
         2,
     )
     withdrawals_total = round(
-        sum(float(item.get("cash_withdrawals", 0) + item.get("cash_out", 0)) for item in daily_items),
+        cash_withdrawals_total + cash_out_total,
         2,
     )
     direct_bank_collection_total = round(
@@ -127,13 +115,15 @@ def calculate_cash_ledger(
     )
     deposits_collection_total = bank_deposits_total
     cash_available = round(
-        max(base_cash_available + document_cash_total - cash_expenses_total - document_expense_total - manual_bank_deposits_total - cash_deposits_total, 0.0),
+        max(base_cash_available + document_cash_total - cash_expenses_total - document_expense_total, 0.0),
         2,
     )
+    total_collected = round(cash_available + bank_deposits_total, 2)
     return CashLedgerSummary(
         total_collected=total_collected,
         base_cash_available=base_cash_available,
         cash_available=cash_available,
+        pos_payments_total=pos_payments_total,
         withdrawals_total=withdrawals_total,
         direct_bank_collection_total=direct_bank_collection_total,
         manual_bank_deposits_total=manual_bank_deposits_total,
@@ -214,6 +204,7 @@ def build_aggregate_snapshot(
         "bank_deposits_total": cash.bank_deposits_total,
         "cash_deposits_total": cash.cash_deposits_total,
         "deposits_collection_total": cash.deposits_collection_total,
+        "pos_payments_total": cash.pos_payments_total,
         "cash_collected_total": cash.total_collected,
         "base_cash_available": cash.base_cash_available,
         "cash_available": cash.cash_available,
@@ -234,6 +225,7 @@ def build_aggregate_snapshot(
             "net_revenue_total": net_revenue_total,
             "document_revenue_total": cash.document_revenue_total,
             "document_profit_adjustment_total": cash.document_profit_total,
+            "pos_payments_total": cash.pos_payments_total,
         },
         "expense_summary": {
             "total_expenses": total_expenses,
@@ -253,6 +245,7 @@ def build_aggregate_snapshot(
             "cash_collected_total": cash.total_collected,
             "base_cash_available": cash.base_cash_available,
             "cash_available": cash.cash_available,
+            "pos_payments_total": cash.pos_payments_total,
             "withdrawals_total": cash.withdrawals_total,
             "document_cash_total": cash.document_cash_total,
         },

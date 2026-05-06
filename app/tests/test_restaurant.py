@@ -831,9 +831,10 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     cash_overview_response = client.get("/api/v1/restaurant/cash/overview", headers=headers)
     assert cash_overview_response.status_code == 200
     cash_overview_payload = cash_overview_response.json()
-    assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 1000.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["total_collected"] == 320.0
     assert cash_overview_payload["periods"]["today"]["summary"]["bank_deposits"] == 150.0
-    assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 200.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["cash_available"] == 170.0
+    assert cash_overview_payload["periods"]["today"]["summary"]["pos_payments"] == 700.0
     assert {item["display_title"] for item in cash_overview_payload["periods"]["today"]["recent_deposits"]} >= {
         "Cash Payments",
         "Chase Bank - Main",
@@ -848,9 +849,10 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
     weekly_cash_cards = {item["label"]: item["amount"] for item in home_response.json()["weekly"]["cash_management"]}
-    assert weekly_cash_cards["Total Collection"] == 1000.0
+    assert weekly_cash_cards["Total Collection"] == 320.0
+    assert weekly_cash_cards["POS Payments"] == 700.0
     assert weekly_cash_cards["Cash Deposit"] == 150.0
-    assert weekly_cash_cards["Cash Available"] == 200.0
+    assert weekly_cash_cards["Available Cash"] == 170.0
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     daily_aggregate = asyncio.run(
@@ -860,8 +862,8 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     assert daily_aggregate["bank_deposits_total"] == 150.0
     assert daily_aggregate["cash_deposits_total"] == 25.0
     assert daily_aggregate["deposits_collection_total"] == 150.0
-    assert daily_aggregate["cash_collected_total"] == 1000.0
-    assert daily_aggregate["cash_available"] == 200.0
+    assert daily_aggregate["cash_collected_total"] == 320.0
+    assert daily_aggregate["cash_available"] == 170.0
 
     linked_cash_rows = asyncio.run(
         db["restaurant_cash_deposits"].find({"source_kind": "manual_entry", "source_id": daily_response.json()["id"]}).to_list(length=None)
@@ -882,7 +884,7 @@ def test_cash_management_uses_daily_entries_expenses_invoices_and_deposits(clien
     assert month_aggregate["bank_deposits_total"] == 150.0
     assert month_aggregate["cash_deposits_total"] == 25.0
     assert month_aggregate["deposits_collection_total"] == 150.0
-    assert month_aggregate["cash_available"] == 200.0
+    assert month_aggregate["cash_available"] == 170.0
 
 
 def test_expenses_section_includes_daily_data_expenses(client, app):
@@ -1586,7 +1588,7 @@ def test_restaurant_cash_api_contracts_remain_stable(client, app):
     assert set(payload.keys()) == {"active_period", "periods"}
     assert set(payload["periods"].keys()) == {"today", "this_week", "this_month"}
     assert set(payload["periods"]["today"].keys()) == {"summary", "status", "recent_deposits"}
-    assert set(payload["periods"]["today"]["summary"].keys()) == {"total_collected", "cash_available", "withdrawals_total", "bank_deposits"}
+    assert set(payload["periods"]["today"]["summary"].keys()) == {"total_collected", "cash_available", "pos_payments", "withdrawals_total", "bank_deposits"}
 
 
 def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
@@ -1672,7 +1674,8 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
     assert home_cash_response.json()["period"] == "weekly"
     assert {item["label"] for item in home_cash_response.json()["items"]} == {
         "Total Collection",
-        "Cash Available",
+        "POS Payments",
+        "Available Cash",
         "Cash Deposit",
     }
 

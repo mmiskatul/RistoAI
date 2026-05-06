@@ -1260,8 +1260,7 @@ class RestaurantOperationsService(BaseService):
         filtered_daily_records: list[dict],
         filtered_cash_deposits: list[dict],
     ) -> list[CashManagementItemResponse]:
-        total_collection = round(sum(float(item.get("cash_collected_total", 0)) for item in filtered_daily_records), 2)
-        cash_available = round(sum(float(item.get("cash_available", 0)) for item in filtered_daily_records), 2)
+        cash_available = self._calculate_cash_available_flow(filtered_daily_records)
         cash_deposit_total = round(
             sum(
                 float(
@@ -1273,11 +1272,32 @@ class RestaurantOperationsService(BaseService):
         )
         if not cash_deposit_total and filtered_cash_deposits:
             cash_deposit_total = round(sum(float(item.get("amount", 0)) for item in filtered_cash_deposits), 2)
+        pos_payments_total = round(
+            sum(float(item.get("pos_payments_total", item.get("pos_payments", 0)) or 0) for item in filtered_daily_records),
+            2,
+        )
+        total_collection = round(cash_available + cash_deposit_total, 2)
         return [
             CashManagementItemResponse(label="Total Collection", amount=total_collection, subtitle="Cash and POS collections"),
-            CashManagementItemResponse(label="Cash Available", amount=cash_available, subtitle="Cash remaining after expenses and withdrawals"),
+            CashManagementItemResponse(label="POS Payments", amount=pos_payments_total, subtitle="Card and POS settlements"),
+            CashManagementItemResponse(label="Available Cash", amount=cash_available, subtitle="Cash remaining after expenses and withdrawals"),
             CashManagementItemResponse(label="Cash Deposit", amount=cash_deposit_total, subtitle="Bank transfers and recorded deposits"),
         ]
+
+    @staticmethod
+    def _calculate_cash_available_flow(records: list[dict]) -> float:
+        has_cash_flow_inputs = any(
+            any(key in item for key in ("cash_in", "cash_payments", "cash_out", "cash_withdrawals"))
+            for item in records
+        )
+        if not has_cash_flow_inputs:
+            return round(sum(float(item.get("cash_available", 0) or 0) for item in records), 2)
+
+        cash_in_total = sum(float(item.get("cash_in", item.get("cash_payments", 0)) or 0) for item in records)
+        cash_out_total = sum(float(item.get("cash_out", 0) or 0) for item in records)
+        cash_withdrawals_total = sum(float(item.get("cash_withdrawals", 0) or 0) for item in records)
+        expenses_total = sum(float(item.get("total_expenses", 0) or 0) for item in records)
+        return round(max(cash_in_total - (cash_out_total + cash_withdrawals_total + expenses_total), 0.0), 2)
 
     async def get_vat_overview(self, current_user: dict) -> VatOverviewResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1898,6 +1918,7 @@ class RestaurantOperationsService(BaseService):
             period_status = CashPeriodStatusResponse(
                 total_collected=label,
                 cash_available="IN_SAFE",
+                pos_payments=label,
                 withdrawals=label,
                 bank_deposits=label,
                 cash_deposits=label,
@@ -1906,6 +1927,7 @@ class RestaurantOperationsService(BaseService):
             period_summary = CashPeriodSummaryResponse(
                 total_collected=round(float(live_snapshot.get("cash_collected_total", 0)), 2),
                 cash_available=round(float(live_snapshot.get("cash_available", 0)), 2),
+                pos_payments=round(float(live_snapshot.get("pos_payments_total", 0)), 2),
                 withdrawals_total=round(float(live_snapshot.get("withdrawals_total", 0)), 2),
                 bank_deposits=round(float(live_snapshot.get("bank_deposits_total", 0)), 2),
             )
@@ -1994,13 +2016,14 @@ class RestaurantOperationsService(BaseService):
             dinner_covers = data["dinner_covers"]
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
             cash_difference = round(data["closing_cash"] - expected_closing_cash, 2)
+            cash_out = max(expected_closing_cash - data["closing_cash"], 0)
             record_payload = {
                 **data,
                 "cash_collected_total": round(data["cash_payments"] + data["pos_payments"], 2),
-                "cash_available": round(data["closing_cash"], 2),
+                "cash_available": max(data["cash_payments"] - cash_out - data["expenses_in_cash"], 0),
                 "cash_withdrawals": 0.0,
                 "cash_in": data["cash_payments"],
-                "cash_out": max(expected_closing_cash - data["closing_cash"], 0),
+                "cash_out": cash_out,
                 "cash_difference": cash_difference,
             }
         final_payload = {
@@ -2068,13 +2091,14 @@ class RestaurantOperationsService(BaseService):
             dinner_covers = data["dinner_covers"]
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
             cash_difference = round(data["closing_cash"] - expected_closing_cash, 2)
+            cash_out = max(expected_closing_cash - data["closing_cash"], 0)
             record_payload = {
                 **data,
                 "cash_collected_total": round(data["cash_payments"] + data["pos_payments"], 2),
-                "cash_available": round(data["closing_cash"], 2),
+                "cash_available": max(data["cash_payments"] - cash_out - data["expenses_in_cash"], 0),
                 "cash_withdrawals": 0.0,
                 "cash_in": data["cash_payments"],
-                "cash_out": max(expected_closing_cash - data["closing_cash"], 0),
+                "cash_out": cash_out,
                 "cash_difference": cash_difference,
             }
         final_payload = {
@@ -3371,8 +3395,15 @@ class RestaurantOperationsService(BaseService):
         previous_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
         recent_profit = sum(float(item.get("profit", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_profit = sum(float(item.get("profit", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
-        cash_collected_total = round(sum(float(item.get("cash_collected_total", 0)) for item in serialized_records), 2)
-        cash_available = round(sum(float(item.get("cash_available", 0)) for item in serialized_records), 2)
+        cash_available = self._calculate_cash_available_flow(serialized_records)
+        cash_deposit_total = round(
+            sum(
+                float(item.get("bank_deposits_total", item.get("deposits_collection_total", 0)) or 0)
+                for item in serialized_records
+            ),
+            2,
+        )
+        cash_collected_total = round(cash_available + cash_deposit_total, 2)
         return {
             "revenue_total": revenue_total,
             "expenses_total": expenses_total,
@@ -3621,6 +3652,7 @@ class RestaurantOperationsService(BaseService):
                     "bank_deposit_count": len(deposits),
                     "bank_deposit_ids": [item["id"] for item in deposits],
                     "cash_collected_total": snapshot["cash_collected_total"],
+                    "pos_payments_total": snapshot["pos_payments_total"],
                     "base_cash_available": snapshot["base_cash_available"],
                     "cash_available": snapshot["cash_available"],
                     "withdrawals_total": snapshot["withdrawals_total"],
@@ -3730,6 +3762,7 @@ class RestaurantOperationsService(BaseService):
                 "bank_deposit_ids": [item["id"] for item in weekly_deposits],
                 "manual_revenue": snapshot["revenue_summary"]["manual_entry_sales_total"],
                 "cash_collected_total": snapshot["cash_collected_total"],
+                "pos_payments_total": snapshot["pos_payments_total"],
                 "base_cash_available": snapshot["base_cash_available"],
                 "cash_available": snapshot["cash_available"],
                 "withdrawals_total": snapshot["withdrawals_total"],
@@ -3823,6 +3856,7 @@ class RestaurantOperationsService(BaseService):
                 "bank_deposit_ids": [item["id"] for item in monthly_deposits],
                 "manual_revenue": snapshot["revenue_summary"]["manual_entry_sales_total"],
                 "cash_collected_total": snapshot["cash_collected_total"],
+                "pos_payments_total": snapshot["pos_payments_total"],
                 "base_cash_available": snapshot["base_cash_available"],
                 "cash_available": snapshot["cash_available"],
                 "withdrawals_total": snapshot["withdrawals_total"],
