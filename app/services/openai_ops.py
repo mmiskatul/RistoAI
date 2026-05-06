@@ -205,7 +205,7 @@ class OpenAIOperationsService:
     ) -> dict[str, str]:
         resolved_language = self._resolve_language(language)
         if not self.enabled:
-            return {"title": fallback_title, "subtitle": fallback_subtitle}
+            return {"title": fallback_title, "subtitle": fallback_subtitle, "ai_provider": "fallback"}
 
         payload = {
             "model": self.settings.openai_model,
@@ -261,7 +261,7 @@ class OpenAIOperationsService:
                         required_prefix = "Suggerimento di ottimizzazione:" if resolved_language == "it" else "Optimization Tip:"
                         if not title.startswith(required_prefix):
                             title = f"{required_prefix} {title}"
-                        return {"title": title, "subtitle": subtitle}
+                        return {"title": title, "subtitle": subtitle, "ai_provider": "openai"}
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 429:
                     logger.warning("OpenAI business insight rate limited; using fallback insight.")
@@ -269,7 +269,7 @@ class OpenAIOperationsService:
                     logger.exception("OpenAI business insight generation failed", exc_info=exc)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("OpenAI business insight generation failed", exc_info=exc)
-            return {"title": fallback_title, "subtitle": fallback_subtitle}
+            return {"title": fallback_title, "subtitle": fallback_subtitle, "ai_provider": "fallback"}
 
         return await self._run_cached_generation(cache_key, _generate)
 
@@ -282,7 +282,7 @@ class OpenAIOperationsService:
     ) -> list[dict[str, str]]:
         resolved_language = self._resolve_language(language)
         if not self.enabled:
-            return fallback_alerts
+            return [{**item, "ai_provider": "fallback"} for item in fallback_alerts]
 
         payload = {
             "model": self.settings.openai_model,
@@ -339,7 +339,7 @@ class OpenAIOperationsService:
                             title = str(item.get("title") or "").strip()
                             subtitle = str(item.get("subtitle") or "").strip()
                             if title and subtitle:
-                                normalized.append({"title": title, "subtitle": subtitle})
+                                normalized.append({"title": title, "subtitle": subtitle, "ai_provider": "openai"})
                         if normalized:
                             return normalized
             except httpx.HTTPStatusError as exc:
@@ -349,7 +349,7 @@ class OpenAIOperationsService:
                     logger.exception("OpenAI supplier alert generation failed", exc_info=exc)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("OpenAI supplier alert generation failed", exc_info=exc)
-            return fallback_alerts
+            return [{**item, "ai_provider": "fallback"} for item in fallback_alerts]
 
         return await self._run_cached_generation(cache_key, _generate)
 

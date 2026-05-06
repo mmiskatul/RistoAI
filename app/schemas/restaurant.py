@@ -808,6 +808,7 @@ class InventoryListResponse(BaseSchema):
 class AnalyticsInsightBannerResponse(BaseSchema):
     title: str
     subtitle: str
+    ai_provider: str = "fallback"
     title_translations: LocalizedTextResponse | None = None
     subtitle_translations: LocalizedTextResponse | None = None
 
@@ -832,6 +833,7 @@ class AnalyticsComparisonRowResponse(BaseSchema):
 class AnalyticsSupplierAlertResponse(BaseSchema):
     title: str
     subtitle: str
+    ai_provider: str = "fallback"
     title_translations: LocalizedTextResponse | None = None
     subtitle_translations: LocalizedTextResponse | None = None
 

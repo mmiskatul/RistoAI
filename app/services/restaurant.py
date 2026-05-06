@@ -2757,10 +2757,13 @@ class RestaurantOperationsService(BaseService):
         staff_cost_percent = round((staff_cost_total / revenue_base) * 100, 1) if revenue_base > 0 else 0.0
         supplier_alerts = [
             AnalyticsSupplierAlertResponse(**item)
-            for item in await self._build_supplier_alerts(
+            for item in await self._build_revenue_monitoring_alerts(
                 current_user=current_user,
-                serialized_expenses=serialized_expenses,
-                serialized_documents=filtered_documents,
+                period=period,
+                current_revenue=current_revenue,
+                previous_revenue=previous_revenue,
+                revenue_change_percent=float(context["revenue_change_percent"]),
+                serialized_records=serialized_records,
             )
         ]
 
@@ -4022,6 +4025,7 @@ class RestaurantOperationsService(BaseService):
             return AnalyticsInsightBannerResponse(
                 title=generated["title"],
                 subtitle=generated["subtitle"],
+                ai_provider=str(generated.get("ai_provider") or "fallback"),
                 title_translations=self._build_localized_text(
                     en=generated["title"] if insight_language == "en" else alternate_generated["title"],
                     it=generated["title"] if insight_language == "it" else alternate_generated["title"],
@@ -4076,6 +4080,7 @@ class RestaurantOperationsService(BaseService):
             return AnalyticsInsightBannerResponse(
                 title=generated["title"],
                 subtitle=generated["subtitle"],
+                ai_provider=str(generated.get("ai_provider") or "fallback"),
                 title_translations=self._build_localized_text(
                     en=generated["title"] if insight_language == "en" else alternate_generated["title"],
                     it=generated["title"] if insight_language == "it" else alternate_generated["title"],
@@ -4117,6 +4122,7 @@ class RestaurantOperationsService(BaseService):
         return AnalyticsInsightBannerResponse(
             title=generated["title"],
             subtitle=generated["subtitle"],
+            ai_provider=str(generated.get("ai_provider") or "fallback"),
             title_translations=self._build_localized_text(
                 en=generated["title"] if insight_language == "en" else alternate_generated["title"],
                 it=generated["title"] if insight_language == "it" else alternate_generated["title"],
@@ -4221,6 +4227,135 @@ class RestaurantOperationsService(BaseService):
                 {
                     "title": item["title"],
                     "subtitle": item["subtitle"],
+                    "ai_provider": str(item.get("ai_provider") or "fallback"),
+                    "title_translations": self._build_localized_text(
+                        en=item["title"] if alert_language == "en" else str(alternate_item.get("title") or ""),
+                        it=item["title"] if alert_language == "it" else str(alternate_item.get("title") or ""),
+                    ),
+                    "subtitle_translations": self._build_localized_text(
+                        en=item["subtitle"] if alert_language == "en" else str(alternate_item.get("subtitle") or ""),
+                        it=item["subtitle"] if alert_language == "it" else str(alternate_item.get("subtitle") or ""),
+                    ),
+                }
+            )
+        return localized_alerts
+
+    async def _build_revenue_monitoring_alerts(
+        self,
+        *,
+        current_user: dict,
+        period: str,
+        current_revenue: float,
+        previous_revenue: float,
+        revenue_change_percent: float,
+        serialized_records: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        alert_language = self._resolve_chat_language(current_user)
+        alternate_language = "it" if alert_language == "en" else "en"
+        period_label = "month" if period == "monthly" else "week"
+        period_label_it = "mese" if period == "monthly" else "settimana"
+        revenue_points = [
+            {
+                "business_date": item.get("business_date"),
+                "revenue": round(float(item.get("total_revenue", 0) or 0), 2),
+                "covers": int(item.get("total_covers", item.get("lunch_covers", 0) + item.get("dinner_covers", 0)) or 0),
+            }
+            for item in serialized_records
+        ]
+
+        if current_revenue <= 0 and not revenue_points:
+            return []
+
+        fallback_alerts_en: list[dict[str, str]] = []
+        fallback_alerts_it: list[dict[str, str]] = []
+
+        if previous_revenue > 0:
+            if revenue_change_percent < -5:
+                fallback_alerts_en.append(
+                    {
+                        "title": f"Revenue down {abs(round(revenue_change_percent, 1))}% this {period_label}",
+                        "subtitle": f"Current revenue is {self._format_currency(current_revenue)} versus {self._format_currency(previous_revenue)} previously.",
+                    }
+                )
+                fallback_alerts_it.append(
+                    {
+                        "title": f"Ricavi in calo del {abs(round(revenue_change_percent, 1))}% questa {period_label_it}",
+                        "subtitle": f"I ricavi attuali sono {self._format_currency(current_revenue)} contro {self._format_currency(previous_revenue)} precedenti.",
+                    }
+                )
+            elif revenue_change_percent > 5:
+                fallback_alerts_en.append(
+                    {
+                        "title": f"Revenue up {round(revenue_change_percent, 1)}% this {period_label}",
+                        "subtitle": f"Current revenue reached {self._format_currency(current_revenue)} versus {self._format_currency(previous_revenue)} previously.",
+                    }
+                )
+                fallback_alerts_it.append(
+                    {
+                        "title": f"Ricavi in crescita del {round(revenue_change_percent, 1)}% questa {period_label_it}",
+                        "subtitle": f"I ricavi attuali sono {self._format_currency(current_revenue)} contro {self._format_currency(previous_revenue)} precedenti.",
+                    }
+                )
+
+        if revenue_points:
+            lowest_point = min(revenue_points, key=lambda item: float(item["revenue"]))
+            highest_point = max(revenue_points, key=lambda item: float(item["revenue"]))
+            if float(highest_point["revenue"]) > 0 and float(lowest_point["revenue"]) < float(highest_point["revenue"]) * 0.5:
+                fallback_alerts_en.append(
+                    {
+                        "title": "Revenue volatility detected",
+                        "subtitle": f"Lowest day {lowest_point['business_date']} was {self._format_currency(float(lowest_point['revenue']))}, below half of the period peak.",
+                    }
+                )
+                fallback_alerts_it.append(
+                    {
+                        "title": "Volatilita ricavi rilevata",
+                        "subtitle": f"Il giorno piu basso {lowest_point['business_date']} e stato {self._format_currency(float(lowest_point['revenue']))}, sotto meta del picco del periodo.",
+                    }
+                )
+
+        if not fallback_alerts_en:
+            fallback_alerts_en.append(
+                {
+                    "title": "Revenue holding steady",
+                    "subtitle": f"Current {period_label} revenue is {self._format_currency(current_revenue)}. Keep monitoring covers and average spend.",
+                }
+            )
+            fallback_alerts_it.append(
+                {
+                    "title": "Ricavi stabili",
+                    "subtitle": f"I ricavi attuali della {period_label_it} sono {self._format_currency(current_revenue)}. Continua a monitorare coperti e spesa media.",
+                }
+            )
+
+        selected_fallback = fallback_alerts_it if alert_language == "it" else fallback_alerts_en
+        alternate_fallback = fallback_alerts_it if alternate_language == "it" else fallback_alerts_en
+        analytics_context = {
+            "period": period,
+            "current_revenue": current_revenue,
+            "previous_revenue": previous_revenue,
+            "revenue_change_percent": round(revenue_change_percent, 2),
+            "revenue_points": revenue_points,
+        }
+        generated_alerts = await self.openai_service.generate_supplier_alerts(
+            analytics_context=analytics_context,
+            fallback_alerts=selected_fallback,
+            language=alert_language,
+        )
+        alternate_generated_alerts = await self.openai_service.generate_supplier_alerts(
+            analytics_context=analytics_context,
+            fallback_alerts=alternate_fallback,
+            language=alternate_language,
+        )
+
+        localized_alerts: list[dict[str, Any]] = []
+        for index, item in enumerate(generated_alerts[:3]):
+            alternate_item = alternate_generated_alerts[index] if index < len(alternate_generated_alerts) else {"title": "", "subtitle": ""}
+            localized_alerts.append(
+                {
+                    "title": item["title"],
+                    "subtitle": item["subtitle"],
+                    "ai_provider": str(item.get("ai_provider") or "fallback"),
                     "title_translations": self._build_localized_text(
                         en=item["title"] if alert_language == "en" else str(alternate_item.get("title") or ""),
                         it=item["title"] if alert_language == "it" else str(alternate_item.get("title") or ""),
