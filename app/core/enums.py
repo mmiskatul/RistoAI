@@ -23,6 +23,7 @@ class SubscriptionPlan(StrEnum):
 class SubscriptionStatus(StrEnum):
     ACTIVE = 'active'
     TRIAL = 'trial'
+    UNSUBSCRIBED = 'unsubscribed'
     SUSPENDED = 'suspended'
     EXPIRED = 'expired'
     CANCELED = 'canceled'

@@ -47,8 +47,6 @@ async def get_auth_service(db=Depends(get_database)) -> AuthService:
         UserRepository(db),
         AuthCodeRepository(db),
         EmailService(get_settings()),
-        SubscriptionPlanRepository(db),
-        UserSubscriptionRepository(db),
         OnboardingProfileRepository(db),
     )
 

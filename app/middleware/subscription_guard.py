@@ -35,7 +35,18 @@ BLOCKED_SUBSCRIPTION_STATUSES = {
     SubscriptionStatus.CANCELED,
     SubscriptionStatus.EXPIRED,
     SubscriptionStatus.SUSPENDED,
+    SubscriptionStatus.UNSUBSCRIBED,
 }
+
+
+def _subscription_error_details(user: dict, *, reason: str) -> dict[str, Any]:
+    return {
+        'selection_required': True,
+        'reason': reason,
+        'subscription_plan_name': user.get('subscription_plan_name'),
+        'subscription_plan': user.get('subscription_plan'),
+        'subscription_status': user.get('subscription_status'),
+    }
 
 
 class SubscriptionGuardMiddleware(BaseHTTPMiddleware):
@@ -72,7 +83,7 @@ class SubscriptionGuardMiddleware(BaseHTTPMiddleware):
                     'error': {
                         'code': 'subscription_required',
                         'message': 'Select a subscription plan before accessing this resource',
-                        'details': {'selection_required': True},
+                        'details': _subscription_error_details(user, reason='missing_plan'),
                     },
                 },
             )
@@ -85,7 +96,7 @@ class SubscriptionGuardMiddleware(BaseHTTPMiddleware):
                     'error': {
                         'code': 'subscription_required',
                         'message': 'An active subscription is required to access this resource',
-                        'details': {'selection_required': True},
+                        'details': _subscription_error_details(user, reason='inactive_subscription'),
                     },
                 },
             )

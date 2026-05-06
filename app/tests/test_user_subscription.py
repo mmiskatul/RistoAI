@@ -7,6 +7,7 @@ from bson import ObjectId
 from fastapi.testclient import TestClient
 from mongomock_motor import AsyncMongoMockClient
 
+from app.core.enums import SubscriptionStatus
 from app.db.mongodb import get_database
 from app.main import create_app
 from app.tests.helpers import register_and_login, seed_subscription_plan, select_subscription_plan
@@ -63,21 +64,17 @@ def test_user_subscription_selection_flow_for_first_login():
         me_response = client.get('/api/v1/auth/me', headers=headers)
 
     assert current_response.status_code == 200
-    assert current_response.json()['selection_required'] is False
-    assert current_response.json()['plan_name'] == 'Core Plan'
-    assert current_response.json()['billing_cycle'] == '1_month'
-    assert current_response.json()['status'] == 'trial'
+    assert current_response.json()['selection_required'] is True
+    assert current_response.json()['plan_name'] is None
+    assert current_response.json()['billing_cycle'] is None
+    assert current_response.json()['status'] is None
     assert plans_response.status_code == 200
-    assert plans_response.json()['selection_required'] is False
+    assert plans_response.json()['selection_required'] is True
     assert len(plans_response.json()['plans']) == 1
     assert me_response.status_code == 200
-    assert me_response.json()['subscription_selection_required'] is False
+    assert me_response.json()['subscription_selection_required'] is True
     subscriptions = asyncio.run(mock_db['user_subscriptions'].find().to_list(length=None))
-    assert len(subscriptions) == 1
-    assert str(subscriptions[0]['user_id']) == me_response.json()['id']
-    assert subscriptions[0]['plan_name'] == 'Core Plan'
-    assert subscriptions[0]['billing_cycle'] == '1_month'
-    assert subscriptions[0]['status'] == 'trial'
+    assert subscriptions == []
 
 
 def test_user_discount_preview_returns_discount_amounts():
@@ -163,21 +160,18 @@ def test_reselecting_subscription_closes_previous_current_record_and_keeps_histo
     assert first.status_code == 200
     assert second.status_code == 200
     subscriptions = asyncio.run(mock_db['user_subscriptions'].find().sort('created_at', 1).to_list(length=None))
-    assert len(subscriptions) == 3
+    assert len(subscriptions) == 2
     assert subscriptions[0]['is_current'] is False
     assert subscriptions[0]['status'] == 'canceled'
     assert subscriptions[0]['ended_at'] is not None
-    assert subscriptions[1]['is_current'] is False
-    assert subscriptions[1]['status'] == 'canceled'
-    assert subscriptions[1]['ended_at'] is not None
-    assert subscriptions[2]['is_current'] is True
-    assert subscriptions[2]['billing_cycle'] == '1_year'
-    assert subscriptions[2]['status'] == 'active'
+    assert subscriptions[1]['is_current'] is True
+    assert subscriptions[1]['billing_cycle'] == '1_year'
+    assert subscriptions[1]['status'] == 'active'
     current_count = asyncio.run(mock_db['user_subscriptions'].count_documents({'is_current': True}))
     assert current_count == 1
 
 
-def test_subscription_middleware_allows_protected_routes_after_automatic_trial_assignment():
+def test_subscription_middleware_blocks_protected_routes_until_subscription_selection():
     app, _ = _build_app_with_mock_db()
     seed_subscription_plan(app)
 
@@ -196,10 +190,12 @@ def test_subscription_middleware_allows_protected_routes_after_automatic_trial_a
         onboarding_response = client.get('/api/v1/onboarding/profile', headers=headers)
 
     assert plans_response.status_code == 200
-    assert plans_response.json()['selection_required'] is False
+    assert plans_response.json()['selection_required'] is True
     assert len(plans_response.json()['plans']) == 1
-    assert onboarding_response.status_code == 200
-    assert onboarding_response.json() is None
+    assert onboarding_response.status_code == 403
+    assert onboarding_response.json()['error']['code'] == 'subscription_required'
+    assert onboarding_response.json()['error']['details']['reason'] == 'missing_plan'
+    assert onboarding_response.json()['error']['details']['selection_required'] is True
 
 
 def test_user_can_cancel_local_trial_and_then_loses_protected_access():
@@ -217,6 +213,7 @@ def test_user_can_cancel_local_trial_and_then_loses_protected_access():
             },
         )
 
+        select_subscription_plan(client, headers)
         cancel_response = client.post('/api/v1/subscriptions/user/cancel', headers=headers)
         protected_response = client.get('/api/v1/onboarding/profile', headers=headers)
 
@@ -226,3 +223,35 @@ def test_user_can_cancel_local_trial_and_then_loses_protected_access():
     assert cancel_payload['subscription']['selection_required'] is True
     assert protected_response.status_code == 403
     assert protected_response.json()['error']['code'] == 'subscription_required'
+    assert protected_response.json()['error']['details']['reason'] == 'inactive_subscription'
+    assert protected_response.json()['error']['details']['subscription_status'] == 'canceled'
+
+
+def test_subscription_middleware_blocks_unsubscribed_users():
+    app, mock_db = _build_app_with_mock_db()
+    seed_subscription_plan(app)
+
+    with TestClient(app) as client:
+        headers = register_and_login(
+            client,
+            {
+                'full_name': 'Unsubscribed User',
+                'email': 'unsubscribed@example.com',
+                'password': 'OwnerPass123',
+                'phone': '+15550007777',
+            },
+        )
+        select_subscription_plan(client, headers)
+        asyncio.run(
+            mock_db['users'].update_one(
+                {'email': 'unsubscribed@example.com'},
+                {'$set': {'subscription_status': SubscriptionStatus.UNSUBSCRIBED}},
+            )
+        )
+
+        protected_response = client.get('/api/v1/onboarding/profile', headers=headers)
+
+    assert protected_response.status_code == 403
+    assert protected_response.json()['error']['code'] == 'subscription_required'
+    assert protected_response.json()['error']['details']['reason'] == 'inactive_subscription'
+    assert protected_response.json()['error']['details']['subscription_status'] == 'unsubscribed'

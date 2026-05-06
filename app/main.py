@@ -101,6 +101,7 @@ def create_fastapi_app(*, testing: bool = False) -> FastAPI:
     settings = get_settings()
     settings.testing = testing
     if testing:
+        settings.debug = True
         settings.smtp_enabled = False
         settings.resend_enabled = False
     configure_logging(settings)

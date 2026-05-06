@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import secrets
-from datetime import UTC, datetime, timedelta
 
 from app.config.settings import get_settings
-from app.core.enums import AccountStatus, AppLanguage, SubscriptionPlan, SubscriptionStatus, UserRole
+from app.core.enums import AccountStatus, AppLanguage, SubscriptionStatus, UserRole
 from app.core.exceptions import AuthenticationException, ConflictException, ValidationException
 from app.core.security import password_manager, token_manager
 from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
-from app.repositories.subscription_plan import SubscriptionPlanRepository
 from app.repositories.user import UserRepository
-from app.repositories.user_subscription import UserSubscriptionRepository
 from app.schemas.auth import (
     AuthChallengeResponse,
     AuthResponse,
@@ -45,15 +42,11 @@ class AuthService(BaseService):
         user_repository: UserRepository,
         auth_code_repository: AuthCodeRepository,
         email_service: EmailService,
-        subscription_plan_repository: SubscriptionPlanRepository,
-        user_subscription_repository: UserSubscriptionRepository,
         onboarding_repository: OnboardingProfileRepository,
     ) -> None:
         self.user_repository = user_repository
         self.auth_code_repository = auth_code_repository
         self.email_service = email_service
-        self.subscription_plan_repository = subscription_plan_repository
-        self.user_subscription_repository = user_subscription_repository
         self.onboarding_repository = onboarding_repository
         self.settings = get_settings()
 
@@ -114,8 +107,6 @@ class AuthService(BaseService):
             raise AuthenticationException('This account is not a restaurant account')
         await self._verify_code(email=payload.email, code=payload.code, purpose=self.RESTAURANT_REGISTRATION_PURPOSE)
         user = await self.user_repository.update(user['_id'], {'email_verified': True, 'is_active': True})
-        if not user.get('subscription_plan_name'):
-            user = await self._activate_default_restaurant_trial(user)
         return await self._build_auth_response(user)
 
     async def resend_restaurant_registration_code(self, payload: ResendVerificationRequest) -> AuthChallengeResponse:
@@ -241,59 +232,6 @@ class AuthService(BaseService):
         if not auth_code:
             raise ValidationException('Invalid or expired verification code')
         await self.auth_code_repository.consume_code(auth_code['_id'])
-
-    async def _activate_default_restaurant_trial(self, user: dict) -> dict:
-        plan = await self.subscription_plan_repository.get_optional_plan()
-        if not plan:
-            plan = await self.subscription_plan_repository.create(
-                {
-                    'singleton_key': 'default_plan',
-                    'name': self.settings.subscription_plan_name,
-                    'monthly_price': self.settings.subscription_plan_monthly_price,
-                    'annual_price': self.settings.subscription_plan_annual_price,
-                    'trial_days': self.settings.subscription_plan_trial_days,
-                    'features': self.settings.subscription_plan_features,
-                    'is_visible': self.settings.subscription_plan_is_visible,
-                    'is_active': self.settings.subscription_plan_is_active,
-                    'is_best_plan': self.settings.subscription_plan_is_best,
-                }
-            )
-        trial_days = int(plan.get('trial_days', self.settings.subscription_plan_trial_days))
-        now = datetime.now(UTC)
-        expires_at = now + timedelta(days=trial_days)
-        await self.user_subscription_repository.close_current_for_user(
-            str(user['_id']),
-            ended_at=now,
-            final_status=SubscriptionStatus.CANCELED,
-        )
-        updated_user = await self.user_repository.update(
-            user['_id'],
-            {
-                'subscription_plan_name': plan['name'],
-                'subscription_plan': SubscriptionPlan.ONE_MONTH,
-                'subscription_status': SubscriptionStatus.TRIAL,
-                'subscription_started_at': now,
-                'subscription_expires_at': expires_at,
-            },
-        )
-        await self.user_subscription_repository.create(
-            {
-                'user_id': user['_id'],
-                'subscription_plan_id': plan['_id'],
-                'plan_name': plan['name'],
-                'billing_cycle': SubscriptionPlan.ONE_MONTH,
-                'status': SubscriptionStatus.TRIAL,
-                'start_trial': True,
-                'trial_days': trial_days,
-                'amount': float(plan.get('monthly_price', 0)),
-                'is_current': True,
-                'started_at': now,
-                'ended_at': None,
-                'expires_at': expires_at,
-            }
-        )
-        return updated_user
-
 
     async def _build_auth_response(self, user: dict) -> AuthResponse:
         public_user = await self._to_auth_user_response(user)

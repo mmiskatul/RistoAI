@@ -658,6 +658,7 @@ class SubscriptionService(BaseService):
             SubscriptionStatus.CANCELED,
             SubscriptionStatus.EXPIRED,
             SubscriptionStatus.SUSPENDED,
+            SubscriptionStatus.UNSUBSCRIBED,
         }
     def _to_active_plan_display(self, plan: dict) -> SubscriptionPlanDisplayResponse:
         serialized = self.serialize(plan)
