@@ -14,6 +14,17 @@ from app.services.onboarding import OnboardingService
 router = APIRouter()
 
 
+def _clean_optional_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    value = value.strip()
+    if not value.lower().startswith(("http://", "https://")):
+        return None
+
+    return value
+
+
 @router.get("/feature-screens", response_model=OnboardingFeatureScreenListResponse)
 async def get_onboarding_feature_screens(
     accept_language: str | None = Header(default=None, alias="Accept-Language"),
@@ -58,10 +69,11 @@ async def save_onboarding_profile(
         main_business_goal=main_business_goal,
         biggest_problem=biggest_problem,
         improvement_focus=improvement_focus,
-        profile_image_url=profile_image_url,
-        interior_photo_url=interior_photo_url,
-        exterior_photo_url=exterior_photo_url,
+        profile_image_url=_clean_optional_url(profile_image_url),
+        interior_photo_url=_clean_optional_url(interior_photo_url),
+        exterior_photo_url=_clean_optional_url(exterior_photo_url),
     )
+
     return await service.save_profile_with_uploads(
         current_user,
         payload,

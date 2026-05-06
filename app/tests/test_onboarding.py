@@ -135,6 +135,60 @@ def test_onboarding_allows_image_upload_before_completion(client, app, owner_cre
     assert save_response.json()['exterior_photo_url'] == image_url
 
 
+def test_onboarding_ignores_invalid_image_urls(client, app, owner_credentials) -> None:
+    seed_subscription_plan(app)
+    headers = register_and_login(client, owner_credentials)
+    select_subscription_plan(client, headers)
+    payload = {
+        'restaurant_name': 'The Italian Bistro',
+        'restaurant_type': 'Fine Dining',
+        'city_location': 'New York, NY',
+        'number_of_seats': 45,
+        'average_spend_per_customer': 25.0,
+        'main_business_goal': 'Increase revenue',
+        'biggest_problem': 'We struggle with slow weekday traffic and inconsistent table turnover.',
+        'improvement_focus': 'Improve staff scheduling and reduce wasted inventory.',
+        'profile_image_url': 'testing ',
+        'interior_photo_url': 'testing ',
+        'exterior_photo_url': 'testing ',
+    }
+
+    response = client.post('/api/v1/onboarding/profile', headers=headers, data=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['profile_image_url'] is None
+    assert body['interior_photo_url'] is None
+    assert body['exterior_photo_url'] is None
+
+
+def test_onboarding_ignores_blank_image_urls(client, app, owner_credentials) -> None:
+    seed_subscription_plan(app)
+    headers = register_and_login(client, owner_credentials)
+    select_subscription_plan(client, headers)
+    payload = {
+        'restaurant_name': 'The Italian Bistro',
+        'restaurant_type': 'Fine Dining',
+        'city_location': 'New York, NY',
+        'number_of_seats': 45,
+        'average_spend_per_customer': 25.0,
+        'main_business_goal': 'Increase revenue',
+        'biggest_problem': 'We struggle with slow weekday traffic and inconsistent table turnover.',
+        'improvement_focus': 'Improve staff scheduling and reduce wasted inventory.',
+        'profile_image_url': '   ',
+        'interior_photo_url': '',
+        'exterior_photo_url': '   ',
+    }
+
+    response = client.post('/api/v1/onboarding/profile', headers=headers, data=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['profile_image_url'] is None
+    assert body['interior_photo_url'] is None
+    assert body['exterior_photo_url'] is None
+
+
 def test_get_onboarding_profile_handles_legacy_incomplete_records(client, app, owner_credentials) -> None:
     seed_subscription_plan(app)
     headers = register_and_login(client, owner_credentials)
