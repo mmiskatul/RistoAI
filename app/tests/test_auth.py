@@ -105,6 +105,41 @@ def test_reject_invalid_restaurant_verification_code(client, owner_credentials):
     assert response.status_code == 422
 
 
+def test_resend_restaurant_registration_code(client, app, owner_credentials):
+    register_response = client.post('/api/v1/auth/restaurant/register', json=owner_credentials)
+    assert register_response.status_code == 201
+    first_code = register_response.json()['debug_verification_code']
+
+    resend_response = client.post(
+        '/api/v1/auth/restaurant/resend-verification',
+        json={'email': owner_credentials['email']},
+    )
+    assert resend_response.status_code == 200
+    resend_payload = resend_response.json()
+    assert resend_payload['purpose'] == 'restaurant_registration'
+    assert resend_payload['email'] == owner_credentials['email']
+    assert resend_payload['verification_required'] is True
+    assert resend_payload['expires_in_seconds'] > 0
+
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    pending_codes = asyncio.run(
+        db.auth_codes.count_documents(
+            {
+                'email': owner_credentials['email'],
+                'purpose': 'restaurant_registration',
+                'consumed_at': None,
+            }
+        )
+    )
+    assert pending_codes == 1
+
+    old_code_response = client.post(
+        '/api/v1/auth/restaurant/verify-registration',
+        json={'email': owner_credentials['email'], 'code': first_code},
+    )
+    assert old_code_response.status_code == 422
+
+
 
 def test_restaurant_forgot_password_flow(client, owner_credentials):
     register_response = client.post('/api/v1/auth/restaurant/register', json=owner_credentials)

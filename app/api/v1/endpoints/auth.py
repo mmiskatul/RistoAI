@@ -13,6 +13,7 @@ from app.schemas.auth import (
     LoginRequest,
     RefreshTokenRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     TokenResponse,
     UpdateLanguagePreferenceRequest,
@@ -38,6 +39,14 @@ async def verify_restaurant_registration(
     service: AuthService = Depends(get_auth_service),
 ) -> AuthResponse:
     return await service.verify_restaurant_registration(payload)
+
+
+@router.post('/restaurant/resend-verification', response_model=AuthChallengeResponse, tags=['Restaurant Authentication'])
+async def resend_restaurant_registration_code(
+    payload: ResendVerificationRequest,
+    service: AuthService = Depends(get_auth_service),
+) -> AuthChallengeResponse:
+    return await service.resend_restaurant_registration_code(payload)
 
 
 @router.post('/restaurant/login', response_model=AuthResponse, tags=['Restaurant Authentication'])

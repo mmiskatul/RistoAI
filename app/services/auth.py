@@ -21,6 +21,7 @@ from app.schemas.auth import (
     LoginRequest,
     RefreshTokenRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     TokenResponse,
     UpdateLanguagePreferenceRequest,
@@ -116,6 +117,16 @@ class AuthService(BaseService):
         if not user.get('subscription_plan_name'):
             user = await self._activate_default_restaurant_trial(user)
         return await self._build_auth_response(user)
+
+    async def resend_restaurant_registration_code(self, payload: ResendVerificationRequest) -> AuthChallengeResponse:
+        user = await self.user_repository.get_by_email(payload.email)
+        if not user:
+            raise AuthenticationException('User not found')
+        if user['role'] not in self.RESTAURANT_AUTH_ROLES:
+            raise AuthenticationException('This account is not a restaurant account')
+        if user.get('email_verified', False):
+            raise ConflictException('This email is already verified')
+        return await self._issue_challenge(user=user, purpose=self.RESTAURANT_REGISTRATION_PURPOSE)
 
     async def login_restaurant(self, payload: LoginRequest) -> AuthResponse:
         user = await self._authenticate_login(payload, allow_suspended_restaurant=True)
