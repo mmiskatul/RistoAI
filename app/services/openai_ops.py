@@ -710,9 +710,6 @@ class OpenAIOperationsService:
         form_data: dict[str, str] = {
             "model": self.settings.openai_transcription_model,
         }
-        resolved_language = self._resolve_language(language)
-        if resolved_language in {"en", "it"}:
-            form_data["language"] = resolved_language
 
         try:
             async with httpx.AsyncClient(base_url=self.settings.openai_base_url, timeout=60.0) as client:

@@ -2890,15 +2890,19 @@ class RestaurantOperationsService(BaseService):
         if not file_bytes:
             raise ValidationException("Voice recording is empty")
 
+        target_language = self._resolve_chat_language(current_user, language)
         transcript = await self.openai_service.transcribe_audio(
             file_name=file_name,
             content_type=content_type,
             file_bytes=file_bytes,
-            language=self._resolve_chat_language(current_user, language),
         )
         if not transcript:
             raise ValidationException("Could not transcribe this voice message. Please try again.")
-        return transcript
+        translated_transcript = await self.openai_service.translate_text(
+            text=transcript,
+            target_language=target_language,
+        )
+        return translated_transcript or transcript
 
     async def _load_chat_generation_context(self, *, scope_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         recent_task = self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=8)
