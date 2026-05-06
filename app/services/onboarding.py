@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import UploadFile
 
 from app.core.exceptions import ValidationException
@@ -137,12 +139,18 @@ class OnboardingService(BaseService):
         exterior_photo: UploadFile | None = None,
     ) -> OnboardingProfileResponse:
         data = payload.model_dump(mode="json")
-        if profile_image:
-            data["profile_image_url"] = await self._upload_image(current_user, profile_image, field_name="profile_image_url")
-        if interior_photo:
-            data["interior_photo_url"] = await self._upload_image(current_user, interior_photo, field_name="interior_photo_url")
-        if exterior_photo:
-            data["exterior_photo_url"] = await self._upload_image(current_user, exterior_photo, field_name="exterior_photo_url")
+        upload_tasks = {
+            field_name: self._upload_image(current_user, file, field_name=field_name)
+            for field_name, file in (
+                ("profile_image_url", profile_image),
+                ("interior_photo_url", interior_photo),
+                ("exterior_photo_url", exterior_photo),
+            )
+            if file is not None
+        }
+        if upload_tasks:
+            uploaded_urls = await asyncio.gather(*upload_tasks.values())
+            data.update(dict(zip(upload_tasks.keys(), uploaded_urls, strict=True)))
         return await self._save_profile(
             current_user,
             data,
