@@ -1961,8 +1961,8 @@ class RestaurantOperationsService(BaseService):
                         DailyDataFormFieldResponse(key="cash_withdrawals", label="Cash Withdrawals", value_type="number", placeholder="0.00", section="cash_tracking"),
                         DailyDataFormFieldResponse(key="cash_out", label="Cash Out / Transfers", value_type="number", placeholder="0.00", section="cash_tracking"),
                         DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Covers", value_type="integer", placeholder="0", section="customer_covers"),
-                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Covers", value_type="integer", placeholder="0", section="customer_covers"),
+                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Coperti", value_type="integer", placeholder="0", section="customer_covers"),
+                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Coperti", value_type="integer", placeholder="0", section="customer_covers"),
                         DailyDataFormFieldResponse(key="opening_cash", label="Opening Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                         DailyDataFormFieldResponse(key="closing_cash", label="Closing Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                         DailyDataFormFieldResponse(key="notes", label="Add Note", value_type="string", placeholder="Optional note", section="cash_tracking"),
@@ -1978,8 +1978,8 @@ class RestaurantOperationsService(BaseService):
                         DailyDataFormFieldResponse(key="cash_payments", label="Cash Payments (+)", value_type="number", placeholder="0.00", section="payment_inputs"),
                         DailyDataFormFieldResponse(key="bank_transfer_payments", label="Invoices Paid by Bank Transfer (+)", value_type="number", placeholder="0.00", section="payment_inputs"),
                         DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash (-)", value_type="number", placeholder="0.00", section="payment_inputs"),
-                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Covers", value_type="integer", placeholder="0", section="customer_covers"),
-                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Covers", value_type="integer", placeholder="0", section="customer_covers"),
+                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Coperti", value_type="integer", placeholder="0", section="customer_covers"),
+                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Coperti", value_type="integer", placeholder="0", section="customer_covers"),
                         DailyDataFormFieldResponse(key="opening_cash", label="Opening Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                         DailyDataFormFieldResponse(key="closing_cash", label="Closing Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                     ],
@@ -5828,23 +5828,23 @@ class RestaurantOperationsService(BaseService):
                 ),
                 DailyDataSectionResponse(
                     key="covers_section",
-                    title="Covers Section",
+                    title="Coperti Section",
                     fields=[
                         DailyDataSectionFieldResponse(
                             key="lunch_covers",
-                            label="Lunch Covers",
+                            label="Lunch Coperti",
                             value=int(payload.get("lunch_covers", 0) or 0),
                             value_type="integer",
                         ),
                         DailyDataSectionFieldResponse(
                             key="dinner_covers",
-                            label="Dinner Covers",
+                            label="Dinner Coperti",
                             value=int(payload.get("dinner_covers", 0) or 0),
                             value_type="integer",
                         ),
                         DailyDataSectionFieldResponse(
                             key="total_covers",
-                            label="Total Covers",
+                            label="Total Coperti",
                             value=int(payload.get("lunch_covers", 0) or 0) + int(payload.get("dinner_covers", 0) or 0),
                             value_type="integer",
                         ),
@@ -6053,11 +6053,11 @@ class RestaurantOperationsService(BaseService):
             sections.append(
                 DailyDataSectionResponse(
                     key="covers_section",
-                    title="Covers Section",
+                    title="Coperti Section",
                     fields=[
-                        DailyDataSectionFieldResponse(key="lunch_covers", label="Lunch Covers", value=lunch_covers_total, value_type="integer"),
-                        DailyDataSectionFieldResponse(key="dinner_covers", label="Dinner Covers", value=dinner_covers_total, value_type="integer"),
-                        DailyDataSectionFieldResponse(key="total_covers", label="Total Covers", value=lunch_covers_total + dinner_covers_total, value_type="integer"),
+                        DailyDataSectionFieldResponse(key="lunch_covers", label="Lunch Coperti", value=lunch_covers_total, value_type="integer"),
+                        DailyDataSectionFieldResponse(key="dinner_covers", label="Dinner Coperti", value=dinner_covers_total, value_type="integer"),
+                        DailyDataSectionFieldResponse(key="total_covers", label="Total Coperti", value=lunch_covers_total + dinner_covers_total, value_type="integer"),
                     ],
                 )
             )
