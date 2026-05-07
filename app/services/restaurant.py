@@ -584,6 +584,110 @@ class RestaurantOperationsService(BaseService):
             notes=str(document.get("counterparty_name") or document.get("supplier_name") or "Uploaded document"),
         )
 
+    async def _delete_document_inventory_items(self, *, scope_id: str, source_id: str) -> None:
+        existing_items = await self.inventory_repository.list_source_linked_items(
+            scope_id=scope_id,
+            source_kind="document",
+            source_id=source_id,
+        )
+        for item in existing_items:
+            await self.inventory_repository.delete(item["_id"])
+
+    async def _sync_document_inventory_items(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        document: dict[str, Any],
+    ) -> None:
+        source_id = str(document.get("id") or document.get("_id") or "")
+        if not source_id:
+            return
+
+        existing_items = await self.inventory_repository.list_source_linked_items(
+            scope_id=scope_id,
+            source_kind="document",
+            source_id=source_id,
+        )
+        existing_by_line = {
+            int(item.get("source_line_index")): item
+            for item in existing_items
+            if item.get("source_line_index") is not None
+        }
+
+        document_type = str(document.get("document_type") or "").lower()
+        line_items = document.get("line_items") or []
+        if document.get("status") != "processed" or document_type != "expense" or not line_items:
+            await self._delete_document_inventory_items(scope_id=scope_id, source_id=source_id)
+            return
+
+        supplier_name = str(
+            document.get("counterparty_name")
+            or document.get("supplier_name")
+            or ""
+        ).strip() or None
+        category = str(document.get("document_label") or "Invoice Items").strip() or "Invoice Items"
+        purchase_date = self._safe_parse_date(document.get("invoice_date")) or datetime.now(UTC).date()
+        active_line_indexes: set[int] = set()
+
+        await self._upsert_inventory_category(current_user=current_user, name=category)
+        await self._upsert_inventory_supplier(current_user=current_user, name=supplier_name)
+
+        for index, raw_item in enumerate(line_items):
+            product_name = str(raw_item.get("product_name") or "").strip()
+            stock_quantity = self._safe_float(raw_item.get("quantity"))
+            unit_price = self._safe_float(raw_item.get("unit_price"))
+            if not product_name or stock_quantity <= 0:
+                continue
+
+            active_line_indexes.add(index)
+            existing = existing_by_line.get(index)
+            history = list(existing.get("history", [])) if existing else []
+            if existing is None:
+                if stock_quantity:
+                    history.append({"kind": "purchase_record", "quantity_delta": round(stock_quantity * unit_price, 2), "occurred_at": datetime.now(UTC)})
+                    history.append({"kind": "stock_added", "quantity_delta": stock_quantity, "occurred_at": datetime.now(UTC)})
+            else:
+                previous_quantity = self._safe_float(existing.get("stock_quantity"))
+                quantity_delta = round(stock_quantity - previous_quantity, 2)
+                if quantity_delta > 0:
+                    history.append({"kind": "stock_added", "quantity_delta": quantity_delta, "occurred_at": datetime.now(UTC)})
+                elif quantity_delta < 0:
+                    history.append({"kind": "stock_removed", "quantity_delta": quantity_delta, "occurred_at": datetime.now(UTC)})
+
+            payload = {
+                "product_name": product_name,
+                "category": category,
+                "stock_quantity": stock_quantity,
+                "unit_type": str(raw_item.get("unit_type") or "unit").strip() or "unit",
+                "supplier_name": supplier_name,
+                "unit_price": unit_price,
+                "alert_threshold": 0,
+                "purchase_date": purchase_date.isoformat(),
+                "stock_status": self._resolve_stock_status(stock_quantity, 0),
+                "history": history,
+                "source_kind": "document",
+                "source_id": source_id,
+                "source_document_id": source_id,
+                "source_line_index": index,
+            }
+
+            if existing is None:
+                await self.inventory_repository.create(
+                    {
+                        "tenant_id": scope_id,
+                        **payload,
+                        "created_by_user_id": str(current_user["_id"]),
+                    }
+                )
+            else:
+                await self.inventory_repository.update(existing["_id"], payload)
+
+        for item in existing_items:
+            line_index = item.get("source_line_index")
+            if line_index is None or int(line_index) not in active_line_indexes:
+                await self.inventory_repository.delete(item["_id"])
+
     async def _sync_daily_record_linked_expense(
         self,
         *,
@@ -1454,6 +1558,11 @@ class RestaurantOperationsService(BaseService):
             current_user=current_user,
             document=serialized_document,
         )
+        await self._sync_document_inventory_items(
+            scope_id=scope_id,
+            current_user=current_user,
+            document=serialized_document,
+        )
         await self._sync_document_linked_cash_deposit(
             scope_id=scope_id,
             current_user=current_user,
@@ -1482,6 +1591,11 @@ class RestaurantOperationsService(BaseService):
             transactions=self._build_document_transactions(serialized_updated),
         )
         await self._sync_document_linked_expense(
+            scope_id=scope_id,
+            current_user=current_user,
+            document=serialized_updated,
+        )
+        await self._sync_document_inventory_items(
             scope_id=scope_id,
             current_user=current_user,
             document=serialized_updated,
@@ -1587,6 +1701,11 @@ class RestaurantOperationsService(BaseService):
                 current_user=current_user,
                 document=serialized_updated,
             )
+            await self._sync_document_inventory_items(
+                scope_id=scope_id,
+                current_user=current_user,
+                document=serialized_updated,
+            )
             await self._sync_document_linked_cash_deposit(
                 scope_id=scope_id,
                 current_user=current_user,
@@ -1600,6 +1719,7 @@ class RestaurantOperationsService(BaseService):
             await self._delete_transactions_for_source(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
             await self._delete_source_linked_expense(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
             await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
+            await self._delete_document_inventory_items(scope_id=scope_id, source_id=str(document["_id"]))
         return self._to_document_detail(updated)
 
     async def delete_document(self, current_user: dict, document_id: str) -> None:
@@ -1609,6 +1729,7 @@ class RestaurantOperationsService(BaseService):
         await self._delete_transactions_for_source(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
         await self._delete_source_linked_expense(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
         await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="document", source_id=str(document["_id"]))
+        await self._delete_document_inventory_items(scope_id=scope_id, source_id=str(document["_id"]))
         await self.document_repository.delete(document["_id"])
         if invoice_date:
             await self._sync_restaurant_record(scope_id=scope_id, business_date=invoice_date, current_user=current_user)
@@ -2542,16 +2663,17 @@ class RestaurantOperationsService(BaseService):
         await self._upsert_inventory_category(current_user=current_user, name=str(serialized_updated.get("category") or ""))
         await self._upsert_inventory_supplier(current_user=current_user, name=str(serialized_updated.get("supplier_name") or ""))
         new_purchase_date = self._safe_parse_date(serialized_updated.get("purchase_date")) or previous_purchase_date or datetime.now(UTC).date()
-        await self._upsert_inventory_linked_expense(
-            scope_id=scope_id,
-            current_user=current_user,
-            inventory_item_id=item_id,
-            product_name=str(serialized_updated.get("product_name") or ""),
-            category=str(serialized_updated.get("category") or "Inventory"),
-            stock_quantity=float(serialized_updated.get("stock_quantity", 0) or 0),
-            unit_price=float(serialized_updated.get("unit_price", 0) or 0),
-            purchase_date=new_purchase_date,
-        )
+        if str(serialized_updated.get("source_kind") or "").lower() != "document":
+            await self._upsert_inventory_linked_expense(
+                scope_id=scope_id,
+                current_user=current_user,
+                inventory_item_id=item_id,
+                product_name=str(serialized_updated.get("product_name") or ""),
+                category=str(serialized_updated.get("category") or "Inventory"),
+                stock_quantity=float(serialized_updated.get("stock_quantity", 0) or 0),
+                unit_price=float(serialized_updated.get("unit_price", 0) or 0),
+                purchase_date=new_purchase_date,
+            )
         if previous_purchase_date is not None:
             await self._sync_restaurant_record(scope_id=scope_id, business_date=previous_purchase_date, current_user=current_user)
         if new_purchase_date != previous_purchase_date:

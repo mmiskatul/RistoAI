@@ -377,6 +377,24 @@ class RestaurantMonthlyRecordRepository(ScopedRepository):
 class RestaurantInventoryRepository(ScopedRepository):
     collection_name = RestaurantCollections.INVENTORY_ITEMS
 
+    async def list_source_linked_items(
+        self,
+        *,
+        scope_id: str,
+        source_kind: str,
+        source_id: str,
+    ) -> list[dict[str, Any]]:
+        cursor = self.collection.find(
+            self.scope_filters(
+                scope_id,
+                {
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                },
+            )
+        ).sort([("source_line_index", ASCENDING), ("created_at", ASCENDING)])
+        return await cursor.to_list(length=None)
+
     async def list_by_scope(
         self,
         *,
