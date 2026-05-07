@@ -201,6 +201,8 @@ class DocumentLineItemSchema(BaseSchema):
     quantity: float = Field(ge=0)
     unit_price: float = Field(ge=0)
     total_price: float = Field(ge=0)
+    vat_rate: float = Field(default=10, ge=0, le=100)
+    vat_amount: float = Field(default=0, ge=0)
 
 
 class DocumentUploadExtractRequest(BaseSchema):

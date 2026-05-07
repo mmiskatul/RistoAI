@@ -1025,7 +1025,10 @@ class OpenAIOperationsService:
             "Use cash for bank deposits, till counts, cash movement, or cash reconciliation documents. "
             "Use revenue for sales reports, receipts, POS summaries, or turnover documents. "
             "Use profit for P&L, income statement, margin report, or documents explicitly showing profit. "
-            "Each line item must include product_name, quantity, unit_price, total_price. "
+            "Each line item must include product_name, quantity, unit_price, total_price, vat_rate, and vat_amount. "
+            "Set vat_rate per product line, not once for the whole invoice. For Italian IVA, 4, 5, 10, and 22 are recommended common rates, "
+            "but use any other percentage if it is clearly visible on the document. "
+            "Use 10 for restaurant food items when the invoice does not show a rate. "
             "Use 0 for missing numeric fields and [] for missing line_items."
         )
         user_content: list[dict[str, Any]] = [
@@ -1253,8 +1256,8 @@ class OpenAIOperationsService:
             "profit_amount": 0.0,
             "ai_summary": f"Fallback extraction generated for {stem}.",
             "line_items": [
-                {"product_name": "Tomato Sauce", "quantity": 10, "unit_price": 5.0, "total_price": 50.0},
-                {"product_name": "Cheese", "quantity": 5, "unit_price": 8.0, "total_price": 40.0},
-                {"product_name": "Chicken", "quantity": 10, "unit_price": 6.0, "total_price": 60.0},
+                {"product_name": "Tomato Sauce", "quantity": 10, "unit_price": 5.0, "total_price": 50.0, "vat_rate": 10, "vat_amount": 5.0},
+                {"product_name": "Cheese", "quantity": 5, "unit_price": 8.0, "total_price": 40.0, "vat_rate": 10, "vat_amount": 4.0},
+                {"product_name": "Chicken", "quantity": 10, "unit_price": 6.0, "total_price": 60.0, "vat_rate": 10, "vat_amount": 6.0},
             ],
         }

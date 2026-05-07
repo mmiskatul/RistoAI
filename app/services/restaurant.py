@@ -159,6 +159,7 @@ logger = logging.getLogger(__name__)
 
 class RestaurantOperationsService(BaseService):
     VAT_RATE = 0.1
+    RECOMMENDED_LINE_VAT_RATES = (4.0, 5.0, 10.0, 22.0)
     SUPPORTED_DOCUMENT_TYPES = {"expense", "cash", "revenue", "profit", "unknown"}
     CASH_TRANSACTION_TYPES = {
         "bank_deposit",
@@ -1410,12 +1411,18 @@ class RestaurantOperationsService(BaseService):
 
     async def get_vat_overview(self, current_user: dict) -> VatOverviewResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        daily_records, _ = await self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=120)
+        daily_records_task = self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=120)
+        documents_task = self._list_vat_documents(scope_id=scope_id)
+        daily_records_result, documents_result = await asyncio.gather(daily_records_task, documents_task)
+        daily_records, _ = daily_records_result
+        documents = documents_result
         serialized_records = self.serialize_list(daily_records)
+        serialized_documents = self.serialize_list(documents)
         revenue_total = sum(float(item.get("total_revenue", 0)) for item in serialized_records)
         expenses_total = sum(float(item.get("total_expenses", 0)) for item in serialized_records)
-        vat_payable = round(revenue_total * self.VAT_RATE, 2)
-        vat_receivable = round(expenses_total * self.VAT_RATE, 2)
+        document_vat = self._calculate_document_vat_totals(serialized_documents)
+        vat_payable = document_vat["payable"] if document_vat["has_payable"] else round(revenue_total * self.VAT_RATE, 2)
+        vat_receivable = document_vat["receivable"] if document_vat["has_receivable"] else round(expenses_total * self.VAT_RATE, 2)
         today = datetime.now(UTC).date()
         filing_deadline = today.replace(day=min(20, max(today.day, 1)))
         return VatOverviewResponse(
@@ -1423,8 +1430,47 @@ class RestaurantOperationsService(BaseService):
             vat_payable=vat_payable,
             vat_receivable=vat_receivable,
             filing_deadline=filing_deadline.isoformat(),
-            report_ready=bool(serialized_records),
+            report_ready=bool(serialized_records or serialized_documents),
         )
+
+    def _calculate_document_vat_totals(self, documents: list[dict[str, Any]]) -> dict[str, Any]:
+        payable = 0.0
+        receivable = 0.0
+        has_payable = False
+        has_receivable = False
+        for document in documents:
+            if document.get("status") != "processed":
+                continue
+            document_type = str(document.get("document_type") or "").lower()
+            line_vat = round(
+                sum(
+                    self._safe_float(item.get("vat_amount"))
+                    for item in document.get("line_items", []) or []
+                    if isinstance(item, dict)
+                ),
+                2,
+            )
+            if line_vat <= 0:
+                continue
+            if document_type in {"revenue", "cash"}:
+                payable += line_vat
+                has_payable = True
+            elif document_type == "expense":
+                receivable += line_vat
+                has_receivable = True
+        return {
+            "payable": round(payable, 2),
+            "receivable": round(receivable, 2),
+            "has_payable": has_payable,
+            "has_receivable": has_receivable,
+        }
+
+    async def _list_vat_documents(self, *, scope_id: str, limit: int = 500) -> list[dict[str, Any]]:
+        cursor = self.document_repository.collection.find(
+            self.document_repository.scope_filters(scope_id, {"status": "processed"}),
+            {"document_type": 1, "status": 1, "line_items": 1},
+        ).limit(limit)
+        return await cursor.to_list(length=limit)
 
     async def list_insights(self, current_user: dict) -> InsightDetailResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -1543,7 +1589,7 @@ class RestaurantOperationsService(BaseService):
                 "ai_provider": payload.ai_provider,
                 "ai_summary": normalized["ai_summary"],
                 "source_file_name": payload.source_file_name,
-                "line_items": [item.model_dump(mode="json") for item in payload.line_items],
+                "line_items": normalized["line_items"],
                 "created_by_user_id": str(current_user["_id"]),
                 "last_edited_by_user_id": str(current_user["_id"]),
                 "last_edited_at": now,
@@ -3291,6 +3337,8 @@ class RestaurantOperationsService(BaseService):
                         "quantity": float(line.get("quantity", 0) or 0),
                         "unit_price": round(float(line.get("unit_price", 0) or 0), 2),
                         "total_price": round(float(line.get("total_price", 0) or 0), 2),
+                        "vat_rate": round(float(line.get("vat_rate", 10) or 10), 2),
+                        "vat_amount": round(float(line.get("vat_amount", 0) or 0), 2),
                     }
                     for line in item.get("line_items", [])[:12]
                     if isinstance(line, dict)
@@ -5986,7 +6034,7 @@ class RestaurantOperationsService(BaseService):
         if "invoice_date" in updates and updates["invoice_date"] is not None:
             updates["invoice_date"] = updates["invoice_date"].isoformat()
         if "line_items" in updates and updates["line_items"] is not None:
-            updates["line_items"] = [item.model_dump(mode="json") for item in payload.line_items or []]
+            updates["line_items"] = self._normalize_document_line_items([item.model_dump(mode="json") for item in payload.line_items or []])
         now = datetime.now(UTC)
         updates["last_edited_by_user_id"] = str(current_user["_id"])
         updates["last_edited_at"] = now
@@ -6256,11 +6304,43 @@ class RestaurantOperationsService(BaseService):
         except (TypeError, ValueError):
             return default
 
+    def _normalize_line_vat_rate(self, value: Any) -> float:
+        rate = round(self._safe_float(value, default=10.0), 2)
+        return min(max(rate, 0.0), 100.0)
+
+    def _normalize_document_line_items(self, line_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized_items: list[dict[str, Any]] = []
+        for item in line_items:
+            if not isinstance(item, dict):
+                continue
+            quantity = round(self._safe_float(item.get("quantity")), 3)
+            unit_price = round(self._safe_float(item.get("unit_price")), 4)
+            total_price = self._safe_float(item.get("total_price"))
+            if total_price <= 0 and quantity > 0 and unit_price > 0:
+                total_price = quantity * unit_price
+            total_price = round(total_price, 2)
+            vat_rate = self._normalize_line_vat_rate(item.get("vat_rate"))
+            vat_amount = total_price * (vat_rate / 100) if total_price > 0 else self._safe_float(item.get("vat_amount"))
+            normalized_items.append(
+                {
+                    "product_name": str(item.get("product_name") or "").strip() or "Line item",
+                    "quantity": quantity,
+                    "unit_price": round(unit_price, 2),
+                    "total_price": total_price,
+                    "vat_rate": vat_rate,
+                    "vat_amount": round(vat_amount, 2),
+                }
+            )
+        return normalized_items
+
     def _normalize_document_extraction(self, *, extraction: dict[str, Any], file_name: str) -> dict[str, Any]:
-        line_items = extraction.get("line_items") or []
+        line_items = self._normalize_document_line_items(extraction.get("line_items") or [])
         total_amount = extraction.get("total_amount")
         if total_amount is None:
-            total_amount = round(sum(self._safe_float(item.get("total_price", 0)) for item in line_items), 2)
+            total_amount = round(
+                sum(self._safe_float(item.get("total_price", 0)) + self._safe_float(item.get("vat_amount", 0)) for item in line_items),
+                2,
+            )
         total_amount = round(self._safe_float(total_amount), 2)
 
         supplier_name = str(
