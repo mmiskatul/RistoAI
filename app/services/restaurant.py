@@ -2152,6 +2152,7 @@ class RestaurantOperationsService(BaseService):
             "business_date": business_date.isoformat(),
             "method": payload.method,
             **record_payload,
+            "inventory_usage": [item.model_dump(mode="json") for item in payload.inventory_usage],
             "total_revenue": total_revenue,
             "total_expenses": total_expenses,
             "profit": round(total_revenue - total_expenses, 2),
@@ -2162,6 +2163,12 @@ class RestaurantOperationsService(BaseService):
         }
         document = await self.daily_record_repository.create(final_payload)
         serialized_document = self.serialize(document)
+        await self._apply_daily_inventory_usage(
+            scope_id=scope_id,
+            current_user=current_user,
+            record_id=serialized_document["id"],
+            usage=payload.inventory_usage,
+        )
         await self._replace_transactions_for_source(
             scope_id=scope_id,
             source_kind="manual_entry",
@@ -2227,6 +2234,7 @@ class RestaurantOperationsService(BaseService):
             "business_date": business_date.isoformat(),
             "method": payload.method,
             **record_payload,
+            "inventory_usage": [item.model_dump(mode="json") for item in payload.inventory_usage],
             "total_revenue": total_revenue,
             "total_expenses": total_expenses,
             "profit": round(total_revenue - total_expenses, 2),
@@ -2235,8 +2243,20 @@ class RestaurantOperationsService(BaseService):
             "avg_revenue_per_cover": round(total_revenue / max(lunch_covers + dinner_covers, 1), 2),
             "created_by_user_id": existing_record.get("created_by_user_id", str(current_user["_id"])),
         }
+        await self._restore_daily_inventory_usage(
+            scope_id=scope_id,
+            current_user=current_user,
+            record_id=str(existing_record["_id"]),
+            usage=existing_record.get("inventory_usage") or [],
+        )
         updated = await self.daily_record_repository.update(existing_record["_id"], final_payload)
         serialized_updated = self.serialize(updated)
+        await self._apply_daily_inventory_usage(
+            scope_id=scope_id,
+            current_user=current_user,
+            record_id=serialized_updated["id"],
+            usage=payload.inventory_usage,
+        )
         await self._replace_transactions_for_source(
             scope_id=scope_id,
             source_kind="manual_entry",
@@ -2531,6 +2551,12 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         record = await self.daily_record_repository.get_scoped_by_id(record_id, scope_id)
         business_date = record.get("business_date")
+        await self._restore_daily_inventory_usage(
+            scope_id=scope_id,
+            current_user=current_user,
+            record_id=str(record["_id"]),
+            usage=record.get("inventory_usage") or [],
+        )
         await self._delete_transactions_for_source(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
         await self._delete_source_linked_expense(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
         await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
@@ -2563,6 +2589,12 @@ class RestaurantOperationsService(BaseService):
 
         deleted_any = False
         for record in self.serialize_list(daily_records):
+            await self._restore_daily_inventory_usage(
+                scope_id=scope_id,
+                current_user=current_user,
+                record_id=record["id"],
+                usage=record.get("inventory_usage") or [],
+            )
             await self._delete_transactions_for_source(scope_id=scope_id, source_kind="manual_entry", source_id=record["id"])
             await self._delete_source_linked_expense(scope_id=scope_id, source_kind="manual_entry", source_id=record["id"])
             await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="manual_entry", source_id=record["id"])
@@ -2714,6 +2746,82 @@ class RestaurantOperationsService(BaseService):
         serialized_updated = self.serialize(updated)
         await self._send_low_stock_push_if_needed(current_user, serialized_updated)
         return self._to_inventory_detail_response(updated)
+
+    async def _apply_daily_inventory_usage(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        record_id: str,
+        usage: list[Any],
+    ) -> None:
+        for entry in usage:
+            entry_payload = entry.model_dump(mode="json") if hasattr(entry, "model_dump") else dict(entry)
+            item_id = str(entry_payload.get("inventory_item_id") or "")
+            quantity_used = self._safe_float(entry_payload.get("quantity_used"))
+            if not item_id or quantity_used <= 0:
+                continue
+            item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
+            available_quantity = self._safe_float(item.get("stock_quantity"))
+            if quantity_used > available_quantity:
+                product_name = str(item.get("product_name") or "inventory item")
+                raise ValidationException(f"Not enough stock for {product_name}. Available: {available_quantity:g}")
+            history = list(item.get("history", []))
+            history.append(
+                {
+                    "kind": "stock_removed",
+                    "quantity_delta": -quantity_used,
+                    "occurred_at": datetime.now(UTC),
+                    "source_kind": "manual_entry",
+                    "source_id": record_id,
+                }
+            )
+            new_quantity = round(available_quantity - quantity_used, 2)
+            updated = await self.inventory_repository.update(
+                item["_id"],
+                {
+                    "stock_quantity": new_quantity,
+                    "stock_status": self._resolve_stock_status(new_quantity, float(item.get("alert_threshold", 0) or 0)),
+                    "history": history,
+                },
+            )
+            await self._send_low_stock_push_if_needed(current_user, self.serialize(updated))
+
+    async def _restore_daily_inventory_usage(
+        self,
+        *,
+        scope_id: str,
+        current_user: dict,
+        record_id: str,
+        usage: list[Any],
+    ) -> None:
+        del current_user
+        for entry in usage:
+            item_id = str(entry.get("inventory_item_id") or "")
+            quantity_used = self._safe_float(entry.get("quantity_used"))
+            if not item_id or quantity_used <= 0:
+                continue
+            item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
+            current_quantity = self._safe_float(item.get("stock_quantity"))
+            history = list(item.get("history", []))
+            history.append(
+                {
+                    "kind": "stock_added",
+                    "quantity_delta": quantity_used,
+                    "occurred_at": datetime.now(UTC),
+                    "source_kind": "manual_entry_restore",
+                    "source_id": record_id,
+                }
+            )
+            new_quantity = round(current_quantity + quantity_used, 2)
+            await self.inventory_repository.update(
+                item["_id"],
+                {
+                    "stock_quantity": new_quantity,
+                    "stock_status": self._resolve_stock_status(new_quantity, float(item.get("alert_threshold", 0) or 0)),
+                    "history": history,
+                },
+            )
 
     async def get_analytics(
         self,

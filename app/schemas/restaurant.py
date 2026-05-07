@@ -541,10 +541,16 @@ class DailyDataMethodTwoRequest(BaseSchema):
     closing_cash: float = Field(default=0, ge=0)
 
 
+class DailyDataInventoryUsageRequest(BaseSchema):
+    inventory_item_id: str = Field(min_length=1)
+    quantity_used: float = Field(gt=0)
+
+
 class DailyDataCreateRequest(BaseSchema):
     method: Literal["method_1", "method_2"]
     method_one: DailyDataMethodOneRequest | None = None
     method_two: DailyDataMethodTwoRequest | None = None
+    inventory_usage: list[DailyDataInventoryUsageRequest] = Field(default_factory=list)
 
 
 
