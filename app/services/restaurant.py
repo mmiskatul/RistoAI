@@ -110,6 +110,8 @@ from app.schemas.restaurant import (
     InventoryHistoryItemResponse,
     InventoryItemResponse,
     InventoryListResponse,
+    InventoryUsageSummaryItemResponse,
+    InventoryUsageSummaryResponse,
     InventoryListItemActionResponse,
     InventoryStockUpdateRequest,
     InventorySupplierCardResponse,
@@ -2110,13 +2112,18 @@ class RestaurantOperationsService(BaseService):
 
     async def create_daily_data(self, current_user: dict, payload: DailyDataCreateRequest) -> DailyDataResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
+        inventory_usage_entries = await self._build_daily_inventory_usage_entries(
+            scope_id=scope_id,
+            usage=payload.inventory_usage,
+        )
+        inventory_usage_cost = round(sum(float(item.get("total_cost", 0) or 0) for item in inventory_usage_entries), 2)
         if payload.method == "method_1":
             if payload.method_one is None:
                 raise ValidationException("method_one is required when method is method_1")
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
             total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
-            total_expenses = round(data["expenses_in_cash"], 2)
+            total_expenses = round(data["expenses_in_cash"] + inventory_usage_cost, 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
             closing_cash = data["closing_cash"] if data["closing_cash"] > 0 else max(data["cash_in"] - data["cash_out"], 0)
@@ -2132,7 +2139,7 @@ class RestaurantOperationsService(BaseService):
             data = payload.method_two.model_dump(mode="json")
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
-            total_expenses = round(data["expenses_in_cash"], 2)
+            total_expenses = round(data["expenses_in_cash"] + inventory_usage_cost, 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
@@ -2152,7 +2159,7 @@ class RestaurantOperationsService(BaseService):
             "business_date": business_date.isoformat(),
             "method": payload.method,
             **record_payload,
-            "inventory_usage": [item.model_dump(mode="json") for item in payload.inventory_usage],
+            "inventory_usage": inventory_usage_entries,
             "total_revenue": total_revenue,
             "total_expenses": total_expenses,
             "profit": round(total_revenue - total_expenses, 2),
@@ -2192,13 +2199,18 @@ class RestaurantOperationsService(BaseService):
     async def update_daily_data(self, current_user: dict, record_id: str, payload: DailyDataCreateRequest) -> DailyDataResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         existing_record = await self.daily_record_repository.get_scoped_by_id(record_id, scope_id)
+        inventory_usage_entries = await self._build_daily_inventory_usage_entries(
+            scope_id=scope_id,
+            usage=payload.inventory_usage,
+        )
+        inventory_usage_cost = round(sum(float(item.get("total_cost", 0) or 0) for item in inventory_usage_entries), 2)
         if payload.method == "method_1":
             if payload.method_one is None:
                 raise ValidationException("method_one is required when method is method_1")
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
             total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
-            total_expenses = round(data["expenses_in_cash"], 2)
+            total_expenses = round(data["expenses_in_cash"] + inventory_usage_cost, 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
             closing_cash = data["closing_cash"] if data["closing_cash"] > 0 else max(data["cash_in"] - data["cash_out"], 0)
@@ -2214,7 +2226,7 @@ class RestaurantOperationsService(BaseService):
             data = payload.method_two.model_dump(mode="json")
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
-            total_expenses = round(data["expenses_in_cash"], 2)
+            total_expenses = round(data["expenses_in_cash"] + inventory_usage_cost, 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
@@ -2234,7 +2246,7 @@ class RestaurantOperationsService(BaseService):
             "business_date": business_date.isoformat(),
             "method": payload.method,
             **record_payload,
-            "inventory_usage": [item.model_dump(mode="json") for item in payload.inventory_usage],
+            "inventory_usage": inventory_usage_entries,
             "total_revenue": total_revenue,
             "total_expenses": total_expenses,
             "profit": round(total_revenue - total_expenses, 2),
@@ -2666,7 +2678,48 @@ class RestaurantOperationsService(BaseService):
         items, total = await self.inventory_repository.list_by_scope(scope_id=scope_id, page=page, page_size=page_size, search=search, status=status, category=category)
         serialized_items = self.serialize_list(items)
         total_inventory_value = round(sum(item["stock_quantity"] * item["unit_price"] for item in serialized_items), 2)
-        return InventoryListResponse(total_inventory_value=total_inventory_value, items=[self._to_inventory_item_response(item) for item in items], **build_pagination_meta(total=total, page=page, page_size=page_size))
+        return InventoryListResponse(
+            total_inventory_value=total_inventory_value,
+            usage_summary=self._build_inventory_usage_summary(serialized_items),
+            items=[self._to_inventory_item_response(item) for item in items],
+            **build_pagination_meta(total=total, page=page, page_size=page_size),
+        )
+
+    def _build_inventory_usage_summary(self, items: list[dict[str, Any]]) -> InventoryUsageSummaryResponse:
+        usage_by_item: dict[str, dict[str, Any]] = {}
+        for item in items:
+            item_id = str(item.get("id") or item.get("_id") or "")
+            if not item_id:
+                continue
+            for entry in item.get("history") or []:
+                if str(entry.get("kind") or "") != "stock_removed":
+                    continue
+                quantity_used = abs(self._safe_float(entry.get("quantity_delta")))
+                if quantity_used <= 0:
+                    continue
+                current = usage_by_item.setdefault(
+                    item_id,
+                    {
+                        "inventory_item_id": item_id,
+                        "product_name": str(item.get("product_name") or ""),
+                        "quantity_used": 0.0,
+                        "unit_type": str(item.get("unit_type") or ""),
+                        "total_cost": 0.0,
+                    },
+                )
+                current["quantity_used"] = round(float(current["quantity_used"]) + quantity_used, 2)
+                current["total_cost"] = round(float(current["total_cost"]) + quantity_used * self._safe_float(item.get("unit_price")), 2)
+
+        top_items = sorted(
+            usage_by_item.values(),
+            key=lambda value: (float(value.get("total_cost", 0)), float(value.get("quantity_used", 0))),
+            reverse=True,
+        )[:5]
+        return InventoryUsageSummaryResponse(
+            total_quantity_used=round(sum(float(item["quantity_used"]) for item in usage_by_item.values()), 2),
+            total_usage_cost=round(sum(float(item["total_cost"]) for item in usage_by_item.values()), 2),
+            top_items=[InventoryUsageSummaryItemResponse(**item) for item in top_items],
+        )
 
     async def get_inventory_value(self, current_user: dict) -> InventoryValueResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -2746,6 +2799,28 @@ class RestaurantOperationsService(BaseService):
         serialized_updated = self.serialize(updated)
         await self._send_low_stock_push_if_needed(current_user, serialized_updated)
         return self._to_inventory_detail_response(updated)
+
+    async def _build_daily_inventory_usage_entries(self, *, scope_id: str, usage: list[Any]) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for entry in usage:
+            entry_payload = entry.model_dump(mode="json") if hasattr(entry, "model_dump") else dict(entry)
+            item_id = str(entry_payload.get("inventory_item_id") or "")
+            quantity_used = self._safe_float(entry_payload.get("quantity_used"))
+            if not item_id or quantity_used <= 0:
+                continue
+            item = await self.inventory_repository.get_scoped_by_id(item_id, scope_id)
+            unit_price = self._safe_float(item.get("unit_price"))
+            entries.append(
+                {
+                    "inventory_item_id": item_id,
+                    "product_name": str(item.get("product_name") or ""),
+                    "quantity_used": quantity_used,
+                    "unit_type": str(item.get("unit_type") or ""),
+                    "unit_cost": unit_price,
+                    "total_cost": round(quantity_used * unit_price, 2),
+                }
+            )
+        return entries
 
     async def _apply_daily_inventory_usage(
         self,
@@ -3621,13 +3696,41 @@ class RestaurantOperationsService(BaseService):
         serialized_expenses = self.serialize_list(expenses)
         revenue_total = round(sum(item["total_revenue"] for item in serialized_records), 2)
         expenses_total = round(sum(float(item.get("total_expenses", 0)) for item in serialized_records), 2)
-        food_cost_total = round(sum(item["amount"] for item in serialized_expenses if "food" in item["category"].lower() or "inventory" in item["category"].lower()), 2)
+        inventory_usage_food_cost = round(
+            sum(
+                float(usage.get("total_cost", 0) or 0)
+                for record in serialized_records
+                for usage in (record.get("inventory_usage") or [])
+            ),
+            2,
+        )
+        food_cost_total = round(
+            sum(item["amount"] for item in serialized_expenses if "food" in item["category"].lower() or "inventory" in item["category"].lower())
+            + inventory_usage_food_cost,
+            2,
+        )
         profit_total = round(sum(float(item.get("profit", 0)) for item in serialized_records), 2)
         covers_total = sum(int(item.get("total_covers", item.get("lunch_covers", 0) + item.get("dinner_covers", 0))) for item in serialized_records)
         recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
-        recent_food_cost = sum(item["amount"] for item in serialized_expenses if item["expense_date"][:10] >= last_7_start.isoformat() and ("food" in item["category"].lower() or "inventory" in item["category"].lower()))
-        previous_food_cost = sum(item["amount"] for item in serialized_expenses if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and ("food" in item["category"].lower() or "inventory" in item["category"].lower()))
+        recent_food_cost = (
+            sum(item["amount"] for item in serialized_expenses if item["expense_date"][:10] >= last_7_start.isoformat() and ("food" in item["category"].lower() or "inventory" in item["category"].lower()))
+            + sum(
+                float(usage.get("total_cost", 0) or 0)
+                for record in serialized_records
+                if record["business_date"] >= last_7_start.isoformat()
+                for usage in (record.get("inventory_usage") or [])
+            )
+        )
+        previous_food_cost = (
+            sum(item["amount"] for item in serialized_expenses if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and ("food" in item["category"].lower() or "inventory" in item["category"].lower()))
+            + sum(
+                float(usage.get("total_cost", 0) or 0)
+                for record in serialized_records
+                if prev_7_start.isoformat() <= record["business_date"] <= prev_7_end.isoformat()
+                for usage in (record.get("inventory_usage") or [])
+            )
+        )
         recent_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
         recent_profit = sum(float(item.get("profit", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())

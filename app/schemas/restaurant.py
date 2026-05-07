@@ -802,8 +802,23 @@ class InventoryValueResponse(BaseSchema):
     total_inventory_value: float
 
 
+class InventoryUsageSummaryItemResponse(BaseSchema):
+    inventory_item_id: str
+    product_name: str
+    quantity_used: float
+    unit_type: str
+    total_cost: float
+
+
+class InventoryUsageSummaryResponse(BaseSchema):
+    total_quantity_used: float = 0.0
+    total_usage_cost: float = 0.0
+    top_items: list[InventoryUsageSummaryItemResponse] = Field(default_factory=list)
+
+
 class InventoryListResponse(BaseSchema):
     total_inventory_value: float
+    usage_summary: InventoryUsageSummaryResponse = Field(default_factory=InventoryUsageSummaryResponse)
     total: int
     page: int
     page_size: int
