@@ -50,6 +50,15 @@ class OpenAIOperationsService:
         metrics_context: dict[str, Any],
         attachment_context: dict[str, Any] | None = None,
     ) -> str:
+        contextual_reply = self._build_contextual_chat_fallback_reply(
+            prompt=prompt,
+            language=language,
+            metrics_context=metrics_context,
+            attachment_context=attachment_context,
+        )
+        if contextual_reply:
+            return contextual_reply
+
         revenue = float(metrics_context.get("revenue_total", 0.0) or 0.0)
         expenses = float(metrics_context.get("expenses_total", 0.0) or 0.0)
         profit = revenue - expenses
@@ -72,6 +81,135 @@ class OpenAIOperationsService:
             f"and reconcile cash movements."
             f"{attachment_note}"
         )
+
+    @classmethod
+    def _build_contextual_chat_fallback_reply(
+        cls,
+        *,
+        prompt: str,
+        language: str,
+        metrics_context: dict[str, Any],
+        attachment_context: dict[str, Any] | None = None,
+    ) -> str:
+        business_context = metrics_context.get("business_context")
+        if not isinstance(business_context, dict):
+            return ""
+
+        prompt_text = str(prompt or "").lower()
+        price_intent = any(token in prompt_text for token in ("overpriced", "price", "prices", "expensive", "market", "prezzo", "prezzi", "caro", "mercato"))
+        if not price_intent:
+            return ""
+
+        line_items = cls._flatten_context_line_items(business_context)
+        if not line_items:
+            return ""
+
+        target = cls._find_target_line_item(prompt_text=prompt_text, line_items=line_items)
+        if not target:
+            return ""
+
+        product_name = str(target.get("product_name") or "this item")
+        unit_price = float(target.get("unit_price", 0) or 0)
+        quantity = float(target.get("quantity", 0) or 0)
+        supplier_name = str(target.get("supplier_name") or "the supplier")
+        invoice_number = str(target.get("invoice_number") or "the recent invoice")
+        market_range = cls._match_market_reference(product_name, business_context)
+
+        if not market_range or unit_price <= 0:
+            if language == "it":
+                return (
+                    f"Ho trovato {product_name} nella fattura {invoice_number} da {supplier_name}, "
+                    f"con prezzo unitario €{unit_price:,.2f}. Non ho un range affidabile per questo articolo nel contesto disponibile, "
+                    "ma puoi confrontarlo con gli ultimi acquisti dello stesso prodotto e chiedere al fornitore una quotazione per volume."
+                )
+            return (
+                f"I found {product_name} on invoice {invoice_number} from {supplier_name} at €{unit_price:,.2f} per unit. "
+                "I do not have a reliable reference range for that exact item in the available context, but compare it against your last purchases "
+                "for the same product and ask the supplier for a volume quote."
+            )
+
+        low = float(market_range.get("low", 0) or 0)
+        high = float(market_range.get("high", 0) or 0)
+        midpoint = (low + high) / 2 if high > 0 else 0
+        variance = ((unit_price - midpoint) / midpoint * 100) if midpoint else 0
+        status = "above" if unit_price > high else "below" if unit_price < low else "within"
+        action = (
+            "renegotiate or request two competing quotes"
+            if status == "above"
+            else "keep monitoring quality, yield, and portion cost"
+        )
+        if language == "it":
+            status_it = "sopra" if status == "above" else "sotto" if status == "below" else "dentro"
+            action_it = "rinegoziare o chiedere due preventivi concorrenti" if status == "above" else "monitorare qualita, resa e costo porzione"
+            return (
+                f"Ho analizzato {product_name} nella fattura {invoice_number} da {supplier_name}: "
+                f"quantita {quantity:g}, prezzo unitario €{unit_price:,.2f}. "
+                f"Il riferimento realistico per {market_range.get('unit', 'unita')} e circa €{low:,.2f}-€{high:,.2f}. "
+                f"Questo prezzo e {status_it} il range, con scostamento di circa {variance:+.1f}% dal punto medio. "
+                f"Raccomandazione: {action_it}. Nota: {market_range.get('note', 'range indicativo')}."
+            )
+        return (
+            f"I analyzed {product_name} on invoice {invoice_number} from {supplier_name}: "
+            f"quantity {quantity:g}, unit price €{unit_price:,.2f}. "
+            f"A realistic reference range per {market_range.get('unit', 'unit')} is about €{low:,.2f}-€{high:,.2f}. "
+            f"Your price is {status} that range, about {variance:+.1f}% versus the midpoint. "
+            f"Recommendation: {action}. Note: {market_range.get('note', 'indicative range')}."
+        )
+
+    @staticmethod
+    def _flatten_context_line_items(business_context: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for invoice in business_context.get("recent_invoices", []) or []:
+            if not isinstance(invoice, dict):
+                continue
+            for line in invoice.get("line_items", []) or []:
+                if isinstance(line, dict):
+                    items.append(
+                        {
+                            **line,
+                            "supplier_name": invoice.get("supplier_name"),
+                            "invoice_number": invoice.get("invoice_number"),
+                            "invoice_date": invoice.get("invoice_date"),
+                        }
+                    )
+        for item in business_context.get("inventory_items", []) or []:
+            if isinstance(item, dict):
+                items.append(
+                    {
+                        "product_name": item.get("product_name"),
+                        "quantity": item.get("stock_quantity"),
+                        "unit_price": item.get("unit_price"),
+                        "supplier_name": item.get("supplier_name"),
+                        "invoice_number": "inventory record",
+                        "invoice_date": item.get("purchase_date"),
+                    }
+                )
+        return items
+
+    @staticmethod
+    def _find_target_line_item(*, prompt_text: str, line_items: list[dict[str, Any]]) -> dict[str, Any] | None:
+        best_item: dict[str, Any] | None = None
+        best_score = 0
+        prompt_tokens = {token for token in prompt_text.replace("/", " ").replace("-", " ").split() if len(token) >= 3}
+        for item in line_items:
+            name = str(item.get("product_name") or "").lower()
+            name_tokens = {token for token in name.replace("/", " ").replace("-", " ").split() if len(token) >= 3}
+            score = len(prompt_tokens & name_tokens)
+            if score > best_score:
+                best_score = score
+                best_item = item
+        return best_item
+
+    @staticmethod
+    def _match_market_reference(product_name: str, business_context: dict[str, Any]) -> dict[str, Any] | None:
+        normalized_name = product_name.lower()
+        for item in business_context.get("market_reference_ranges", []) or []:
+            if not isinstance(item, dict):
+                continue
+            keywords = item.get("product_keywords", [])
+            if any(str(keyword).lower() in normalized_name for keyword in keywords):
+                return item
+        return None
 
     @staticmethod
     def _build_chat_scope_refusal(*, language: str) -> str:
@@ -480,6 +618,7 @@ class OpenAIOperationsService:
         metrics_context: dict[str, Any],
         recent_messages: Sequence[dict[str, Any]],
         attachment_context: dict[str, Any] | None = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> str:
         resolved_language = self._resolve_language(language)
         scope_context = self._build_chat_scope_context(
@@ -517,7 +656,18 @@ class OpenAIOperationsService:
                                 "If the user asks anything outside restaurant business scope, refuse briefly. "
                                 "Treat short follow-up questions as in-scope when the recent conversation "
                                 "or attachment context is clearly about restaurant operations. "
-                                "Keep replies concise, practical, and grounded in the supplied metrics. "
+                                "Use the supplied metrics, business_context, recent invoices, invoice line items, inventory, suppliers, "
+                                "account profile, market_reference_ranges, and long-term memory before giving advice. "
+                                "Use a compact professional format when helpful: direct answer, evidence, and recommendation. "
+                                "For broader requests, analyze relevant dimensions from available data: supplier pricing, margin, inventory risk, "
+                                "cash flow, revenue/covers, waste, and operational bottlenecks. "
+                                "Use memory for user preferences, recurring concerns, known suppliers/products, and previous goals, "
+                                "but do not expose memory mechanics unless the user asks. "
+                                "For supplier price questions, identify the invoice line item, compare its unit price to the supplied market range, "
+                                "state whether it is below, within, or above range, and recommend a concrete action. "
+                                "Do not tell the user to manually check data that is already present in context. "
+                                "If exact market data is unavailable, say it is an indicative range and explain the assumption. "
+                                "Keep replies concise, practical, numeric when possible, and grounded in the supplied data. "
                                 f"Always answer in {'Italian' if resolved_language == 'it' else 'English'}."
                             ),
                         }
@@ -530,6 +680,7 @@ class OpenAIOperationsService:
                             "type": "input_text",
                             "text": (
                                 f"Metrics context: {json.dumps(metrics_context)}\n"
+                                f"Long-term memory: {json.dumps(memory_context) if memory_context else 'none'}\n"
                                 f"Recent messages:\n{transcript}\n"
                                 f"Attachment context: {json.dumps(attachment_context) if attachment_context else "none"}\n"
                                 f"Scope context: {json.dumps(scope_context)}\n"
@@ -559,6 +710,68 @@ class OpenAIOperationsService:
                 metrics_context=metrics_context,
                 attachment_context=attachment_context,
             )
+
+    async def summarize_chat_memory(
+        self,
+        *,
+        existing_memory: dict[str, Any] | None,
+        recent_messages: Sequence[dict[str, Any]],
+        business_context: dict[str, Any] | None = None,
+        language: str = "en",
+    ) -> dict[str, Any]:
+        resolved_language = self._resolve_language(language)
+        fallback = self._fallback_chat_memory_summary(
+            existing_memory=existing_memory,
+            recent_messages=recent_messages,
+            business_context=business_context,
+            language=resolved_language,
+        )
+        if not self.enabled:
+            return fallback
+
+        payload = {
+            "model": self.settings.openai_model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "Return only valid JSON with keys summary, preferences, recurring_topics, "
+                                "known_entities, and last_user_intent. Maintain a concise professional memory "
+                                "for one restaurant account. Store durable business facts, user preferences, "
+                                "recurring concerns, suppliers, products, and operational goals. Do not store "
+                                "sensitive payment credentials or unrelated personal details."
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"Existing memory: {json.dumps(existing_memory) if existing_memory else 'none'}\n"
+                                f"Recent messages: {json.dumps(list(recent_messages))}\n"
+                                f"Business context: {json.dumps(business_context) if business_context else 'none'}\n"
+                                f"Memory language: {'Italian' if resolved_language == 'it' else 'English'}"
+                            ),
+                        }
+                    ],
+                },
+            ],
+        }
+        try:
+            response_payload = await self._responses_create(payload)
+            parsed = self._try_parse_json(response_payload.get("output_text", ""))
+            if isinstance(parsed, dict):
+                return self._normalize_chat_memory_payload(parsed, fallback=fallback)
+            return fallback
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("OpenAI chat memory summary failed", exc_info=exc)
+            return fallback
 
     async def summarize_chat_attachment(
         self,
@@ -847,6 +1060,117 @@ class OpenAIOperationsService:
                     "content": user_content,
                 },
             ],
+        }
+
+    @classmethod
+    def _normalize_chat_memory_payload(cls, payload: dict[str, Any], *, fallback: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "summary": str(payload.get("summary") or fallback.get("summary") or "").strip()[:1400],
+            "preferences": cls._coerce_string_list(payload.get("preferences") or fallback.get("preferences"), limit=8),
+            "recurring_topics": cls._coerce_string_list(payload.get("recurring_topics") or fallback.get("recurring_topics"), limit=10),
+            "known_entities": cls._coerce_entity_list(payload.get("known_entities") or fallback.get("known_entities"), limit=15),
+            "last_user_intent": str(payload.get("last_user_intent") or fallback.get("last_user_intent") or "").strip()[:240],
+        }
+
+    @staticmethod
+    def _coerce_string_list(value: Any, *, limit: int) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text and text not in result:
+                result.append(text[:160])
+            if len(result) >= limit:
+                break
+        return result
+
+    @staticmethod
+    def _coerce_entity_list(value: Any, *, limit: int) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        result: list[dict[str, str]] = []
+        for item in value:
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("value") or "").strip()
+                entity_type = str(item.get("type") or item.get("entity_type") or "business").strip()
+                note = str(item.get("note") or item.get("summary") or "").strip()
+            else:
+                name = str(item or "").strip()
+                entity_type = "business"
+                note = ""
+            if name:
+                result.append({"type": entity_type[:40], "name": name[:120], "note": note[:180]})
+            if len(result) >= limit:
+                break
+        return result
+
+    @classmethod
+    def _fallback_chat_memory_summary(
+        cls,
+        *,
+        existing_memory: dict[str, Any] | None,
+        recent_messages: Sequence[dict[str, Any]],
+        business_context: dict[str, Any] | None = None,
+        language: str = "en",
+    ) -> dict[str, Any]:
+        previous_summary = str((existing_memory or {}).get("summary") or "").strip()
+        user_messages = [
+            str(item.get("message") or "").strip()
+            for item in recent_messages
+            if item.get("role") == "user" and str(item.get("message") or "").strip()
+        ]
+        last_user_intent = user_messages[-1][:240] if user_messages else str((existing_memory or {}).get("last_user_intent") or "")[:240]
+
+        topics = cls._coerce_string_list((existing_memory or {}).get("recurring_topics"), limit=10)
+        entities = cls._coerce_entity_list((existing_memory or {}).get("known_entities"), limit=15)
+        combined_text = " ".join(user_messages).lower()
+        topic_keywords = {
+            "supplier pricing": ("price", "overpriced", "expensive", "market", "prezzo", "caro", "mercato"),
+            "invoice analysis": ("invoice", "fattura", "uploaded", "document"),
+            "inventory and costs": ("inventory", "stock", "cost", "margine", "scorte"),
+            "cash flow": ("cash", "bank", "deposit", "reconcile", "cassa"),
+        }
+        for topic, keywords in topic_keywords.items():
+            if topic not in topics and any(keyword in combined_text for keyword in keywords):
+                topics.append(topic)
+
+        if isinstance(business_context, dict):
+            for invoice in business_context.get("recent_invoices", []) or []:
+                if not isinstance(invoice, dict):
+                    continue
+                if invoice.get("supplier_name"):
+                    entities.append({"type": "supplier", "name": str(invoice["supplier_name"])[:120], "note": "recent invoice supplier"})
+                for line in invoice.get("line_items", []) or []:
+                    if isinstance(line, dict) and line.get("product_name"):
+                        entities.append({"type": "product", "name": str(line["product_name"])[:120], "note": "recent invoice item"})
+            profile = business_context.get("restaurant_profile") if isinstance(business_context.get("restaurant_profile"), dict) else {}
+            if profile.get("main_business_goal"):
+                topics.append(str(profile["main_business_goal"])[:160])
+
+        deduped_entities: list[dict[str, str]] = []
+        seen_entities: set[tuple[str, str]] = set()
+        for entity in entities:
+            key = (entity.get("type", ""), entity.get("name", "").lower())
+            if entity.get("name") and key not in seen_entities:
+                seen_entities.add(key)
+                deduped_entities.append(entity)
+
+        new_summary_parts = [previous_summary] if previous_summary else []
+        if last_user_intent:
+            new_summary_parts.append(
+                f"Recent focus: {last_user_intent}" if language != "it" else f"Focus recente: {last_user_intent}"
+            )
+        summary = " ".join(new_summary_parts).strip()[:1400]
+        if not summary:
+            summary = "Restaurant user prefers practical, data-grounded operational answers." if language != "it" else "L'utente preferisce risposte operative, pratiche e basate sui dati."
+
+        return {
+            "summary": summary,
+            "preferences": cls._coerce_string_list((existing_memory or {}).get("preferences"), limit=8),
+            "recurring_topics": topics[:10],
+            "known_entities": deduped_entities[:15],
+            "last_user_intent": last_user_intent,
         }
 
     @staticmethod

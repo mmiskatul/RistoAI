@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, time
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ASCENDING, DESCENDING
+from pymongo import ASCENDING, DESCENDING, ReturnDocument
 
 from app.core.exceptions import NotFoundException
 from app.db.collections import RestaurantCollections
@@ -454,6 +454,30 @@ class RestaurantChatRepository(ScopedRepository):
         if not document or document.get("tenant_id") != scope_id:
             raise NotFoundException("Chat message not found")
         return document
+
+
+class RestaurantChatMemoryRepository(ScopedRepository):
+    collection_name = RestaurantCollections.CHAT_MEMORIES
+
+    async def get_by_scope(self, *, scope_id: str) -> dict[str, Any] | None:
+        return await self.get_one(self.scope_filters(scope_id))
+
+    async def upsert_by_scope(self, *, scope_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        update_payload = {
+            **payload,
+            "tenant_id": scope_id,
+            "updated_at": now,
+        }
+        return await self.collection.find_one_and_update(
+            self.scope_filters(scope_id),
+            {
+                "$set": update_payload,
+                "$setOnInsert": {"created_at": now},
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
 
 
 class RestaurantInsightRepository(ScopedRepository):

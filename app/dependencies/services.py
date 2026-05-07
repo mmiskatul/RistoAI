@@ -98,6 +98,7 @@ def build_restaurant_operations_service(db) -> RestaurantOperationsService:
         repos.restaurant_chats(),
         repos.restaurant_insights(),
         OpenAIOperationsService(),
+        repos.restaurant_chat_memories(),
         repos.onboarding_profiles(),
         build_image_storage_service(settings),
     )

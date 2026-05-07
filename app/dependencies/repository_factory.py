@@ -7,6 +7,7 @@ from app.repositories.onboarding_profile import OnboardingProfileRepository
 from app.repositories.restaurant_ops import (
     RestaurantBankAccountRepository,
     RestaurantCashDepositRepository,
+    RestaurantChatMemoryRepository,
     RestaurantChatRepository,
     RestaurantDailyRecordRepository,
     RestaurantDocumentRepository,
@@ -62,6 +63,9 @@ class RepositoryFactory:
 
     def restaurant_chats(self) -> RestaurantChatRepository:
         return RestaurantChatRepository(self.db)
+
+    def restaurant_chat_memories(self) -> RestaurantChatMemoryRepository:
+        return RestaurantChatMemoryRepository(self.db)
 
     def restaurant_daily_records(self) -> RestaurantDailyRecordRepository:
         return RestaurantDailyRecordRepository(self.db)

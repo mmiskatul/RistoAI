@@ -18,6 +18,7 @@ from app.core.exceptions import ConflictException, ValidationException
 from app.repositories.restaurant_ops import (
     RestaurantBankAccountRepository,
     RestaurantCashDepositRepository,
+    RestaurantChatMemoryRepository,
     RestaurantChatRepository,
     RestaurantDailyRecordRepository,
     RestaurantRecordRepository,
@@ -317,6 +318,7 @@ class RestaurantOperationsService(BaseService):
         chat_repository: RestaurantChatRepository,
         insight_repository: RestaurantInsightRepository,
         openai_service: OpenAIOperationsService,
+        chat_memory_repository: RestaurantChatMemoryRepository | None = None,
         onboarding_repository: OnboardingProfileRepository | None = None,
         image_storage_service: ImageStorageService | None = None,
     ) -> None:
@@ -334,6 +336,7 @@ class RestaurantOperationsService(BaseService):
         self.inventory_category_repository = inventory_category_repository
         self.inventory_supplier_repository = inventory_supplier_repository
         self.chat_repository = chat_repository
+        self.chat_memory_repository = chat_memory_repository
         self.insight_repository = insight_repository
         self.onboarding_repository = onboarding_repository
         self.openai_service = openai_service
@@ -3209,19 +3212,190 @@ class RestaurantOperationsService(BaseService):
         )
         return translated_transcript or transcript
 
-    async def _load_chat_generation_context(self, *, scope_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    async def _load_chat_generation_context(self, *, current_user: dict, scope_id: str) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any] | None]:
         recent_task = self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=8)
         daily_records_task = self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=14)
         expenses_task = self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=14)
-        recent, daily_records_result, expenses_result = await asyncio.gather(
+        documents_task = self._list_recent_chat_documents(scope_id=scope_id, limit=12)
+        inventory_task = self.inventory_repository.list_by_scope(scope_id=scope_id, page=1, page_size=30)
+        suppliers_task = self.inventory_supplier_repository.list_by_scope(scope_id=scope_id, limit=30)
+        memory_task = (
+            self.chat_memory_repository.get_by_scope(scope_id=scope_id)
+            if self.chat_memory_repository is not None
+            else asyncio.sleep(0, result=None)
+        )
+        onboarding_task = (
+            self.onboarding_repository.get_by_user_id(str(current_user["_id"]))
+            if self.onboarding_repository is not None
+            else asyncio.sleep(0, result=None)
+        )
+        recent, daily_records_result, expenses_result, documents, inventory_result, suppliers, memory, onboarding_profile = await asyncio.gather(
             recent_task,
             daily_records_task,
             expenses_task,
+            documents_task,
+            inventory_task,
+            suppliers_task,
+            memory_task,
+            onboarding_task,
         )
         daily_records, _ = daily_records_result
         expenses, _ = expenses_result
+        inventory_items, _ = inventory_result
         metrics_context = self._build_metrics_context(daily_records=daily_records, expenses=expenses)
-        return recent, metrics_context
+        metrics_context["business_context"] = self._build_chat_business_context(
+            current_user=current_user,
+            onboarding_profile=onboarding_profile,
+            documents=documents,
+            inventory_items=inventory_items,
+            suppliers=suppliers,
+            expenses=expenses,
+        )
+        return recent, metrics_context, self.serialize(memory) if memory else None
+
+    async def _list_recent_chat_documents(self, *, scope_id: str, limit: int = 12) -> list[dict[str, Any]]:
+        cursor = self.document_repository.collection.find(
+            self.document_repository.scope_filters(scope_id)
+        ).sort([("invoice_date", -1), ("created_at", -1)]).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    def _build_chat_business_context(
+        self,
+        *,
+        current_user: dict,
+        onboarding_profile: dict[str, Any] | None,
+        documents: list[dict[str, Any]],
+        inventory_items: list[dict[str, Any]],
+        suppliers: list[dict[str, Any]],
+        expenses: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        serialized_user = self.serialize(current_user)
+        serialized_profile = self.serialize(onboarding_profile) if onboarding_profile else {}
+        serialized_documents = self.serialize_list(documents)
+        serialized_inventory = self.serialize_list(inventory_items)
+        serialized_suppliers = self.serialize_list(suppliers)
+        serialized_expenses = self.serialize_list(expenses)
+
+        recent_invoices = [
+            {
+                "id": item.get("id"),
+                "supplier_name": item.get("supplier_name") or item.get("counterparty_name"),
+                "invoice_number": item.get("invoice_number"),
+                "invoice_date": item.get("invoice_date"),
+                "total_amount": round(float(item.get("total_amount", 0) or 0), 2),
+                "currency": item.get("currency") or "EUR",
+                "ai_summary": item.get("ai_summary"),
+                "line_items": [
+                    {
+                        "product_name": line.get("product_name"),
+                        "quantity": float(line.get("quantity", 0) or 0),
+                        "unit_price": round(float(line.get("unit_price", 0) or 0), 2),
+                        "total_price": round(float(line.get("total_price", 0) or 0), 2),
+                    }
+                    for line in item.get("line_items", [])[:12]
+                    if isinstance(line, dict)
+                ],
+            }
+            for item in serialized_documents[:10]
+        ]
+
+        inventory_snapshot = [
+            {
+                "id": item.get("id"),
+                "product_name": item.get("product_name"),
+                "category": item.get("category"),
+                "supplier_name": item.get("supplier_name"),
+                "stock_quantity": float(item.get("stock_quantity", 0) or 0),
+                "unit_type": item.get("unit_type"),
+                "unit_price": round(float(item.get("unit_price", 0) or 0), 2),
+                "stock_status": item.get("stock_status"),
+                "purchase_date": item.get("purchase_date"),
+            }
+            for item in serialized_inventory[:25]
+        ]
+
+        supplier_spend: dict[str, float] = {}
+        for document in recent_invoices:
+            supplier = str(document.get("supplier_name") or "Unknown supplier")
+            supplier_spend[supplier] = round(supplier_spend.get(supplier, 0.0) + float(document.get("total_amount", 0) or 0), 2)
+        for expense in serialized_expenses:
+            supplier = str(expense.get("category") or expense.get("notes") or "Other expenses")
+            supplier_spend[supplier] = round(supplier_spend.get(supplier, 0.0) + float(expense.get("amount", 0) or 0), 2)
+
+        return {
+            "restaurant_profile": {
+                "restaurant_name": serialized_user.get("restaurant_name") or serialized_profile.get("restaurant_name"),
+                "city_location": serialized_user.get("city_location") or serialized_user.get("location") or serialized_profile.get("city_location") or serialized_profile.get("location"),
+                "restaurant_type": serialized_profile.get("restaurant_type"),
+                "number_of_seats": serialized_profile.get("number_of_seats"),
+                "average_spend_per_customer": serialized_profile.get("average_spend_per_customer"),
+                "main_business_goal": serialized_profile.get("main_business_goal"),
+                "biggest_problem": serialized_profile.get("biggest_problem"),
+                "improvement_focus": serialized_profile.get("improvement_focus"),
+            },
+            "recent_invoices": recent_invoices,
+            "inventory_items": inventory_snapshot,
+            "known_suppliers": [
+                {"id": item.get("id"), "name": item.get("name")}
+                for item in serialized_suppliers[:20]
+            ],
+            "supplier_spend": [
+                {"supplier": supplier, "amount": amount}
+                for supplier, amount in sorted(supplier_spend.items(), key=lambda item: item[1], reverse=True)[:10]
+            ],
+            "market_reference_ranges": self._chat_market_reference_ranges(),
+        }
+
+    @staticmethod
+    def _chat_market_reference_ranges() -> list[dict[str, Any]]:
+        return [
+            {"product_keywords": ["salmon", "salmone"], "unit": "kg", "low": 18.0, "high": 32.0, "note": "typical wholesale range for fresh restaurant-grade salmon in Europe"},
+            {"product_keywords": ["chicken", "pollo"], "unit": "kg", "low": 4.0, "high": 9.0, "note": "typical wholesale poultry range"},
+            {"product_keywords": ["beef", "manzo"], "unit": "kg", "low": 10.0, "high": 24.0, "note": "varies heavily by cut and origin"},
+            {"product_keywords": ["mozzarella"], "unit": "kg", "low": 5.0, "high": 11.0, "note": "typical wholesale dairy range"},
+            {"product_keywords": ["flour", "farina"], "unit": "kg", "low": 0.8, "high": 2.2, "note": "bulk flour wholesale range"},
+            {"product_keywords": ["tomato", "pomodoro"], "unit": "kg", "low": 1.2, "high": 4.0, "note": "fresh or processed tomato range depends on format"},
+            {"product_keywords": ["olive oil", "olio"], "unit": "liter", "low": 5.0, "high": 12.0, "note": "restaurant bulk olive oil range"},
+        ]
+
+    async def _update_chat_memory(
+        self,
+        *,
+        current_user: dict,
+        scope_id: str,
+        recent_items: list[dict[str, Any]],
+        metrics_context: dict[str, Any],
+        language: str,
+    ) -> dict[str, Any] | None:
+        if self.chat_memory_repository is None:
+            return None
+
+        existing_memory = await self.chat_memory_repository.get_by_scope(scope_id=scope_id)
+        recent_messages = [
+            self._serialize_chat_message_for_context(item, language=language)
+            for item in recent_items[-12:]
+            if item.get("role") in {"user", "assistant"}
+        ]
+        memory_payload = await self.openai_service.summarize_chat_memory(
+            existing_memory=self.serialize(existing_memory) if existing_memory else None,
+            recent_messages=recent_messages,
+            business_context=metrics_context.get("business_context"),
+            language=language,
+        )
+        source_message_ids = [str(item.get("_id") or item.get("id")) for item in recent_items[-12:] if item.get("_id") or item.get("id")]
+        return await self.chat_memory_repository.upsert_by_scope(
+            scope_id=scope_id,
+            payload={
+                "summary": str(memory_payload.get("summary") or "").strip(),
+                "preferences": memory_payload.get("preferences") or [],
+                "recurring_topics": memory_payload.get("recurring_topics") or [],
+                "known_entities": memory_payload.get("known_entities") or [],
+                "last_user_intent": str(memory_payload.get("last_user_intent") or "").strip(),
+                "source_message_ids": source_message_ids,
+                "language": language,
+                "created_by_user_id": str(current_user["_id"]),
+            },
+        )
 
     async def update_chat_message(self, current_user: dict, message_id: str, payload: ChatMessageUpdateRequest) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -3242,7 +3416,7 @@ class RestaurantOperationsService(BaseService):
                 "last_edited_by_user_id": str(current_user["_id"]),
             },
         )
-        recent, metrics_context = await self._load_chat_generation_context(scope_id=scope_id)
+        recent, metrics_context, memory_context = await self._load_chat_generation_context(current_user=current_user, scope_id=scope_id)
         recent_context = [self._serialize_chat_message_for_context(item, language=chat_language) for item in recent]
         alternate_chat_language = "it" if chat_language == "en" else "en"
         assistant_text = await self.openai_service.generate_chat_reply(
@@ -3250,12 +3424,14 @@ class RestaurantOperationsService(BaseService):
             language=chat_language,
             metrics_context=metrics_context,
             recent_messages=recent_context,
+            memory_context=memory_context,
         )
         alternate_assistant_text = await self.openai_service.generate_chat_reply(
             prompt=payload.message,
             language=alternate_chat_language,
             metrics_context=metrics_context,
             recent_messages=[self._serialize_chat_message_for_context(item, language=alternate_chat_language) for item in recent],
+            memory_context=memory_context,
         )
         await self.chat_repository.create(
             {
@@ -3271,7 +3447,17 @@ class RestaurantOperationsService(BaseService):
                 "regenerated_from_message_id": str(updated_message["_id"]),
             }
         )
-        return await self.list_chat_messages(current_user)
+        items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
+        await self._update_chat_memory(
+            current_user=current_user,
+            scope_id=scope_id,
+            recent_items=items,
+            metrics_context=metrics_context,
+            language=chat_language,
+        )
+        return ChatConversationResponse(
+            messages=[self._to_chat_message_response(item, language=chat_language) for item in items],
+        )
 
     async def create_chat_message_with_attachment(
         self,
@@ -3358,7 +3544,7 @@ class RestaurantOperationsService(BaseService):
             user_message_payload["attachment_summary"] = attachment_summary
             user_message_payload["attachment_summary_translations"] = attachment_summary_translations
         user_message = await self.chat_repository.create(user_message_payload)
-        recent, metrics_context = await self._load_chat_generation_context(scope_id=scope_id)
+        recent, metrics_context, memory_context = await self._load_chat_generation_context(current_user=current_user, scope_id=scope_id)
         recent_context = [self._serialize_chat_message_for_context(item, language=chat_language) for item in recent]
         alternate_chat_language = "it" if chat_language == "en" else "en"
         assistant_text = await self.openai_service.generate_chat_reply(
@@ -3367,6 +3553,7 @@ class RestaurantOperationsService(BaseService):
             metrics_context=metrics_context,
             recent_messages=recent_context,
             attachment_context=attachment_context,
+            memory_context=memory_context,
         )
         alternate_assistant_text = await self.openai_service.generate_chat_reply(
             prompt=payload.message,
@@ -3374,6 +3561,7 @@ class RestaurantOperationsService(BaseService):
             metrics_context=metrics_context,
             recent_messages=[self._serialize_chat_message_for_context(item, language=alternate_chat_language) for item in recent],
             attachment_context=alternate_attachment_context or attachment_context,
+            memory_context=memory_context,
         )
         insight_message = self._build_chat_insight_message(metrics_context, language=chat_language)
         alternate_insight_message = self._build_chat_insight_message(metrics_context, language=alternate_chat_language)
@@ -3406,6 +3594,13 @@ class RestaurantOperationsService(BaseService):
             ),
         )
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
+        await self._update_chat_memory(
+            current_user=current_user,
+            scope_id=scope_id,
+            recent_items=items,
+            metrics_context=metrics_context,
+            language=chat_language,
+        )
         return ChatConversationResponse(
             messages=[self._to_chat_message_response(item, language=chat_language) for item in items],
         )

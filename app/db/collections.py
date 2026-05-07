@@ -29,6 +29,7 @@ class RestaurantCollections:
     INVENTORY_CATEGORIES = "restaurant_inventory_categories"
     INVENTORY_SUPPLIERS = "restaurant_inventory_suppliers"
     CHAT_MESSAGES = "restaurant_chat_messages"
+    CHAT_MEMORIES = "restaurant_chat_memories"
     AI_INSIGHTS = "restaurant_ai_insights"
 
 
@@ -55,5 +56,6 @@ ALL_COLLECTIONS = {
     RestaurantCollections.INVENTORY_CATEGORIES,
     RestaurantCollections.INVENTORY_SUPPLIERS,
     RestaurantCollections.CHAT_MESSAGES,
+    RestaurantCollections.CHAT_MEMORIES,
     RestaurantCollections.AI_INSIGHTS,
 }
