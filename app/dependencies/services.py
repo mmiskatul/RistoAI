@@ -1,38 +1,15 @@
 from __future__ import annotations
 
-from fastapi import Depends, Query
+from fastapi import Depends
 
 from app.config.settings import get_settings
 from app.db.mongodb import get_database
-from app.repositories.admin_settings import AdminSettingsRepository
-from app.repositories.auth_code import AuthCodeRepository
-from app.repositories.coupon import CouponRepository
-from app.repositories.restaurant_ops import (
-    RestaurantBankAccountRepository,
-    RestaurantCashDepositRepository,
-    RestaurantChatRepository,
-    RestaurantDailyRecordRepository,
-    RestaurantRecordRepository,
-    RestaurantWeeklyRecordRepository,
-    RestaurantMonthlyRecordRepository,
-    RestaurantDocumentRepository,
-    RestaurantExpenseRepository,
-    RestaurantFinanceTransactionRepository,
-    RestaurantInsightRepository,
-    RestaurantInventoryRepository,
-    RestaurantInventoryCategoryRepository,
-    RestaurantInventorySupplierRepository,
-)
-from app.repositories.onboarding_profile import OnboardingProfileRepository
-from app.repositories.subscription_plan import SubscriptionPlanRepository
-from app.repositories.support_ticket import SupportTicketRepository
-from app.repositories.user import UserRepository
-from app.repositories.user_subscription import UserSubscriptionRepository
+from app.dependencies.repository_factory import RepositoryFactory
 from app.services.admin_settings import AdminSettingsService
 from app.services.auth import AuthService
 from app.services.dashboard import DashboardService
 from app.services.email import EmailService
-from app.services.image_storage import build_image_storage_service
+from app.services.image_storage import ImageStorageService, build_image_storage_service
 from app.services.restaurant import RestaurantOperationsService
 from app.services.onboarding import OnboardingService
 from app.services.openai_ops import OpenAIOperationsService
@@ -43,72 +20,85 @@ from app.services.user_management import UserManagementService
 
 
 async def get_auth_service(db=Depends(get_database)) -> AuthService:
+    repos = RepositoryFactory(db)
     return AuthService(
-        UserRepository(db),
-        AuthCodeRepository(db),
+        repos.users(),
+        repos.auth_codes(),
         EmailService(get_settings()),
-        OnboardingProfileRepository(db),
+        repos.onboarding_profiles(),
     )
 
 
 async def get_onboarding_service(db=Depends(get_database)) -> OnboardingService:
     settings = get_settings()
-    return OnboardingService(OnboardingProfileRepository(db), UserRepository(db), build_image_storage_service(settings))
+    repos = RepositoryFactory(db)
+    return OnboardingService(repos.onboarding_profiles(), repos.users(), build_image_storage_service(settings))
 
 
 async def get_dashboard_service(db=Depends(get_database)) -> DashboardService:
+    repos = RepositoryFactory(db)
     return DashboardService(
-        UserRepository(db),
-        OnboardingProfileRepository(db),
-        AuthCodeRepository(db),
-        SubscriptionPlanRepository(db),
-        RestaurantRecordRepository(db),
-        RestaurantCashDepositRepository(db),
-        RestaurantInventoryRepository(db),
+        repos.users(),
+        repos.onboarding_profiles(),
+        repos.auth_codes(),
+        repos.subscription_plans(),
+        repos.restaurant_records(),
+        repos.restaurant_cash_deposits(),
+        repos.restaurant_inventory(),
     )
 
 
 async def get_user_management_service(db=Depends(get_database)) -> UserManagementService:
-    return UserManagementService(UserRepository(db), OnboardingProfileRepository(db), AuthCodeRepository(db))
+    repos = RepositoryFactory(db)
+    return UserManagementService(repos.users(), repos.onboarding_profiles(), repos.auth_codes())
 
 
 async def get_subscription_service(db=Depends(get_database)) -> SubscriptionService:
-    return SubscriptionService(UserRepository(db), SubscriptionPlanRepository(db), CouponRepository(db), UserSubscriptionRepository(db), StripeBillingService(get_settings()))
+    repos = RepositoryFactory(db)
+    return SubscriptionService(
+        repos.users(),
+        repos.subscription_plans(),
+        repos.coupons(),
+        repos.user_subscriptions(),
+        StripeBillingService(get_settings()),
+    )
 
 
 async def get_support_service(db=Depends(get_database)) -> SupportService:
-    return SupportService(SupportTicketRepository(db))
+    return SupportService(RepositoryFactory(db).support_tickets())
 
 
 async def get_admin_settings_service(db=Depends(get_database)) -> AdminSettingsService:
     settings = get_settings()
+    repos = RepositoryFactory(db)
     return AdminSettingsService(
-        AdminSettingsRepository(db),
-        UserRepository(db),
+        repos.admin_settings(),
+        repos.users(),
         build_image_storage_service(settings),
     )
 
 
 def build_restaurant_operations_service(db) -> RestaurantOperationsService:
     settings = get_settings()
+    repos = RepositoryFactory(db)
     return RestaurantOperationsService(
-        UserRepository(db),
-        RestaurantDocumentRepository(db),
-        RestaurantExpenseRepository(db),
-        RestaurantCashDepositRepository(db),
-        RestaurantBankAccountRepository(db),
-        RestaurantDailyRecordRepository(db),
-        RestaurantRecordRepository(db),
-        RestaurantWeeklyRecordRepository(db),
-        RestaurantMonthlyRecordRepository(db),
-        RestaurantFinanceTransactionRepository(db),
-        RestaurantInventoryRepository(db),
-        RestaurantInventoryCategoryRepository(db),
-        RestaurantInventorySupplierRepository(db),
-        RestaurantChatRepository(db),
-        RestaurantInsightRepository(db),
+        repos.users(),
+        repos.restaurant_documents(),
+        repos.restaurant_expenses(),
+        repos.restaurant_cash_deposits(),
+        repos.restaurant_bank_accounts(),
+        repos.restaurant_daily_records(),
+        repos.restaurant_records(),
+        repos.restaurant_weekly_records(),
+        repos.restaurant_monthly_records(),
+        repos.restaurant_finance_transactions(),
+        repos.restaurant_inventory(),
+        repos.restaurant_inventory_categories(),
+        repos.restaurant_inventory_suppliers(),
+        repos.restaurant_chats(),
+        repos.restaurant_insights(),
         OpenAIOperationsService(),
-        OnboardingProfileRepository(db),
+        repos.onboarding_profiles(),
         build_image_storage_service(settings),
     )
 
@@ -119,5 +109,4 @@ async def get_restaurant_operations_service(db=Depends(get_database)) -> Restaur
 
 async def get_image_storage_service() -> ImageStorageService:
     settings = get_settings()
-    from app.services.image_storage import build_image_storage_service, ImageStorageService
     return build_image_storage_service(settings)
