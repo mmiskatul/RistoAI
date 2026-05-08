@@ -3266,11 +3266,8 @@ class RestaurantOperationsService(BaseService):
         )
         if not transcript:
             raise ValidationException("Could not transcribe this voice message. Please try again.")
-        translated_transcript = await self.openai_service.translate_text(
-            text=transcript,
-            target_language=target_language,
-        )
-        return translated_transcript or transcript
+        # Return exact transcription, no translation or changes to what the user said
+        return transcript
 
     async def _load_chat_generation_context(self, *, current_user: dict, scope_id: str) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any] | None]:
         recent_task = self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=8)
