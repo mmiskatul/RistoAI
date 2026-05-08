@@ -39,6 +39,10 @@ def calculate_cash_ledger(
     cash_out_total = round(sum(float(item.get("cash_out", 0) or 0) for item in daily_items), 2)
     cash_withdrawals_total = round(sum(float(item.get("cash_withdrawals", 0) or 0) for item in daily_items), 2)
     manual_entry_expenses_total = round(sum(float(item.get("total_expenses", 0) or 0) for item in daily_items), 2)
+    document_expense_total_from_records = round(
+        sum(float(item.get("uploaded_document_total", 0) or 0) for item in daily_items),
+        2,
+    )
     base_cash_available = round(
         max(cash_in_total - cash_out_total - cash_withdrawals_total - manual_entry_expenses_total, 0.0),
         2,
@@ -77,6 +81,8 @@ def calculate_cash_ledger(
         ),
         2,
     )
+    if document_expense_total_from_records > document_expense_total:
+        document_expense_total = document_expense_total_from_records
     document_cash_total = round(
         sum(
             float(item.get("amount", 0))

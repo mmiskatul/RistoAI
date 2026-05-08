@@ -30,8 +30,8 @@ def client(app):
 @pytest.fixture()
 def owner_credentials() -> dict[str, str]:
     return {
-        "full_name": "Risto Owner",
-        "email": "owner@example.com",
-        "password": "OwnerPass123",
+        "full_name": "Masab Miskat",
+        "email": "masabimiskat@gmail.com",
+        "password": "password123",
         "phone": "+15550001111",
     }
