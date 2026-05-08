@@ -3263,6 +3263,7 @@ class RestaurantOperationsService(BaseService):
             file_name=file_name,
             content_type=content_type,
             file_bytes=file_bytes,
+            language=target_language,
         )
         if not transcript:
             raise ValidationException("Could not transcribe this voice message. Please try again.")
