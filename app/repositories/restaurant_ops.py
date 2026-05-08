@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import UTC, date, datetime, time
 from typing import Any
@@ -445,9 +445,11 @@ class RestaurantInventorySupplierRepository(ScopedRepository):
 class RestaurantChatRepository(ScopedRepository):
     collection_name = RestaurantCollections.CHAT_MESSAGES
 
-    async def list_recent_by_scope(self, *, scope_id: str, limit: int = 20) -> list[dict[str, Any]]:
-        cursor = self.collection.find(self.scope_filters(scope_id)).sort([("created_at", ASCENDING)]).limit(limit)
-        return await cursor.to_list(length=limit)
+    async def list_recent_by_scope(self, *, scope_id: str, limit: int | None = None) -> list[dict[str, Any]]:
+        cursor = self.collection.find(self.scope_filters(scope_id)).sort([("created_at", ASCENDING)])
+        if limit is not None:
+            cursor = cursor.limit(limit)
+        return await cursor.to_list(length=None)
 
     async def get_by_scope_and_id(self, *, scope_id: str, message_id: str) -> dict[str, Any]:
         document = await self.get_optional_by_id(message_id)

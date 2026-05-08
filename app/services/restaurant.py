@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import base64
@@ -3177,7 +3177,7 @@ class RestaurantOperationsService(BaseService):
     async def list_chat_messages(self, current_user: dict) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         chat_language = self._resolve_chat_language(current_user)
-        items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
+        items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id)
         items = await self._hydrate_chat_message_translations(items)
         messages = [self._to_chat_message_response(item, language=chat_language) for item in items]
         if not messages:
@@ -3503,7 +3503,7 @@ class RestaurantOperationsService(BaseService):
                 "regenerated_from_message_id": str(updated_message["_id"]),
             }
         )
-        items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
+        items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id)
         await self._update_chat_memory(
             current_user=current_user,
             scope_id=scope_id,
@@ -3649,7 +3649,7 @@ class RestaurantOperationsService(BaseService):
                 }
             ),
         )
-        items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id, limit=40)
+        items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id)
         await self._update_chat_memory(
             current_user=current_user,
             scope_id=scope_id,
@@ -5497,7 +5497,7 @@ class RestaurantOperationsService(BaseService):
 
     @staticmethod
     def _format_currency(value: float) -> str:
-        return f"€{value:,.2f}" if value >= 0 else f"-€{abs(value):,.2f}"
+        return f"â‚¬{value:,.2f}" if value >= 0 else f"-â‚¬{abs(value):,.2f}"
 
     @staticmethod
     def _percent_change(previous: float, current: float) -> float:
@@ -5557,9 +5557,9 @@ class RestaurantOperationsService(BaseService):
                     kind="daily_record",
                     title=formatted_business_date,
                     subtitle=(
-                        f"Ricavi €{total_revenue:,.2f} | Coperti {total_covers} | Media €{average_per_cover:,.2f}"
+                        f"Ricavi â‚¬{total_revenue:,.2f} | Coperti {total_covers} | Media â‚¬{average_per_cover:,.2f}"
                         if activity_language == "it"
-                        else f"Revenue €{total_revenue:,.2f} | Covers {total_covers} | Avg €{average_per_cover:,.2f}"
+                        else f"Revenue â‚¬{total_revenue:,.2f} | Covers {total_covers} | Avg â‚¬{average_per_cover:,.2f}"
                     ),
                     timestamp=item["created_at"],
                     entity_id=item["id"],
@@ -6226,7 +6226,7 @@ class RestaurantOperationsService(BaseService):
             value = float(metric.get("value", 0))
             change_percent = float(metric.get("change_percent", 0))
             currency = str(metric.get("currency", "EUR"))
-            currency_symbol = "€" if currency == "EUR" else f"{currency} "
+            currency_symbol = "â‚¬" if currency == "EUR" else f"{currency} "
             if label.lower() == "expenses":
                 related_items.append({"label": f"{label} increase", "value": f"+{currency_symbol}{value:,.0f}", "subtitle": None})
             else:
