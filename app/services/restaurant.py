@@ -3177,9 +3177,15 @@ class RestaurantOperationsService(BaseService):
     async def list_chat_messages(self, current_user: dict) -> ChatConversationResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         chat_language = self._resolve_chat_language(current_user)
+        # Fetch all messages for full history display (no cap).
         items = await self.chat_repository.list_recent_by_scope(scope_id=scope_id)
-        items = await self._hydrate_chat_message_translations(items)
-        messages = [self._to_chat_message_response(item, language=chat_language) for item in items]
+        # Only hydrate translations for the most recent 40 messages to avoid
+        # calling OpenAI on the entire history in one request (Vercel timeout).
+        items_to_hydrate = items[-40:] if len(items) > 40 else items
+        older_items = items[:-40] if len(items) > 40 else []
+        hydrated_recent = await self._hydrate_chat_message_translations(items_to_hydrate)
+        all_items = older_items + hydrated_recent
+        messages = [self._to_chat_message_response(item, language=chat_language) for item in all_items]
         if not messages:
             messages = [
                 ChatMessageResponse(
