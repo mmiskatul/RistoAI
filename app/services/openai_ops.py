@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import base64
@@ -68,15 +68,15 @@ class OpenAIOperationsService:
         )
         if language == "it":
             return (
-                f"Panoramica attuale: ricavi €{revenue:,.2f}, spese €{expenses:,.2f}, "
-                f"profitto stimato €{profit:,.2f}. "
+                f"Panoramica attuale: ricavi â‚¬{revenue:,.2f}, spese â‚¬{expenses:,.2f}, "
+                f"profitto stimato â‚¬{profit:,.2f}. "
                 f"In base alla tua richiesta \"{prompt}\", ti consiglio di controllare la voce di costo piu alta, "
                 f"verificare i giorni con ricavi piu bassi e riconciliare i movimenti di cassa."
                 f"{attachment_note}"
         )
         return (
-            f"Current snapshot: revenue €{revenue:,.2f}, expenses €{expenses:,.2f}, "
-            f"estimated profit €{profit:,.2f}. "
+            f"Current snapshot: revenue â‚¬{revenue:,.2f}, expenses â‚¬{expenses:,.2f}, "
+            f"estimated profit â‚¬{profit:,.2f}. "
             f"Based on your request \"{prompt}\", focus on the highest cost area, review the lowest-revenue days, "
             f"and reconcile cash movements."
             f"{attachment_note}"
@@ -119,11 +119,11 @@ class OpenAIOperationsService:
             if language == "it":
                 return (
                     f"Ho trovato {product_name} nella fattura {invoice_number} da {supplier_name}, "
-                    f"con prezzo unitario €{unit_price:,.2f}. Non ho un range affidabile per questo articolo nel contesto disponibile, "
+                    f"con prezzo unitario â‚¬{unit_price:,.2f}. Non ho un range affidabile per questo articolo nel contesto disponibile, "
                     "ma puoi confrontarlo con gli ultimi acquisti dello stesso prodotto e chiedere al fornitore una quotazione per volume."
                 )
             return (
-                f"I found {product_name} on invoice {invoice_number} from {supplier_name} at €{unit_price:,.2f} per unit. "
+                f"I found {product_name} on invoice {invoice_number} from {supplier_name} at â‚¬{unit_price:,.2f} per unit. "
                 "I do not have a reliable reference range for that exact item in the available context, but compare it against your last purchases "
                 "for the same product and ask the supplier for a volume quote."
             )
@@ -143,15 +143,15 @@ class OpenAIOperationsService:
             action_it = "rinegoziare o chiedere due preventivi concorrenti" if status == "above" else "monitorare qualita, resa e costo porzione"
             return (
                 f"Ho analizzato {product_name} nella fattura {invoice_number} da {supplier_name}: "
-                f"quantita {quantity:g}, prezzo unitario €{unit_price:,.2f}. "
-                f"Il riferimento realistico per {market_range.get('unit', 'unita')} e circa €{low:,.2f}-€{high:,.2f}. "
+                f"quantita {quantity:g}, prezzo unitario â‚¬{unit_price:,.2f}. "
+                f"Il riferimento realistico per {market_range.get('unit', 'unita')} e circa â‚¬{low:,.2f}-â‚¬{high:,.2f}. "
                 f"Questo prezzo e {status_it} il range, con scostamento di circa {variance:+.1f}% dal punto medio. "
                 f"Raccomandazione: {action_it}. Nota: {market_range.get('note', 'range indicativo')}."
             )
         return (
             f"I analyzed {product_name} on invoice {invoice_number} from {supplier_name}: "
-            f"quantity {quantity:g}, unit price €{unit_price:,.2f}. "
-            f"A realistic reference range per {market_range.get('unit', 'unit')} is about €{low:,.2f}-€{high:,.2f}. "
+            f"quantity {quantity:g}, unit price â‚¬{unit_price:,.2f}. "
+            f"A realistic reference range per {market_range.get('unit', 'unit')} is about â‚¬{low:,.2f}-â‚¬{high:,.2f}. "
             f"Your price is {status} that range, about {variance:+.1f}% versus the midpoint. "
             f"Recommendation: {action}. Note: {market_range.get('note', 'indicative range')}."
         )
@@ -634,11 +634,14 @@ class OpenAIOperationsService:
             return self._build_chat_scope_refusal(language=resolved_language)
 
         if not self.enabled:
-            return self._build_chat_fallback_reply(
-                prompt=prompt,
-                language=resolved_language,
-                metrics_context=metrics_context,
-                attachment_context=attachment_context,
+            if resolved_language == "it":
+                return (
+                    "Il servizio AI non e al momento disponibile perche la chiave API non e configurata. "
+                    "Contatta il tuo amministratore per abilitare il servizio AI."
+                )
+            return (
+                "The AI service is currently unavailable because the API key is not configured. "
+                "Please contact your administrator to enable the AI service."
             )
 
         transcript = "\n".join(f"{item['role']}: {item['message']}" for item in recent_messages[-6:])
@@ -704,11 +707,14 @@ class OpenAIOperationsService:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("OpenAI chat generation failed", exc_info=exc)
-            return self._build_chat_fallback_reply(
-                prompt=prompt,
-                language=resolved_language,
-                metrics_context=metrics_context,
-                attachment_context=attachment_context,
+            if resolved_language == "it":
+                return (
+                    "Il servizio AI ha riscontrato un errore temporaneo. "
+                    "Per favore riprova tra qualche istante."
+                )
+            return (
+                "The AI service encountered a temporary error. "
+                "Please try again in a moment."
             )
 
     async def summarize_chat_memory(
