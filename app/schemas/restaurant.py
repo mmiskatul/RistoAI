@@ -687,6 +687,22 @@ class DailyDataListItemResponse(BaseSchema):
     invoice_document_total: float = 0.0
     total_covers: int
     avg_revenue_per_cover: float
+    method: str | None = None
+    profit: float | None = None
+    lunch_covers: int | None = None
+    dinner_covers: int | None = None
+    pos_payments: float | None = None
+    cash_withdrawals: float | None = None
+    cash_in: float | None = None
+    cash_out: float | None = None
+    cash_payments: float | None = None
+    bank_transfer_payments: float | None = None
+    expenses_in_cash: float | None = None
+    opening_cash: float | None = None
+    closing_cash: float | None = None
+    notes: str | None = None
+    inventory_usage: list[DailyDataInventoryUsageEntryResponse] = Field(default_factory=list)
+    method_sections: list[DailyDataSectionResponse] = Field(default_factory=list)
     created_at: str
 
 

@@ -7143,6 +7143,32 @@ class RestaurantOperationsService(BaseService):
             invoice_document_total=float(serialized.get("uploaded_document_total", 0.0) or 0.0),
             total_covers=total_covers,
             avg_revenue_per_cover=float(serialized.get("avg_revenue_per_cover", 0.0) or 0.0),
+            method=str(serialized.get("method") or ""),
+            profit=float(serialized.get("profit", 0.0) or 0.0),
+            lunch_covers=lunch_covers,
+            dinner_covers=dinner_covers,
+            pos_payments=float(serialized.get("pos_payments", 0.0) or 0.0),
+            cash_withdrawals=float(serialized.get("cash_withdrawals", 0.0) or 0.0),
+            cash_in=float(serialized.get("cash_in", 0.0) or 0.0),
+            cash_out=float(serialized.get("cash_out", 0.0) or 0.0),
+            cash_payments=float(serialized.get("cash_payments", 0.0) or 0.0),
+            bank_transfer_payments=float(serialized.get("bank_transfer_payments", 0.0) or 0.0),
+            expenses_in_cash=float(serialized.get("expenses_in_cash", 0.0) or 0.0),
+            opening_cash=float(serialized.get("opening_cash", 0.0) or 0.0),
+            closing_cash=float(serialized.get("closing_cash", 0.0) or 0.0),
+            notes=str(serialized.get("notes") or ""),
+            inventory_usage=[
+                DailyDataInventoryUsageEntryResponse(
+                    inventory_item_id=str(item.get("inventory_item_id") or ""),
+                    product_name=str(item.get("product_name") or ""),
+                    quantity_used=float(item.get("quantity_used", 0.0) or 0.0),
+                    unit_type=str(item.get("unit_type") or ""),
+                    unit_cost=float(item.get("unit_cost", 0.0) or 0.0),
+                    total_cost=float(item.get("total_cost", 0.0) or 0.0),
+                )
+                for item in (serialized.get("inventory_usage") or [])
+            ],
+            method_sections=self._build_daily_data_sections(serialized),
             created_at=str(serialized.get("created_at") or datetime.now(UTC).isoformat()),
         )
 
