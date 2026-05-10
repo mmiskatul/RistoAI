@@ -217,6 +217,8 @@ class DocumentExtractionResponse(BaseSchema):
     counterparty_name: str | None = None
     document_number: str | None = None
     document_date: str | None = None
+    net_total: float = 0
+    vat_total: float = 0
     total_amount: float
     currency: str = "EUR"
     expense_amount: float = 0
@@ -236,6 +238,8 @@ class DocumentConfirmSaveResponse(BaseSchema):
     counterparty_name: str | None = None
     document_number: str | None = None
     document_date: str | None = None
+    net_total: float = 0
+    vat_total: float = 0
     total_amount: float
     currency: str = "EUR"
     expense_amount: float = 0
@@ -325,6 +329,8 @@ class DocumentDetailResponse(BaseSchema):
     document_number: str | None = None
     document_date: str | None = None
     upload_date: str
+    net_total: float = 0
+    vat_total: float = 0
     total_amount: float
     currency: str = "EUR"
     expense_amount: float = 0

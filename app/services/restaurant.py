@@ -158,7 +158,18 @@ logger = logging.getLogger(__name__)
 
 
 class RestaurantOperationsService(BaseService):
-    VAT_RATE = 0.1
+    DEFAULT_REVENUE_VAT_RATE = 0.1
+    DEFAULT_EXPENSE_VAT_RATE = 0.1
+    BUSINESS_TYPE_REVENUE_VAT_RATES = {
+        "restaurant": 0.1,
+        "fine dining": 0.1,
+        "fast food": 0.1,
+        "cafe": 0.1,
+        "café": 0.1,
+        "casual dining": 0.1,
+        "pizzeria": 0.1,
+        "bistro": 0.1,
+    }
     RECOMMENDED_LINE_VAT_RATES = (4.0, 5.0, 10.0, 22.0)
     SUPPORTED_DOCUMENT_TYPES = {"expense", "cash", "revenue", "profit", "unknown"}
     CASH_TRANSACTION_TYPES = {
@@ -239,6 +250,29 @@ class RestaurantOperationsService(BaseService):
     def _build_localized_actions(*, en: list[dict[str, str]], it: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
         return {"en": en, "it": it}
 
+    @classmethod
+    def _normalize_business_type(cls, value: Any) -> str:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return ""
+        return " ".join(raw.replace("_", " ").replace("-", " ").split())
+
+    @classmethod
+    def _resolve_revenue_vat_rate_for_business_type(cls, value: Any) -> float:
+        normalized = cls._normalize_business_type(value)
+        if not normalized:
+            return cls.DEFAULT_REVENUE_VAT_RATE
+
+        exact_match = cls.BUSINESS_TYPE_REVENUE_VAT_RATES.get(normalized)
+        if exact_match is not None:
+            return exact_match
+
+        for business_type_key, vat_rate in cls.BUSINESS_TYPE_REVENUE_VAT_RATES.items():
+            if business_type_key in normalized:
+                return vat_rate
+
+        return cls.DEFAULT_REVENUE_VAT_RATE
+
     @staticmethod
     def _resolve_localized_text(
         translations: Any,
@@ -300,6 +334,14 @@ class RestaurantOperationsService(BaseService):
                     if isinstance(item, dict)
                 ]
         return fallback or []
+
+    async def _resolve_revenue_vat_rate(self, current_user: dict) -> float:
+        business_type = current_user.get("restaurant_type")
+        if not business_type and self.onboarding_repository is not None:
+            onboarding_profile = await self.onboarding_repository.get_by_user_id(str(current_user["_id"]))
+            if onboarding_profile is not None:
+                business_type = self.serialize(onboarding_profile).get("restaurant_type")
+        return self._resolve_revenue_vat_rate_for_business_type(business_type)
 
     def __init__(
         self,
@@ -1336,6 +1378,7 @@ class RestaurantOperationsService(BaseService):
         )
         metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
         home_revenue_total = round(sum(self._resolve_home_revenue_amount(item) for item in filtered_daily_records), 2)
+        revenue_vat_rate = await self._resolve_revenue_vat_rate(current_user)
 
         revenue_points: list[ChartPointResponse] = []
         if include_revenue:
@@ -1350,7 +1393,11 @@ class RestaurantOperationsService(BaseService):
                 filtered_daily_records=filtered_daily_records,
                 filtered_cash_deposits=filtered_cash_deposits,
             ) if include_cash_management else [],
-            vat_balance=self._calculate_vat_balance(home_revenue_total, metrics_context["expenses_total"]),
+            vat_balance=self._calculate_vat_balance(
+                home_revenue_total,
+                metrics_context["expenses_total"],
+                revenue_vat_rate=revenue_vat_rate,
+            ),
             revenue=revenue_points,
             operating_revenue_total=home_revenue_total,
             invoice_document_total=invoice_document_total,
@@ -1414,7 +1461,12 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         daily_records_task = self.record_repository.list_by_scope(scope_id=scope_id, page=1, page_size=120)
         documents_task = self._list_vat_documents(scope_id=scope_id)
-        daily_records_result, documents_result = await asyncio.gather(daily_records_task, documents_task)
+        revenue_vat_rate_task = self._resolve_revenue_vat_rate(current_user)
+        daily_records_result, documents_result, revenue_vat_rate = await asyncio.gather(
+            daily_records_task,
+            documents_task,
+            revenue_vat_rate_task,
+        )
         daily_records, _ = daily_records_result
         documents = documents_result
         serialized_records = self.serialize_list(daily_records)
@@ -1422,8 +1474,16 @@ class RestaurantOperationsService(BaseService):
         revenue_total = sum(float(item.get("total_revenue", 0)) for item in serialized_records)
         expenses_total = sum(float(item.get("total_expenses", 0)) for item in serialized_records)
         document_vat = self._calculate_document_vat_totals(serialized_documents)
-        vat_payable = document_vat["payable"] if document_vat["has_payable"] else round(revenue_total * self.VAT_RATE, 2)
-        vat_receivable = document_vat["receivable"] if document_vat["has_receivable"] else round(expenses_total * self.VAT_RATE, 2)
+        vat_payable = (
+            document_vat["payable"]
+            if document_vat["has_payable"]
+            else round(revenue_total * revenue_vat_rate, 2)
+        )
+        vat_receivable = (
+            document_vat["receivable"]
+            if document_vat["has_receivable"]
+            else round(expenses_total * self.DEFAULT_EXPENSE_VAT_RATE, 2)
+        )
         today = datetime.now(UTC).date()
         filing_deadline = today.replace(day=min(20, max(today.day, 1)))
         return VatOverviewResponse(
@@ -1553,6 +1613,8 @@ class RestaurantOperationsService(BaseService):
             counterparty_name=normalized["counterparty_name"],
             document_number=normalized["invoice_number"],
             document_date=normalized["invoice_date"],
+            net_total=normalized["net_total"],
+            vat_total=normalized["vat_total"],
             total_amount=normalized["total_amount"],
             currency=normalized["currency"],
             expense_amount=normalized["expense_amount"],
@@ -1580,6 +1642,8 @@ class RestaurantOperationsService(BaseService):
                 "invoice_number": normalized["invoice_number"],
                 "invoice_date": resolved_invoice_date.isoformat(),
                 "upload_date": now,
+                "net_total": normalized["net_total"],
+                "vat_total": normalized["vat_total"],
                 "total_amount": normalized["total_amount"],
                 "currency": normalized["currency"],
                 "expense_amount": normalized["expense_amount"],
@@ -5530,8 +5594,17 @@ class RestaurantOperationsService(BaseService):
             return 0.0 if current == 0 else 100.0
         return round(((current - previous) / abs(previous)) * 100, 1)
 
-    def _calculate_vat_balance(self, revenue_total: float, expenses_total: float) -> float:
-        return round((revenue_total - expenses_total) * self.VAT_RATE, 2)
+    def _calculate_vat_balance(
+        self,
+        revenue_total: float,
+        expenses_total: float,
+        *,
+        revenue_vat_rate: float | None = None,
+        expense_vat_rate: float | None = None,
+    ) -> float:
+        resolved_revenue_vat_rate = self.DEFAULT_REVENUE_VAT_RATE if revenue_vat_rate is None else revenue_vat_rate
+        resolved_expense_vat_rate = self.DEFAULT_EXPENSE_VAT_RATE if expense_vat_rate is None else expense_vat_rate
+        return round((revenue_total * resolved_revenue_vat_rate) - (expenses_total * resolved_expense_vat_rate), 2)
 
     def _build_weekly_revenue_chart(self, daily_records: list[dict], *, anchor_date: date | None = None) -> list[ChartPointResponse]:
         today = anchor_date or datetime.now(UTC).date()
@@ -6289,6 +6362,8 @@ class RestaurantOperationsService(BaseService):
             counterparty_name=serialized.get("counterparty_name"),
             document_number=serialized.get("invoice_number"),
             document_date=serialized.get("invoice_date"),
+            net_total=float(serialized.get("net_total", 0.0)),
+            vat_total=float(serialized.get("vat_total", 0.0)),
             total_amount=float(serialized.get("total_amount", 0.0)),
             currency=str(serialized.get("currency", "EUR")),
             expense_amount=float(serialized.get("expense_amount", 0.0)),
@@ -6320,6 +6395,8 @@ class RestaurantOperationsService(BaseService):
             document_number=serialized.get("invoice_number"),
             document_date=invoice_date,
             upload_date=upload_date,
+            net_total=float(serialized.get("net_total", 0.0)),
+            vat_total=float(serialized.get("vat_total", 0.0)),
             total_amount=float(serialized.get("total_amount", 0.0)),
             currency=str(serialized.get("currency", "EUR")),
             expense_amount=float(serialized.get("expense_amount", 0.0)),
@@ -6372,15 +6449,27 @@ class RestaurantOperationsService(BaseService):
             )
         return normalized_items
 
+    def _calculate_invoice_totals(self, line_items: list[dict[str, Any]]) -> dict[str, float]:
+        net_total = round(sum(self._safe_float(item.get("total_price", 0)) for item in line_items), 2)
+        vat_total = round(sum(self._safe_float(item.get("vat_amount", 0)) for item in line_items), 2)
+        total_amount = round(net_total + vat_total, 2)
+        return {
+            "net_total": net_total,
+            "vat_total": vat_total,
+            "total_amount": total_amount,
+        }
+
     def _normalize_document_extraction(self, *, extraction: dict[str, Any], file_name: str) -> dict[str, Any]:
         line_items = self._normalize_document_line_items(extraction.get("line_items") or [])
-        total_amount = extraction.get("total_amount")
-        if total_amount is None:
-            total_amount = round(
-                sum(self._safe_float(item.get("total_price", 0)) + self._safe_float(item.get("vat_amount", 0)) for item in line_items),
-                2,
-            )
-        total_amount = round(self._safe_float(total_amount), 2)
+        invoice_totals = self._calculate_invoice_totals(line_items)
+        total_amount = invoice_totals["total_amount"]
+        if not line_items:
+            total_amount = round(self._safe_float(extraction.get("total_amount")), 2)
+            invoice_totals = {
+                "net_total": total_amount,
+                "vat_total": 0.0,
+                "total_amount": total_amount,
+            }
 
         supplier_name = str(
             extraction.get("supplier_name")
@@ -6422,6 +6511,8 @@ class RestaurantOperationsService(BaseService):
             "supplier_name": supplier_name,
             "invoice_number": extraction.get("invoice_number"),
             "invoice_date": invoice_date,
+            "net_total": invoice_totals["net_total"],
+            "vat_total": invoice_totals["vat_total"],
             "total_amount": total_amount,
             "currency": currency,
             "expense_amount": expense_amount,

@@ -1745,6 +1745,7 @@ def test_restaurant_daily_data_dashboard_analytics_and_chat(client, app):
         for phrase in ("il costo del cibo", "controlla i prezzi", "sprechi")
     )
 
+
     second_daily_response = client.post(
         "/api/v1/restaurant/manual-entry",
         headers=headers,
@@ -2329,5 +2330,118 @@ def test_weekly_revenue_trend_uses_latest_available_business_dates(client, app):
     assert len(analytics_trend_payload["points"]) == 7
     assert sum(item["value"] for item in analytics_trend_payload["points"]) == 1700
     assert any(item["value"] > 0 for item in analytics_trend_payload["points"])
+
+
+def test_vat_overview_applies_revenue_vat_from_restaurant_type(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "VAT Owner",
+            "email": "vat-owner@example.com",
+            "password": "VatOwner123",
+            "phone": "+3900000088",
+        },
+    )
+    select_subscription_plan_only(client, headers)
+    complete_onboarding_profile(
+        client,
+        headers,
+        restaurant_type="Pizzeria",
+    )
+
+    today_iso = datetime.now(UTC).date().isoformat()
+    manual_entry_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "method_two": {
+                "business_date": today_iso,
+                "pos_payments": 600,
+                "cash_payments": 300,
+                "bank_transfer_payments": 100,
+                "lunch_covers": 18,
+                "dinner_covers": 22,
+                "opening_cash": 100,
+                "closing_cash": 260,
+            },
+        },
+    )
+    assert manual_entry_response.status_code == 201
+
+    vat_overview_response = client.get("/api/v1/restaurant/vat/overview", headers=headers)
+    assert vat_overview_response.status_code == 200
+    vat_overview_payload = vat_overview_response.json()
+    assert vat_overview_payload["vat_payable"] == 100.0
+    assert vat_overview_payload["vat_receivable"] == 0.0
+    assert vat_overview_payload["estimated_vat_balance"] == 100.0
+
+    home_vat_balance_response = client.get("/api/v1/restaurant/home/vat-balance", headers=headers)
+    assert home_vat_balance_response.status_code == 200
+    assert home_vat_balance_response.json()["balance"] == 100.0
+
+
+def test_vat_overview_uses_mixed_purchase_invoice_line_rates(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Invoice VAT Owner",
+            "email": "invoice-vat-owner@example.com",
+            "password": "InvoiceVat123",
+            "phone": "+3900000077",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+    confirm_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
+        headers=headers,
+        json={
+            "document_type": "expense",
+            "document_label": "Expense",
+            "counterparty_name": "Fresh Food Supplier Ltd",
+            "supplier_name": "Fresh Food Supplier Ltd",
+            "invoice_number": "INV-MIXED-VAT",
+            "invoice_date": today_iso,
+            "total_amount": 441.0,
+            "currency": "EUR",
+            "expense_amount": 441.0,
+            "cash_amount": 0.0,
+            "revenue_amount": 0.0,
+            "profit_amount": 0.0,
+            "line_items": [
+                {"product_name": "Meat", "quantity": 1, "unit_price": 100.0, "total_price": 100.0, "vat_rate": 10.0, "vat_amount": 10.0},
+                {"product_name": "Water", "quantity": 1, "unit_price": 100.0, "total_price": 100.0, "vat_rate": 22.0, "vat_amount": 22.0},
+                {"product_name": "Flour", "quantity": 1, "unit_price": 100.0, "total_price": 100.0, "vat_rate": 4.0, "vat_amount": 4.0},
+                {"product_name": "Special Product", "quantity": 1, "unit_price": 100.0, "total_price": 100.0, "vat_rate": 5.0, "vat_amount": 5.0},
+            ],
+            "source_file_name": "mixed-vat-invoice.png",
+            "ai_provider": "fallback",
+            "ai_summary": "Mixed VAT invoice",
+        },
+    )
+    assert confirm_response.status_code == 201
+
+    detail_response = client.get(
+        f"/api/v1/restaurant/documents/{confirm_response.json()['id']}",
+        headers=headers,
+    )
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["net_total"] == 400.0
+    assert detail_payload["vat_total"] == 41.0
+    assert detail_payload["total_amount"] == 441.0
+    assert [item["vat_rate"] for item in detail_payload["line_items"]] == [10.0, 22.0, 4.0, 5.0]
+    assert [item["vat_amount"] for item in detail_payload["line_items"]] == [10.0, 22.0, 4.0, 5.0]
+
+    vat_overview_response = client.get("/api/v1/restaurant/vat/overview", headers=headers)
+    assert vat_overview_response.status_code == 200
+    vat_overview_payload = vat_overview_response.json()
+    assert vat_overview_payload["vat_payable"] == 0.0
+    assert vat_overview_payload["vat_receivable"] == 41.0
+    assert vat_overview_payload["estimated_vat_balance"] == -41.0
 
 
