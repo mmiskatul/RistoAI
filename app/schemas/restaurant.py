@@ -1016,6 +1016,8 @@ class RestaurantProfileUpdateRequest(BaseSchema):
     biggest_problem: str | None = Field(default=None, max_length=1000)
     improvement_focus: str | None = Field(default=None, max_length=1000)
     profile_image_url: str | None = None
+    interior_photo_url: str | None = None
+    exterior_photo_url: str | None = None
 
 
 class RestaurantSettingsSubscriptionResponse(BaseSchema):

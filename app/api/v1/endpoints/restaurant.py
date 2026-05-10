@@ -830,7 +830,11 @@ async def update_profile(
     biggest_problem: str | None = Form(default=None, max_length=1000),
     improvement_focus: str | None = Form(default=None, max_length=1000),
     profile_image: UploadFile | None = File(default=None),
+    interior_photo: UploadFile | None = File(default=None),
+    exterior_photo: UploadFile | None = File(default=None),
     profile_image_url: str | None = Form(default=None),
+    interior_photo_url: str | None = Form(default=None),
+    exterior_photo_url: str | None = Form(default=None),
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> RestaurantProfileResponse:
@@ -847,10 +851,18 @@ async def update_profile(
         biggest_problem=biggest_problem,
         improvement_focus=improvement_focus,
         profile_image_url=profile_image_url,
+        interior_photo_url=interior_photo_url,
+        exterior_photo_url=exterior_photo_url,
     )
     return await _run_endpoint(
         'update_profile',
-        lambda: service.update_profile_with_image(current_user, payload, profile_image=profile_image),
+        lambda: service.update_profile_with_image(
+            current_user,
+            payload,
+            profile_image=profile_image,
+            interior_photo=interior_photo,
+            exterior_photo=exterior_photo,
+        ),
     )
 
 

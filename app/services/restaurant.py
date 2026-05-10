@@ -3725,6 +3725,8 @@ class RestaurantOperationsService(BaseService):
         payload: RestaurantProfileUpdateRequest,
         *,
         profile_image: UploadFile | None = None,
+        interior_photo: UploadFile | None = None,
+        exterior_photo: UploadFile | None = None,
     ) -> RestaurantProfileResponse:
         updates = payload.model_dump(exclude_none=True)
         if "city_location" in updates and "location" not in updates:
@@ -3733,11 +3735,30 @@ class RestaurantOperationsService(BaseService):
             updates["city_location"] = updates["location"]
         if "profile_image_url" in updates and "avatar_url" not in updates:
             updates["avatar_url"] = updates["profile_image_url"]
+        onboarding_updates: dict[str, Any] = {}
+        if "interior_photo_url" in updates:
+            onboarding_updates["interior_photo_url"] = updates.pop("interior_photo_url") or None
+        if "exterior_photo_url" in updates:
+            onboarding_updates["exterior_photo_url"] = updates.pop("exterior_photo_url") or None
         if profile_image:
             uploaded_image = await self._upload_profile_image(current_user, profile_image)
             updates["profile_image_url"] = uploaded_image
             updates["avatar_url"] = uploaded_image
+        if interior_photo:
+            onboarding_updates["interior_photo_url"] = await self._upload_onboarding_photo(
+                current_user,
+                interior_photo,
+                field_name="interior_photo",
+            )
+        if exterior_photo:
+            onboarding_updates["exterior_photo_url"] = await self._upload_onboarding_photo(
+                current_user,
+                exterior_photo,
+                field_name="exterior_photo",
+            )
         user = current_user if not updates else await self.user_repository.update(current_user["_id"], updates)
+        if onboarding_updates and self.onboarding_repository is not None:
+            await self.onboarding_repository.upsert_by_user_id(str(current_user["_id"]), onboarding_updates)
         return await self.get_profile(user)
 
     async def remove_profile_image(self, current_user: dict) -> RestaurantProfileResponse:
@@ -7090,6 +7111,15 @@ class RestaurantOperationsService(BaseService):
         uploaded: UploadedImage = await self.image_storage_service.upload_file(
             file=file,
             prefix=f"restaurant/profile/{current_user['_id']}",
+        )
+        return uploaded.url
+
+    async def _upload_onboarding_photo(self, current_user: dict, file: UploadFile, *, field_name: str) -> str:
+        if not self.image_storage_service:
+            raise ValidationException("Image upload service is not configured")
+        uploaded: UploadedImage = await self.image_storage_service.upload_file(
+            file=file,
+            prefix=f"restaurant/{field_name}/{current_user['_id']}",
         )
         return uploaded.url
 

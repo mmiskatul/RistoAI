@@ -2173,8 +2173,13 @@ def test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record(client
             "restaurant_type": "Fine Dining",
             "city_location": "San Francisco",
             "number_of_seats": 120,
+            "interior_photo_url": "",
         },
-        files={"profile_image": ("profile.jpg", b"profile-image-bytes", "image/jpeg")},
+        files={
+            "profile_image": ("profile.jpg", b"profile-image-bytes", "image/jpeg"),
+            "interior_photo": ("interior.jpg", b"interior-image-bytes", "image/jpeg"),
+            "exterior_photo": ("exterior.jpg", b"exterior-image-bytes", "image/jpeg"),
+        },
     )
     assert settings_update_response.status_code == 200
     updated_settings_payload = settings_update_response.json()
@@ -2186,8 +2191,10 @@ def test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record(client
     assert updated_settings_payload["number_of_seats"] == 120
     assert updated_settings_payload["profile_image_url"].startswith("https://")
     assert "/restaurant/profile/" in updated_settings_payload["profile_image_url"]
-
-    assert updated_settings_payload["profile_image_url"].startswith("https://")
+    assert updated_settings_payload["interior_photo_url"].startswith("https://")
+    assert "/restaurant/interior_photo/" in updated_settings_payload["interior_photo_url"]
+    assert updated_settings_payload["exterior_photo_url"].startswith("https://")
+    assert "/restaurant/exterior_photo/" in updated_settings_payload["exterior_photo_url"]
 
     remove_profile_image_response = client.delete("/api/v1/restaurant/settings/profile/image", headers=headers)
     assert remove_profile_image_response.status_code == 200
