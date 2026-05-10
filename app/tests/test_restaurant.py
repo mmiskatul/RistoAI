@@ -2445,3 +2445,219 @@ def test_vat_overview_uses_mixed_purchase_invoice_line_rates(client, app):
     assert vat_overview_payload["estimated_vat_balance"] == -41.0
 
 
+def test_invoice_products_sync_inventory_and_food_cost_memory(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Inventory Sync Owner",
+            "email": "inventory-sync-owner@example.com",
+            "password": "InventorySync123",
+            "phone": "+3900000088",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+
+    revenue_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
+        headers=headers,
+        json={
+            "document_type": "revenue",
+            "document_label": "Revenue",
+            "counterparty_name": "Dining Room Sales",
+            "supplier_name": "Dining Room Sales",
+            "invoice_number": "REV-INV-SYNC-1",
+            "invoice_date": today_iso,
+            "total_amount": 1000.0,
+            "currency": "EUR",
+            "expense_amount": 0.0,
+            "cash_amount": 0.0,
+            "revenue_amount": 1000.0,
+            "profit_amount": 0.0,
+            "line_items": [],
+            "source_file_name": "revenue-sync.pdf",
+            "ai_provider": "fallback",
+            "ai_summary": "Revenue base for food cost coverage",
+        },
+    )
+    assert revenue_response.status_code == 201
+
+    expense_response = client.post(
+        "/api/v1/restaurant/documents/confirm-save",
+        headers=headers,
+        json={
+            "document_type": "expense",
+            "document_label": "Food Ingredients",
+            "counterparty_name": "Metro Supplier",
+            "supplier_name": "Metro Supplier",
+            "invoice_number": "EXP-INV-SYNC-1",
+            "invoice_date": today_iso,
+            "total_amount": 110.0,
+            "currency": "EUR",
+            "expense_amount": 110.0,
+            "cash_amount": 0.0,
+            "revenue_amount": 0.0,
+            "profit_amount": 0.0,
+            "line_items": [
+                {"product_name": "Beef", "quantity": 5, "unit_price": 10.0, "total_price": 50.0, "vat_rate": 10.0, "vat_amount": 5.0},
+                {"product_name": "Water", "quantity": 10, "unit_price": 5.0, "total_price": 50.0, "vat_rate": 10.0, "vat_amount": 5.0},
+            ],
+            "source_file_name": "food-invoice-sync.pdf",
+            "ai_provider": "fallback",
+            "ai_summary": "Food invoice should sync inventory and analytics",
+        },
+    )
+    assert expense_response.status_code == 201
+
+    inventory_response = client.get("/api/v1/restaurant/inventory", headers=headers)
+    assert inventory_response.status_code == 200
+    inventory_payload = inventory_response.json()
+    assert inventory_payload["total"] == 2
+    assert inventory_payload["total_inventory_value"] == 100.0
+    assert {item["product_name"] for item in inventory_payload["items"]} == {"Beef", "Water"}
+    assert {item["category"] for item in inventory_payload["items"]} == {"Food Ingredients"}
+    assert {item["supplier_name"] for item in inventory_payload["items"]} == {"Metro Supplier"}
+
+    inventory_items_by_name = {item["product_name"]: item for item in inventory_payload["items"]}
+    assert inventory_items_by_name["Beef"]["stock_quantity"] == 5.0
+    assert inventory_items_by_name["Beef"]["unit_price"] == 10.0
+    assert inventory_items_by_name["Water"]["stock_quantity"] == 10.0
+    assert inventory_items_by_name["Water"]["unit_price"] == 5.0
+
+    categories_response = client.get("/api/v1/restaurant/inventory/categories", headers=headers)
+    assert categories_response.status_code == 200
+    assert "Food Ingredients" in {item["name"] for item in categories_response.json()["items"]}
+
+    suppliers_response = client.get("/api/v1/restaurant/inventory/suppliers", headers=headers)
+    assert suppliers_response.status_code == 200
+    assert "Metro Supplier" in {item["name"] for item in suppliers_response.json()["items"]}
+
+    analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
+    assert analytics_response.status_code == 200
+    analytics_payload = analytics_response.json()
+    food_cost_item = next(item for item in analytics_payload["cost_breakdown"] if item["label"] == "Food Cost")
+    assert food_cost_item["value"] == 11.0
+
+
+def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Daily Inventory Owner",
+            "email": "daily-inventory-owner@example.com",
+            "password": "DailyInventory123",
+            "phone": "+3900000089",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+
+    add_inventory_response = client.post(
+        "/api/v1/restaurant/inventory/add-item",
+        headers=headers,
+        json={
+            "product_name": "Tomatoes",
+            "category": "Vegetables",
+            "stock_quantity": 10,
+            "unit_type": "kg",
+            "supplier_name": "Farm Supplier",
+            "unit_price": 2.0,
+            "alert_threshold": 1,
+            "purchase_date": today_iso,
+        },
+    )
+    assert add_inventory_response.status_code == 201
+    inventory_id = add_inventory_response.json()["id"]
+
+    create_daily_response = client.post(
+        "/api/v1/restaurant/manual-entry",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "inventory_usage": [
+                {
+                    "inventory_item_id": inventory_id,
+                    "quantity_used": 3,
+                }
+            ],
+            "method_two": {
+                "business_date": today_iso,
+                "pos_payments": 100,
+                "cash_payments": 50,
+                "bank_transfer_payments": 0,
+                "expenses_in_cash": 0,
+                "lunch_covers": 5,
+                "dinner_covers": 5,
+                "opening_cash": 20,
+                "closing_cash": 70,
+            },
+        },
+    )
+    assert create_daily_response.status_code == 201
+    record_id = create_daily_response.json()["id"]
+    assert create_daily_response.json()["total_expenses"] == 6.0
+
+    inventory_after_create = client.get("/api/v1/restaurant/inventory", headers=headers)
+    assert inventory_after_create.status_code == 200
+    inventory_after_create_payload = inventory_after_create.json()
+    assert inventory_after_create_payload["items"][0]["stock_quantity"] == 7.0
+    assert inventory_after_create_payload["usage_summary"]["total_quantity_used"] == 3.0
+    assert inventory_after_create_payload["usage_summary"]["total_usage_cost"] == 6.0
+
+    home_metrics_after_create = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
+    assert home_metrics_after_create.status_code == 200
+    food_cost_metric_after_create = next(item for item in home_metrics_after_create.json()["items"] if item["label"] == "Food Cost")
+    assert food_cost_metric_after_create["value"] == 6.0
+
+    analytics_after_create = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
+    assert analytics_after_create.status_code == 200
+    food_cost_breakdown_after_create = next(item for item in analytics_after_create.json()["cost_breakdown"] if item["label"] == "Food Cost")
+    assert food_cost_breakdown_after_create["value"] == 4.0
+
+    update_daily_response = client.patch(
+        f"/api/v1/restaurant/manual-entry/{record_id}",
+        headers=headers,
+        json={
+            "method": "method_2",
+            "inventory_usage": [
+                {
+                    "inventory_item_id": inventory_id,
+                    "quantity_used": 1,
+                }
+            ],
+            "method_two": {
+                "business_date": today_iso,
+                "pos_payments": 100,
+                "cash_payments": 50,
+                "bank_transfer_payments": 0,
+                "expenses_in_cash": 0,
+                "lunch_covers": 5,
+                "dinner_covers": 5,
+                "opening_cash": 20,
+                "closing_cash": 70,
+            },
+        },
+    )
+    assert update_daily_response.status_code == 200
+    assert update_daily_response.json()["total_expenses"] == 2.0
+
+    inventory_after_update = client.get("/api/v1/restaurant/inventory", headers=headers)
+    assert inventory_after_update.status_code == 200
+    inventory_after_update_payload = inventory_after_update.json()
+    assert inventory_after_update_payload["items"][0]["stock_quantity"] == 9.0
+    assert inventory_after_update_payload["usage_summary"]["total_quantity_used"] == 1.0
+    assert inventory_after_update_payload["usage_summary"]["total_usage_cost"] == 2.0
+
+    delete_daily_response = client.delete(f"/api/v1/restaurant/daily-data/{record_id}", headers=headers)
+    assert delete_daily_response.status_code == 204
+
+    inventory_after_delete = client.get("/api/v1/restaurant/inventory", headers=headers)
+    assert inventory_after_delete.status_code == 200
+    inventory_after_delete_payload = inventory_after_delete.json()
+    assert inventory_after_delete_payload["items"][0]["stock_quantity"] == 10.0
+    assert inventory_after_delete_payload["usage_summary"]["total_quantity_used"] == 0.0
+    assert inventory_after_delete_payload["usage_summary"]["total_usage_cost"] == 0.0
