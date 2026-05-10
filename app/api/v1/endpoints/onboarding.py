@@ -14,12 +14,12 @@ from app.services.onboarding import OnboardingService
 router = APIRouter()
 
 
-def _clean_optional_url(value: str | None) -> str | None:
+def _clean_optional_image_reference(value: str | None) -> str | None:
     if value is None:
         return None
 
     value = value.strip()
-    if not value.lower().startswith(("http://", "https://")):
+    if not value.lower().startswith(("http://", "https://", "data:image/")):
         return None
 
     return value
@@ -69,9 +69,9 @@ async def save_onboarding_profile(
         main_business_goal=main_business_goal,
         biggest_problem=biggest_problem,
         improvement_focus=improvement_focus,
-        profile_image_url=_clean_optional_url(profile_image_url),
-        interior_photo_url=_clean_optional_url(interior_photo_url),
-        exterior_photo_url=_clean_optional_url(exterior_photo_url),
+        profile_image_url=_clean_optional_image_reference(profile_image_url),
+        interior_photo_url=_clean_optional_image_reference(interior_photo_url),
+        exterior_photo_url=_clean_optional_image_reference(exterior_photo_url),
     )
 
     return await service.save_profile_with_uploads(

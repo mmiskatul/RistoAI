@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import AnyHttpUrl, Field, field_validator
+from pydantic import Field, field_validator
 
 from app.schemas.common import BaseSchema, MongoReadSchema
 
@@ -11,9 +11,9 @@ class OnboardingProfileUpsertRequest(BaseSchema):
     city_location: str = Field(min_length=1, max_length=120)
     number_of_seats: int = Field(ge=1, le=10000)
     average_spend_per_customer: float = Field(ge=0, le=100000)
-    profile_image_url: AnyHttpUrl | None = None
-    interior_photo_url: AnyHttpUrl | None = None
-    exterior_photo_url: AnyHttpUrl | None = None
+    profile_image_url: str | None = None
+    interior_photo_url: str | None = None
+    exterior_photo_url: str | None = None
     main_business_goal: str = Field(min_length=1, max_length=120)
     biggest_problem: str = Field(min_length=1, max_length=1000)
     improvement_focus: str = Field(min_length=1, max_length=1000)
@@ -22,6 +22,18 @@ class OnboardingProfileUpsertRequest(BaseSchema):
     @classmethod
     def normalize_short_text(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("profile_image_url", "interior_photo_url", "exterior_photo_url")
+    @classmethod
+    def validate_image_reference(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if normalized.lower().startswith(("http://", "https://", "data:image/")):
+            return normalized
+        raise ValueError("Image URL must start with http://, https://, or data:image/")
 
 
 class OnboardingProfileResponse(MongoReadSchema):

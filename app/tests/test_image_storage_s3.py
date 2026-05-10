@@ -41,6 +41,56 @@ def test_build_image_storage_service_uses_dummy_service_in_tests():
     assert isinstance(service, DummyImageStorageService)
 
 
+def test_service_falls_back_to_inline_data_url_when_s3_not_configured():
+    service = build_image_storage_service(_build_settings())
+
+    class UploadFileStub:
+        filename = "avatar.png"
+        content_type = "image/png"
+
+        async def read(self):
+            return b"fake-image-bytes"
+
+    uploaded = __import__("asyncio").run(
+        service.upload_file(file=UploadFileStub(), prefix="uploads/user-123")
+    )
+
+    assert uploaded.key.startswith("inline/uploads/user-123/")
+    assert uploaded.url.startswith("data:image/png;base64,")
+
+
+def test_service_falls_back_to_inline_data_url_when_s3_upload_fails(monkeypatch):
+    service = ImageStorageService(
+        _build_settings(
+            AWS_ACCESS_KEY_ID="access-key",
+            AWS_SECRET_ACCESS_KEY="secret-key",
+            AWS_S3_BUCKET="ristoai-assets",
+            AWS_REGION="eu-central-1",
+        )
+    )
+
+    def raise_upload_failure(**_: object):
+        from app.core.exceptions import ValidationException
+
+        raise ValidationException("Image upload failed", {"provider": "aws_s3", "reason": "network timeout"})
+
+    monkeypatch.setattr(service, "_upload_sync", raise_upload_failure)
+
+    class UploadFileStub:
+        filename = "avatar.png"
+        content_type = "image/png"
+
+        async def read(self):
+            return b"fake-image-bytes"
+
+    uploaded = __import__("asyncio").run(
+        service.upload_file(file=UploadFileStub(), prefix="uploads/user-123")
+    )
+
+    assert uploaded.key.startswith("inline/uploads/user-123/")
+    assert uploaded.url.startswith("data:image/png;base64,")
+
+
 def test_s3_service_upload_and_status_use_bucket_urls(monkeypatch):
     service = ImageStorageService(
         _build_settings(

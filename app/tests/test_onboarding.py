@@ -162,6 +162,34 @@ def test_onboarding_ignores_invalid_image_urls(client, app, owner_credentials) -
     assert body['exterior_photo_url'] is None
 
 
+def test_onboarding_accepts_inline_data_image_urls(client, app, owner_credentials) -> None:
+    seed_subscription_plan(app)
+    headers = register_and_login(client, owner_credentials)
+    select_subscription_plan(client, headers)
+    inline_image = "data:image/png;base64,ZmFrZS1pbWFnZS1ieXRlcw=="
+    payload = {
+        'restaurant_name': 'The Italian Bistro',
+        'restaurant_type': 'Fine Dining',
+        'city_location': 'New York, NY',
+        'number_of_seats': 45,
+        'average_spend_per_customer': 25.0,
+        'main_business_goal': 'Increase revenue',
+        'biggest_problem': 'We struggle with slow weekday traffic and inconsistent table turnover.',
+        'improvement_focus': 'Improve staff scheduling and reduce wasted inventory.',
+        'profile_image_url': inline_image,
+        'interior_photo_url': inline_image,
+        'exterior_photo_url': inline_image,
+    }
+
+    response = client.post('/api/v1/onboarding/profile', headers=headers, data=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['profile_image_url'] == inline_image
+    assert body['interior_photo_url'] == inline_image
+    assert body['exterior_photo_url'] == inline_image
+
+
 def test_onboarding_ignores_blank_image_urls(client, app, owner_credentials) -> None:
     seed_subscription_plan(app)
     headers = register_and_login(client, owner_credentials)

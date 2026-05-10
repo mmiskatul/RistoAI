@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from mimetypes import guess_extension, guess_type
@@ -50,6 +52,7 @@ RETRYABLE_UPLOAD_ERROR_MESSAGES = (
     "503",
     "504",
 )
+INLINE_IMAGE_PREFIX = "inline"
 
 
 @dataclass(slots=True)
@@ -68,6 +71,16 @@ class UploadedImageStatus:
 class ImageStorageService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+
+    def _is_s3_configured(self) -> bool:
+        return all(
+            (
+                self.settings.aws_access_key_id,
+                self.settings.aws_secret_access_key,
+                self.settings.aws_s3_bucket,
+                self.settings.aws_region,
+            )
+        )
 
     def _validate_config(self) -> None:
         missing = [
@@ -116,10 +129,32 @@ class ImageStorageService:
         normalized_key = key.lstrip("/")
         return f"https://{bucket}.s3.{region}.amazonaws.com/{normalized_key}"
 
+    @staticmethod
+    def _is_inline_url(value: str | None) -> bool:
+        return str(value or "").startswith("data:image/")
+
+    @staticmethod
+    def _build_inline_key(*, prefix: str, extension: str, file_bytes: bytes) -> str:
+        safe_prefix = prefix.strip("/").replace(" ", "-")
+        digest = hashlib.sha256(file_bytes).hexdigest()[:16]
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        return f"{INLINE_IMAGE_PREFIX}/{safe_prefix}/{timestamp}-{digest}{extension or '.jpg'}"
+
+    @staticmethod
+    def _build_inline_data_url(*, content_type: str, file_bytes: bytes) -> str:
+        encoded = base64.b64encode(file_bytes).decode("ascii")
+        normalized_content_type = content_type if content_type.startswith("image/") else "image/jpeg"
+        return f"data:{normalized_content_type};base64,{encoded}"
+
+    @classmethod
+    def _build_inline_lookup_key(cls, url: str) -> str:
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+        return f"{INLINE_IMAGE_PREFIX}/url/{digest}"
+
     def resolve_public_url(self, value: str | None) -> str | None:
         if not value:
             return value
-        if value.startswith("http://") or value.startswith("https://"):
+        if value.startswith("http://") or value.startswith("https://") or self._is_inline_url(value):
             return value
         return self._build_public_url(value)
 
@@ -138,6 +173,9 @@ class ImageStorageService:
             normalized_url = str(url or "").strip()
             if not normalized_url:
                 raise ValidationException("Either key or url is required")
+            if self._is_inline_url(normalized_url):
+                normalized_key = self._build_inline_lookup_key(normalized_url)
+                return normalized_key, normalized_url
             normalized_key = self._extract_key_from_url(normalized_url)
         normalized_url = str(self.resolve_public_url(url or normalized_key) or "").strip()
         return normalized_key, normalized_url
@@ -208,15 +246,33 @@ class ImageStorageService:
         file_bytes = await file.read()
         if not file_bytes:
             raise ValidationException("Uploaded image is empty")
-        return await run_in_threadpool(
-            self._upload_sync,
-            content_type=content_type,
-            extension=extension,
-            file_bytes=file_bytes,
-            prefix=prefix,
-        )
+        if not self._is_s3_configured():
+            inline_key = self._build_inline_key(prefix=prefix, extension=extension, file_bytes=file_bytes)
+            return UploadedImage(
+                url=self._build_inline_data_url(content_type=content_type, file_bytes=file_bytes),
+                key=inline_key,
+            )
+        try:
+            return await run_in_threadpool(
+                self._upload_sync,
+                content_type=content_type,
+                extension=extension,
+                file_bytes=file_bytes,
+                prefix=prefix,
+            )
+        except ValidationException as exc:
+            reason = str((exc.details or {}).get("reason") or "").strip().lower()
+            if exc.message != "Image upload failed" or not reason:
+                raise
+            inline_key = self._build_inline_key(prefix=prefix, extension=extension, file_bytes=file_bytes)
+            return UploadedImage(
+                url=self._build_inline_data_url(content_type=content_type, file_bytes=file_bytes),
+                key=inline_key,
+            )
 
     def _get_upload_status_sync(self, *, key: str, url: str) -> UploadedImageStatus:
+        if key.startswith(f"{INLINE_IMAGE_PREFIX}/") or self._is_inline_url(url):
+            return UploadedImageStatus(exists=True, key=key, url=url)
         self._validate_config()
         s3_client = self._create_client()
         try:
