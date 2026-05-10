@@ -5774,7 +5774,23 @@ class RestaurantOperationsService(BaseService):
             expense_date = self._safe_parse_date(item.get("expense_date"))
             reference_date = expense_date.isoformat() if expense_date else ""
             source_kind = str(item.get("source_kind") or "").lower()
+            source_entity_id = item["id"]
+            activity_source_kind = "expense"
             expense_route = f"/(tabs)/home/expense-details?id={item['id']}"
+            if source_kind == "document" and item.get("source_id"):
+                activity_source_kind = "invoice"
+                source_entity_id = str(item.get("source_id"))
+                expense_route = f"/(tabs)/documents/{source_entity_id}"
+            elif source_kind == "manual_entry" and item.get("source_id"):
+                activity_source_kind = "daily_record"
+                source_entity_id = str(item.get("source_id"))
+                expense_route = f"/(tabs)/home/daily-record-details?dataId={source_entity_id}"
+            elif source_kind == "inventory":
+                inventory_source_id = str(item.get("source_inventory_item_id") or "")
+                if inventory_source_id:
+                    activity_source_kind = "inventory"
+                    source_entity_id = inventory_source_id
+                    expense_route = f"/(tabs)/inventory/{inventory_source_id}"
             expense_title = (
                 {
                     "manual_entry": "Spesa dati giornalieri",
@@ -5797,8 +5813,8 @@ class RestaurantOperationsService(BaseService):
                     timestamp=item["created_at"],
                     entity_id=item["id"],
                     reference_date=reference_date,
-                    source_kind="expense",
-                    source_entity_id=item["id"],
+                    source_kind=activity_source_kind,
+                    source_entity_id=source_entity_id,
                     route=expense_route,
                 )
             )
