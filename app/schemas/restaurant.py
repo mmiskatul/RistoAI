@@ -614,6 +614,15 @@ class DailyDataSectionResponse(BaseSchema):
     fields: list[DailyDataSectionFieldResponse] = Field(default_factory=list)
 
 
+class DailyDataInventoryUsageEntryResponse(BaseSchema):
+    inventory_item_id: str
+    product_name: str = ""
+    quantity_used: float = 0.0
+    unit_type: str = ""
+    unit_cost: float = 0.0
+    total_cost: float = 0.0
+
+
 class DailyDataResponse(BaseSchema):
     id: str
     business_date: str
@@ -628,6 +637,17 @@ class DailyDataResponse(BaseSchema):
     dinner_covers: int
     total_covers: int
     avg_revenue_per_cover: float
+    pos_payments: float = 0.0
+    cash_withdrawals: float = 0.0
+    cash_in: float = 0.0
+    cash_out: float = 0.0
+    cash_payments: float = 0.0
+    bank_transfer_payments: float = 0.0
+    expenses_in_cash: float = 0.0
+    opening_cash: float = 0.0
+    closing_cash: float = 0.0
+    notes: str = ""
+    inventory_usage: list[DailyDataInventoryUsageEntryResponse] = Field(default_factory=list)
     revenue_breakdown: list[DailyDataRevenueBreakdownItemResponse] = Field(default_factory=list)
     covers_summary: DailyDataCoversSummaryResponse = Field(default_factory=DailyDataCoversSummaryResponse)
     register_summary: DailyDataRegisterSummaryResponse = Field(default_factory=DailyDataRegisterSummaryResponse)
