@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.config.settings import get_settings
 from app.core.enums import CouponStatus, SubscriptionPlan, SubscriptionStatus
 from app.core.exceptions import ConflictException, ValidationException
 from app.repositories.coupon import CouponRepository
@@ -68,15 +70,18 @@ class SubscriptionService(BaseService):
         self.stripe_billing_service = stripe_billing_service
 
     async def get_overview(self, query: SubscriptionOverviewQuery) -> SubscriptionOverviewResponse:
-        users, total = await self.user_repository.get_filtered_subscription_users(
-            search=query.search,
-            subscription_status=query.status,
-            billing_cycle=query.billing_cycle,
-            page=query.page,
-            page_size=query.page_size,
+        (users_result, all_subscription_users, plan_map) = await asyncio.gather(
+            self.user_repository.get_filtered_subscription_users(
+                search=query.search,
+                subscription_status=query.status,
+                billing_cycle=query.billing_cycle,
+                page=query.page,
+                page_size=query.page_size,
+            ),
+            self.user_repository.get_users_with_subscription_data(),
+            self._get_plan_map(),
         )
-        all_subscription_users = await self.user_repository.get_users_with_subscription_data()
-        plan_map = await self._get_plan_map()
+        users, total = users_result
         pagination = build_pagination_meta(total=total, page=query.page, page_size=query.page_size)
 
         active_users = [user for user in all_subscription_users if user.get('subscription_status') == SubscriptionStatus.ACTIVE]
@@ -535,10 +540,27 @@ class SubscriptionService(BaseService):
 
     async def _get_plan_map(self) -> dict[str, dict]:
         plans = await self.subscription_plan_repository.get_active_plans()
-        return {plan['name']: plan for plan in plans}
+        plan_map = {plan['name']: plan for plan in plans}
+        if plan_map:
+            return plan_map
+
+        settings = get_settings()
+        return {
+            settings.subscription_plan_name: {
+                'name': settings.subscription_plan_name,
+                'monthly_price': settings.subscription_plan_monthly_price,
+                'annual_price': settings.subscription_plan_annual_price,
+                'trial_days': settings.subscription_plan_trial_days,
+                'is_active': True,
+                'is_visible': settings.subscription_plan_is_visible,
+                'is_best_plan': settings.subscription_plan_is_best,
+            }
+        }
 
     def _monthly_revenue_value(self, user: dict, plan_map: dict[str, dict]) -> float:
         plan = plan_map.get(user.get('subscription_plan_name'))
+        if not plan and len(plan_map) == 1:
+            plan = next(iter(plan_map.values()))
         if not plan:
             return 0.0
         if user.get('subscription_plan') == SubscriptionPlan.ONE_YEAR:
@@ -547,6 +569,8 @@ class SubscriptionService(BaseService):
 
     def _annual_revenue_value(self, user: dict, plan_map: dict[str, dict]) -> float:
         plan = plan_map.get(user.get('subscription_plan_name'))
+        if not plan and len(plan_map) == 1:
+            plan = next(iter(plan_map.values()))
         if not plan:
             return 0.0
         if user.get('subscription_plan') == SubscriptionPlan.ONE_YEAR:
@@ -587,6 +611,8 @@ class SubscriptionService(BaseService):
 
     def _charge_value(self, user: dict, plan_map: dict[str, dict]) -> float:
         plan = plan_map.get(user.get('subscription_plan_name'))
+        if not plan and len(plan_map) == 1:
+            plan = next(iter(plan_map.values()))
         if not plan:
             return 0.0
         if user.get('subscription_plan') == SubscriptionPlan.ONE_YEAR:

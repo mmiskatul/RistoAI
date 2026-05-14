@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from bson import ObjectId
@@ -87,16 +88,21 @@ class SupportService(BaseService):
         return SupportTicketActionResponse(message='Support ticket created successfully', ticket=self._to_ticket_detail(ticket))
 
     async def get_management_page(self, query: SupportTicketQuery) -> SupportTicketManagementResponse:
-        tickets, total = await self.support_ticket_repository.get_filtered_tickets(
-            search=query.search,
-            status=query.status,
-            page=query.page,
-            page_size=query.page_size,
+        (ticket_result, open_tickets, resolved_tickets) = await asyncio.gather(
+            self.support_ticket_repository.get_filtered_tickets(
+                search=query.search,
+                status=query.status,
+                page=query.page,
+                page_size=query.page_size,
+            ),
+            self.support_ticket_repository.count_by_status(SupportTicketStatus.OPEN),
+            self.support_ticket_repository.count_by_status(SupportTicketStatus.RESOLVED),
         )
+        tickets, total = ticket_result
         pagination = build_pagination_meta(total=total, page=query.page, page_size=query.page_size)
         summary = SupportTicketSummaryResponse(
-            open_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.OPEN),
-            resolved_tickets=await self.support_ticket_repository.count_by_status(SupportTicketStatus.RESOLVED),
+            open_tickets=open_tickets,
+            resolved_tickets=resolved_tickets,
         )
         return SupportTicketManagementResponse(
             summary=summary,

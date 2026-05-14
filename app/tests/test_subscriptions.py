@@ -211,7 +211,7 @@ def test_subscription_overview_returns_page_data():
     assert payload['summary'] == {
         'active_subscriptions': 1,
         'trial_users': 1,
-        'monthly_revenue_mrr': 24.17,
+        'monthly_revenue_mrr': 25.0,
         'annual_revenue': 300.0,
     }
     assert payload['total'] == 3

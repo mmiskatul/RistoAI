@@ -54,7 +54,6 @@ async def login_restaurant(
     payload: LoginRequest,
     service: AuthService = Depends(get_auth_service),
 ) -> AuthResponse:
-    print(f"Attempting restaurant login with payload: {payload}")
     return await service.login_restaurant(payload)
 
 

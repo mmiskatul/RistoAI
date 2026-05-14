@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, time
 from typing import Any
 
@@ -27,9 +28,12 @@ class ScopedRepository(BaseRepository[dict]):
             filters.update(extra_filters)
         return filters
 
+    async def get_optional_scoped_by_id(self, document_id: str, scope_id: str) -> dict[str, Any] | None:
+        return await self.get_one(self.scope_filters(scope_id, {"_id": self.to_object_id(document_id)}))
+
     async def get_scoped_by_id(self, document_id: str, scope_id: str) -> dict[str, Any]:
-        document = await self.get_optional_by_id(document_id)
-        if not document or document.get(self.scope_field) != scope_id:
+        document = await self.get_optional_scoped_by_id(document_id, scope_id)
+        if not document:
             raise NotFoundException(f"{self.collection_name.rstrip('s').replace('_', ' ').title()} not found")
         return document
 
@@ -50,7 +54,7 @@ class RestaurantDocumentRepository(ScopedRepository):
         if status:
             filters["status"] = status
         if search:
-            regex = {"$regex": search.strip(), "$options": "i"}
+            regex = {"$regex": re.escape(search.strip()), "$options": "i"}
             filters["$or"] = [
                 {"supplier_name": regex},
                 {"invoice_number": regex},
@@ -407,7 +411,7 @@ class RestaurantInventoryRepository(ScopedRepository):
     ) -> tuple[list[dict[str, Any]], int]:
         filters = self.scope_filters(scope_id)
         if search:
-            regex = {"$regex": search.strip(), "$options": "i"}
+            regex = {"$regex": re.escape(search.strip()), "$options": "i"}
             filters["$or"] = [
                 {"product_name": regex},
                 {"supplier_name": regex},
@@ -452,8 +456,8 @@ class RestaurantChatRepository(ScopedRepository):
         return await cursor.to_list(length=None)
 
     async def get_by_scope_and_id(self, *, scope_id: str, message_id: str) -> dict[str, Any]:
-        document = await self.get_optional_by_id(message_id)
-        if not document or document.get("tenant_id") != scope_id:
+        document = await self.get_optional_scoped_by_id(message_id, scope_id)
+        if not document:
             raise NotFoundException("Chat message not found")
         return document
 
@@ -490,8 +494,8 @@ class RestaurantInsightRepository(ScopedRepository):
         return await cursor.to_list(length=limit)
 
     async def get_by_scope_and_id(self, *, scope_id: str, insight_id: str) -> dict[str, Any]:
-        document = await self.get_optional_by_id(insight_id)
-        if not document or document.get("tenant_id") != scope_id:
+        document = await self.get_optional_scoped_by_id(insight_id, scope_id)
+        if not document:
             raise NotFoundException("Insight not found")
         return document
 

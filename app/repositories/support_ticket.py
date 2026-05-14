@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.core.exceptions import NotFoundException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -28,7 +30,7 @@ class SupportTicketRepository(BaseRepository[dict]):
         if status is not None:
             filters.append({"status": status})
         if search:
-            search_filter = {"$regex": search.strip(), "$options": "i"}
+            search_filter = {"$regex": re.escape(search.strip()), "$options": "i"}
             filters.append(
                 {
                     "$or": [
@@ -53,7 +55,7 @@ class SupportTicketRepository(BaseRepository[dict]):
         if status is not None:
             and_filters.append({"status": status})
         if search:
-            search_filter = {"$regex": search.strip(), "$options": "i"}
+            search_filter = {"$regex": re.escape(search.strip()), "$options": "i"}
             and_filters.append(
                 {
                     "$or": [

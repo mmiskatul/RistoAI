@@ -7,11 +7,10 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from html import escape
 from typing import Any
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 
 from bson import ObjectId
 from fastapi import UploadFile
+import httpx
 
 from app.core.security import password_manager
 from app.core.exceptions import ConflictException, ValidationException
@@ -5946,27 +5945,26 @@ class RestaurantOperationsService(BaseService):
                 }
                 for device in devices
             ]
-            await asyncio.to_thread(self._post_expo_push_messages, messages)
+            await self._post_expo_push_messages(messages)
         except Exception as exc:
             logger.warning("Push notification delivery failed: %s", exc)
 
     @staticmethod
-    def _post_expo_push_messages(messages: list[dict[str, Any]]) -> None:
+    async def _post_expo_push_messages(messages: list[dict[str, Any]]) -> None:
         if not messages:
             return
-        request = urllib_request.Request(
-            "https://exp.host/--/api/v2/push/send",
-            data=json.dumps(messages).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
         try:
-            with urllib_request.urlopen(request, timeout=10) as response:
-                response.read()
-        except urllib_error.URLError as exc:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    "https://exp.host/--/api/v2/push/send",
+                    json=messages,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
             raise RuntimeError(f"Expo push request failed: {exc}") from exc
 
     async def _send_activity_push_for_daily_record(self, current_user: dict, item: dict[str, Any]) -> None:

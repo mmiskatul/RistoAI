@@ -9,6 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from pymongo.errors import PyMongoError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1.router import api_router
@@ -170,6 +171,11 @@ def create_fastapi_app(*, testing: bool = False) -> FastAPI:
             {'errors': _make_json_safe(exc.errors())},
         )
 
+    @app.exception_handler(PyMongoError)
+    async def mongo_exception_handler(_: Request, exc: PyMongoError) -> JSONResponse:
+        logger.exception('Database operation failed', exc_info=exc)
+        return _error_response(503, 'database_error', 'Database operation failed')
+
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(_: Request, exc: Exception) -> JSONResponse:
         logger.exception('Unhandled server error', exc_info=exc)
@@ -185,8 +191,13 @@ def create_fastapi_app(*, testing: bool = False) -> FastAPI:
         }
 
     @app.get('/health', tags=['Health'])
-    async def healthcheck() -> dict[str, str]:
-        return {'status': 'ok', 'service': settings.app_name}
+    async def healthcheck() -> dict[str, Any]:
+        database_connected = True if settings.testing else await MongoDB.ping(settings)
+        return {
+            'status': 'ok' if database_connected else 'degraded',
+            'service': settings.app_name,
+            'database': 'connected' if database_connected else 'unavailable',
+        }
 
     @app.get('/preview/landing', response_class=HTMLResponse, include_in_schema=False)
     async def landing_preview() -> HTMLResponse:

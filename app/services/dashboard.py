@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.config.settings import get_settings
 from app.core.enums import SubscriptionPlan, SubscriptionStatus, UserRole
 from app.repositories.auth_code import AuthCodeRepository
 from app.repositories.onboarding_profile import OnboardingProfileRepository
@@ -63,10 +65,12 @@ class DashboardService(BaseService):
         self.inventory_repository = inventory_repository
 
     async def get_user_metrics(self) -> DashboardUserMetricsResponse:
-        role_counts = await self.user_repository.get_role_counts()
-        total_users = await self.user_repository.count()
-        active_users = await self.user_repository.count({"is_active": True})
-        verified_users = await self.user_repository.count({"email_verified": True})
+        role_counts, total_users, active_users, verified_users = await asyncio.gather(
+            self.user_repository.get_role_counts(),
+            self.user_repository.count(),
+            self.user_repository.count({"is_active": True}),
+            self.user_repository.count({"email_verified": True}),
+        )
 
         return DashboardUserMetricsResponse(
             total_users=total_users,
@@ -79,8 +83,10 @@ class DashboardService(BaseService):
         )
 
     async def get_analytics(self, *, range_key: str = "30d") -> DashboardAnalyticsResponse:
-        users = await self.user_repository.get_users_with_subscription_data()
-        plan_map = await self._get_plan_map()
+        users, plan_map = await asyncio.gather(
+            self.user_repository.get_users_with_subscription_data(),
+            self._get_plan_map(),
+        )
         now = datetime.now(UTC)
         current_range_start = self._range_start(now, range_key)
         previous_range_start = self._range_start(current_range_start - timedelta(seconds=1), range_key)
@@ -153,16 +159,29 @@ class DashboardService(BaseService):
     async def get_overview(self, current_user: dict, year: int | None = None) -> DashboardOverviewResponse:
         selected_year = year or datetime.now(UTC).year
         del current_user
-        role_counts = await self.user_repository.get_role_counts()
-        total_users = await self.user_repository.count()
-        active_users = await self.user_repository.count({"is_active": True})
-        verified_users = await self.user_repository.count({"email_verified": True})
-        completed_onboarding = await self.onboarding_repository.count_completed()
-        pending_verifications = await self.auth_code_repository.count_pending(purpose="restaurant_registration")
-        monthly_new_users = await self.user_repository.get_monthly_registrations(selected_year)
-        monthly_completed_onboarding = await self.onboarding_repository.get_monthly_completed_counts(selected_year)
-        subscription_users = await self.user_repository.get_users_with_subscription_data()
-        plan_map = await self._get_plan_map()
+        (
+            role_counts,
+            total_users,
+            active_users,
+            verified_users,
+            completed_onboarding,
+            pending_verifications,
+            monthly_new_users,
+            monthly_completed_onboarding,
+            subscription_users,
+            plan_map,
+        ) = await asyncio.gather(
+            self.user_repository.get_role_counts(),
+            self.user_repository.count(),
+            self.user_repository.count({"is_active": True}),
+            self.user_repository.count({"email_verified": True}),
+            self.onboarding_repository.count_completed(),
+            self.auth_code_repository.count_pending(purpose="restaurant_registration"),
+            self.user_repository.get_monthly_registrations(selected_year),
+            self.onboarding_repository.get_monthly_completed_counts(selected_year),
+            self.user_repository.get_users_with_subscription_data(),
+            self._get_plan_map(),
+        )
 
         active_subscriptions = sum(1 for user in subscription_users if user.get("subscription_status") == SubscriptionStatus.ACTIVE)
         trial_users = sum(1 for user in subscription_users if user.get("subscription_status") == SubscriptionStatus.TRIAL)
@@ -194,14 +213,19 @@ class DashboardService(BaseService):
             subscription_breakdown=self._build_subscription_breakdown(active_subscriptions, trial_users),
         )
         restaurant_lookup = await self.user_repository.get_restaurant_lookup()
+        recent_daily_data, recent_cash_deposits, recent_inventory_items = await asyncio.gather(
+            self._get_recent_daily_data_rows(restaurant_lookup),
+            self._get_recent_cash_rows(restaurant_lookup),
+            self._get_recent_inventory_rows(restaurant_lookup),
+        )
 
         return DashboardOverviewResponse(
             summary=summary,
             charts=charts,
             meta=DashboardMetaResponse(year=selected_year),
-            recent_daily_data=await self._get_recent_daily_data_rows(restaurant_lookup),
-            recent_cash_deposits=await self._get_recent_cash_rows(restaurant_lookup),
-            recent_inventory_items=await self._get_recent_inventory_rows(restaurant_lookup),
+            recent_daily_data=recent_daily_data,
+            recent_cash_deposits=recent_cash_deposits,
+            recent_inventory_items=recent_inventory_items,
         )
 
     async def _get_recent_daily_data_rows(self, restaurant_lookup: dict[str, str]) -> list[DashboardDailyDataRowResponse]:
@@ -575,11 +599,28 @@ class DashboardService(BaseService):
 
     async def _get_plan_map(self) -> dict[str, dict]:
         plans = await self.subscription_plan_repository.get_active_plans()
-        return {str(plan["name"]): plan for plan in plans}
+        plan_map = {str(plan["name"]): plan for plan in plans}
+        if plan_map:
+            return plan_map
+
+        settings = get_settings()
+        return {
+            settings.subscription_plan_name: {
+                "name": settings.subscription_plan_name,
+                "monthly_price": settings.subscription_plan_monthly_price,
+                "annual_price": settings.subscription_plan_annual_price,
+                "trial_days": settings.subscription_plan_trial_days,
+                "is_active": True,
+                "is_visible": settings.subscription_plan_is_visible,
+                "is_best_plan": settings.subscription_plan_is_best,
+            }
+        }
 
     @staticmethod
     def _monthly_revenue_value(user: dict, plan_map: dict[str, dict]) -> float:
         plan = plan_map.get(user.get("subscription_plan_name"))
+        if not plan and len(plan_map) == 1:
+            plan = next(iter(plan_map.values()))
         if plan:
             if user.get("subscription_plan") == SubscriptionPlan.ONE_YEAR:
                 return round(float(plan["annual_price"]) / 12, 2)
@@ -596,6 +637,8 @@ class DashboardService(BaseService):
     @staticmethod
     def _charge_value(user: dict, plan_map: dict[str, dict]) -> float:
         plan = plan_map.get(user.get("subscription_plan_name"))
+        if not plan and len(plan_map) == 1:
+            plan = next(iter(plan_map.values()))
         if plan:
             if user.get("subscription_plan") == SubscriptionPlan.ONE_YEAR:
                 return round(float(plan["annual_price"]), 2)

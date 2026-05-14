@@ -20,7 +20,7 @@ class OnboardingProfileRepository(BaseRepository[dict]):
     async def get_by_user_ids(self, user_ids: list[str]) -> list[dict]:
         if not user_ids:
             return []
-        return await self.collection.find({"user_id": {"$in": user_ids}}).to_list(length=None)
+        return await self.collection.find({"user_id": {"$in": user_ids}}).to_list(length=len(user_ids))
 
     async def upsert_by_user_id(self, user_id: str, payload: dict) -> dict:
         now = utc_now()

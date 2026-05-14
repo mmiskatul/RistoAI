@@ -29,6 +29,10 @@ class Settings(BaseSettings):
 
     mongodb_uri: str = Field(default="mongodb://localhost:27017", alias="MONGODB_URI")
     database_name: str = Field(default="ristoai", alias="DATABASE_NAME")
+    mongodb_min_pool_size: int = Field(default=1, alias="MONGODB_MIN_POOL_SIZE")
+    mongodb_max_pool_size: int = Field(default=50, alias="MONGODB_MAX_POOL_SIZE")
+    mongodb_connect_timeout_ms: int = Field(default=10_000, alias="MONGODB_CONNECT_TIMEOUT_MS")
+    mongodb_server_selection_timeout_ms: int = Field(default=10_000, alias="MONGODB_SERVER_SELECTION_TIMEOUT_MS")
 
     jwt_secret: str = Field(default="change-me", alias="JWT_SECRET")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
@@ -90,6 +94,7 @@ class Settings(BaseSettings):
     stripe_checkout_success_url: str = Field(default="aldo://subscription/success", alias="STRIPE_CHECKOUT_SUCCESS_URL")
     stripe_checkout_cancel_url: str = Field(default="aldo://subscription/cancel", alias="STRIPE_CHECKOUT_CANCEL_URL")
     stripe_customer_portal_return_url: str = Field(default="aldo://subscription/manage", alias="STRIPE_CUSTOMER_PORTAL_RETURN_URL")
+    slow_request_threshold_ms: float = Field(default=1_000.0, alias="SLOW_REQUEST_THRESHOLD_MS")
 
     @computed_field
     @property
@@ -108,6 +113,20 @@ class Settings(BaseSettings):
             raise ValueError("SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must both be set together")
         if self.subscription_plan_trial_days < 0 or self.subscription_plan_trial_days > 365:
             raise ValueError("SUBSCRIPTION_PLAN_TRIAL_DAYS must be between 0 and 365")
+        if self.mongodb_min_pool_size < 0:
+            raise ValueError("MONGODB_MIN_POOL_SIZE cannot be negative")
+        if self.mongodb_max_pool_size < 1:
+            raise ValueError("MONGODB_MAX_POOL_SIZE must be at least 1")
+        if self.mongodb_min_pool_size > self.mongodb_max_pool_size:
+            raise ValueError("MONGODB_MIN_POOL_SIZE cannot exceed MONGODB_MAX_POOL_SIZE")
+        return self
+
+    @model_validator(mode="after")
+    def normalize_cors_origins(self) -> "Settings":
+        if isinstance(self.cors_origins, str):
+            self.cors_origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        if not self.cors_origins:
+            self.cors_origins = ["*"]
         return self
 
     @classmethod

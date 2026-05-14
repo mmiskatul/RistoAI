@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 from app.core.enums import AccountStatus, SubscriptionPlan, SubscriptionStatus
@@ -35,21 +36,28 @@ class UserManagementService(BaseService):
         self.auth_code_repository = auth_code_repository
 
     async def get_management_page(self, query: UserManagementQuery) -> UserManagementListResponse:
-        users, total = await self.user_repository.get_filtered_users(
-            search=query.search,
-            role=query.role,
-            is_active=query.is_active,
-            subscription_status=query.subscription_status,
-            page=query.page,
-            page_size=query.page_size,
+        (users_result, total_users, active_users, suspended_users, trial_users) = await asyncio.gather(
+            self.user_repository.get_filtered_users(
+                search=query.search,
+                role=query.role,
+                is_active=query.is_active,
+                subscription_status=query.subscription_status,
+                page=query.page,
+                page_size=query.page_size,
+            ),
+            self.user_repository.count(),
+            self.user_repository.count({"is_active": True}),
+            self.user_repository.count({"is_active": False}),
+            self.user_repository.count({"subscription_status": SubscriptionStatus.TRIAL}),
         )
+        users, total = users_result
         items = [self._to_item(user) for user in users]
         pagination = build_pagination_meta(total=total, page=query.page, page_size=query.page_size)
         summary = UserManagementSummaryResponse(
-            total_users=await self.user_repository.count(),
-            active_users=await self.user_repository.count({"is_active": True}),
-            suspended_users=await self.user_repository.count({"is_active": False}),
-            trial_users=await self.user_repository.count({"subscription_status": SubscriptionStatus.TRIAL}),
+            total_users=total_users,
+            active_users=active_users,
+            suspended_users=suspended_users,
+            trial_users=trial_users,
         )
 
         return UserManagementListResponse(

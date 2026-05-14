@@ -38,9 +38,20 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         response.headers["X-Request-ID"] = request_id
+        response.headers["X-Process-Time-MS"] = str(duration_ms)
         if settings.request_logs_enabled:
             logger.info(
                 "request_id=%s client=%s %s %s -> %s in %sms",
+                request_id,
+                client_host,
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration_ms,
+            )
+        if duration_ms >= settings.slow_request_threshold_ms:
+            logger.warning(
+                "Slow request detected request_id=%s client=%s %s %s -> %s in %sms",
                 request_id,
                 client_host,
                 request.method,

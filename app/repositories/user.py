@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,6 +13,16 @@ from app.repositories.base import BaseRepository
 
 class UserRepository(BaseRepository[dict]):
     collection_name = CoreCollections.USERS
+    SUBSCRIPTION_ANALYTICS_PROJECTION = {
+        "_id": 1,
+        "created_at": 1,
+        "subscription_status": 1,
+        "subscription_plan_name": 1,
+        "subscription_plan": 1,
+        "subscription_started_at": 1,
+        "subscription_expires_at": 1,
+        "stripe_subscription_id": 1,
+    }
 
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db)
@@ -83,7 +94,10 @@ class UserRepository(BaseRepository[dict]):
         return await self.get_multi(filters=filters, page=page, page_size=page_size)
 
     async def get_users_with_subscription_data(self) -> list[dict]:
-        return await self.collection.find({"subscription_status": {"$ne": None}}).to_list(length=None)
+        return await self.collection.find(
+            {"subscription_status": {"$ne": None}},
+            self.SUBSCRIPTION_ANALYTICS_PROJECTION,
+        ).to_list(length=10_000)
 
     async def get_restaurant_lookup(self) -> dict[str, str]:
         rows = await self.collection.find(
@@ -124,7 +138,7 @@ class UserRepository(BaseRepository[dict]):
         if subscription_status is not None:
             and_filters.append({"subscription_status": subscription_status})
         if search:
-            escaped_search = {"$regex": search.strip(), "$options": "i"}
+            escaped_search = {"$regex": re.escape(search.strip()), "$options": "i"}
             and_filters.append(
                 {
                     "$or": [
