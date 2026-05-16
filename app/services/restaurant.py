@@ -3832,6 +3832,7 @@ class RestaurantOperationsService(BaseService):
         profile_image: UploadFile | None = None,
         interior_photo: UploadFile | None = None,
         exterior_photo: UploadFile | None = None,
+        remove_profile_image: bool = False,
         remove_interior_photo: bool = False,
         remove_exterior_photo: bool = False,
     ) -> RestaurantProfileResponse:
@@ -3844,6 +3845,9 @@ class RestaurantOperationsService(BaseService):
         if "profile_image_url" in updates and "avatar_url" not in updates:
             updates["avatar_url"] = updates["profile_image_url"]
         if "profile_image_url" in explicitly_set_fields and "profile_image_url" not in updates:
+            updates["profile_image_url"] = None
+            updates["avatar_url"] = None
+        if remove_profile_image:
             updates["profile_image_url"] = None
             updates["avatar_url"] = None
         onboarding_updates: dict[str, Any] = {}

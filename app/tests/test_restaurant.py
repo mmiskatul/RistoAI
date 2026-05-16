@@ -2217,6 +2217,18 @@ def test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record(client
     removed_profile_payload = remove_profile_image_response.json()
     assert removed_profile_payload["profile_image_url"] is None
 
+    remove_profile_image_via_update_response = client.put(
+        "/api/v1/restaurant/settings/profile",
+        headers=headers,
+        data={
+            "remove_profile_image": "true",
+            "profile_image_url": "",
+        },
+    )
+    assert remove_profile_image_via_update_response.status_code == 200
+    removed_profile_via_update_payload = remove_profile_image_via_update_response.json()
+    assert removed_profile_via_update_payload["profile_image_url"] is None
+
     subscription_settings_response = client.get("/api/v1/restaurant/settings/subscription", headers=headers)
     assert subscription_settings_response.status_code == 200
     subscription_settings_payload = subscription_settings_response.json()
