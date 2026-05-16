@@ -835,6 +835,8 @@ async def update_profile(
     profile_image_url: str | None = Form(default=None),
     interior_photo_url: str | None = Form(default=None),
     exterior_photo_url: str | None = Form(default=None),
+    remove_interior_photo: bool = Form(default=False),
+    remove_exterior_photo: bool = Form(default=False),
     current_user: dict = Depends(get_current_user),
     service: RestaurantOperationsService = Depends(get_restaurant_operations_service),
 ) -> RestaurantProfileResponse:
@@ -862,6 +864,8 @@ async def update_profile(
             profile_image=profile_image,
             interior_photo=interior_photo,
             exterior_photo=exterior_photo,
+            remove_interior_photo=remove_interior_photo,
+            remove_exterior_photo=remove_exterior_photo,
         ),
     )
 

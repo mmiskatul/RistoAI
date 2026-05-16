@@ -2201,6 +2201,8 @@ def test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record(client
         "/api/v1/restaurant/settings/profile",
         headers=headers,
         data={
+            "remove_interior_photo": "true",
+            "remove_exterior_photo": "true",
             "interior_photo_url": "",
             "exterior_photo_url": "",
         },

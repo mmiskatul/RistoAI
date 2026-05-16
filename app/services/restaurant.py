@@ -3832,6 +3832,8 @@ class RestaurantOperationsService(BaseService):
         profile_image: UploadFile | None = None,
         interior_photo: UploadFile | None = None,
         exterior_photo: UploadFile | None = None,
+        remove_interior_photo: bool = False,
+        remove_exterior_photo: bool = False,
     ) -> RestaurantProfileResponse:
         updates = payload.model_dump(exclude_none=True)
         explicitly_set_fields = set(payload.model_fields_set)
@@ -3849,9 +3851,13 @@ class RestaurantOperationsService(BaseService):
             onboarding_updates["interior_photo_url"] = updates.pop("interior_photo_url") or None
         elif "interior_photo_url" in explicitly_set_fields:
             onboarding_updates["interior_photo_url"] = None
+        if remove_interior_photo:
+            onboarding_updates["interior_photo_url"] = None
         if "exterior_photo_url" in updates:
             onboarding_updates["exterior_photo_url"] = updates.pop("exterior_photo_url") or None
         elif "exterior_photo_url" in explicitly_set_fields:
+            onboarding_updates["exterior_photo_url"] = None
+        if remove_exterior_photo:
             onboarding_updates["exterior_photo_url"] = None
         if profile_image:
             uploaded_image = await self._upload_profile_image(current_user, profile_image)
