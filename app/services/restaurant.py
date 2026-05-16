@@ -3834,17 +3834,25 @@ class RestaurantOperationsService(BaseService):
         exterior_photo: UploadFile | None = None,
     ) -> RestaurantProfileResponse:
         updates = payload.model_dump(exclude_none=True)
+        explicitly_set_fields = set(payload.model_fields_set)
         if "city_location" in updates and "location" not in updates:
             updates["location"] = updates["city_location"]
         if "location" in updates and "city_location" not in updates:
             updates["city_location"] = updates["location"]
         if "profile_image_url" in updates and "avatar_url" not in updates:
             updates["avatar_url"] = updates["profile_image_url"]
+        if "profile_image_url" in explicitly_set_fields and "profile_image_url" not in updates:
+            updates["profile_image_url"] = None
+            updates["avatar_url"] = None
         onboarding_updates: dict[str, Any] = {}
         if "interior_photo_url" in updates:
             onboarding_updates["interior_photo_url"] = updates.pop("interior_photo_url") or None
+        elif "interior_photo_url" in explicitly_set_fields:
+            onboarding_updates["interior_photo_url"] = None
         if "exterior_photo_url" in updates:
             onboarding_updates["exterior_photo_url"] = updates.pop("exterior_photo_url") or None
+        elif "exterior_photo_url" in explicitly_set_fields:
+            onboarding_updates["exterior_photo_url"] = None
         if profile_image:
             uploaded_image = await self._upload_profile_image(current_user, profile_image)
             updates["profile_image_url"] = uploaded_image

@@ -2197,6 +2197,19 @@ def test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record(client
     assert updated_settings_payload["exterior_photo_url"].startswith("https://")
     assert "/restaurant/exterior_photo/" in updated_settings_payload["exterior_photo_url"]
 
+    clear_restaurant_photos_response = client.put(
+        "/api/v1/restaurant/settings/profile",
+        headers=headers,
+        data={
+            "interior_photo_url": "",
+            "exterior_photo_url": "",
+        },
+    )
+    assert clear_restaurant_photos_response.status_code == 200
+    cleared_restaurant_photos_payload = clear_restaurant_photos_response.json()
+    assert cleared_restaurant_photos_payload["interior_photo_url"] is None
+    assert cleared_restaurant_photos_payload["exterior_photo_url"] is None
+
     remove_profile_image_response = client.delete("/api/v1/restaurant/settings/profile/image", headers=headers)
     assert remove_profile_image_response.status_code == 200
     removed_profile_payload = remove_profile_image_response.json()
