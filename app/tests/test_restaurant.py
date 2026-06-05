@@ -2528,8 +2528,8 @@ def test_invoice_products_sync_inventory_and_food_cost_memory(client, app):
             "revenue_amount": 0.0,
             "profit_amount": 0.0,
             "line_items": [
-                {"product_name": "Beef", "quantity": 5, "unit_price": 10.0, "total_price": 50.0, "vat_rate": 10.0, "vat_amount": 5.0},
-                {"product_name": "Water", "quantity": 10, "unit_price": 5.0, "total_price": 50.0, "vat_rate": 10.0, "vat_amount": 5.0},
+                {"product_name": "Beef", "category": "Meat", "quantity": 5, "unit_price": 10.0, "total_price": 50.0, "vat_rate": 10.0, "vat_amount": 5.0},
+                {"product_name": "Water", "category": "Drinks", "quantity": 10, "unit_price": 5.0, "total_price": 50.0, "vat_rate": 10.0, "vat_amount": 5.0},
             ],
             "source_file_name": "food-invoice-sync.pdf",
             "ai_provider": "fallback",
@@ -2537,6 +2537,7 @@ def test_invoice_products_sync_inventory_and_food_cost_memory(client, app):
         },
     )
     assert expense_response.status_code == 201
+    expense_document_id = expense_response.json()["id"]
 
     inventory_response = client.get("/api/v1/restaurant/inventory", headers=headers)
     assert inventory_response.status_code == 200
@@ -2544,7 +2545,7 @@ def test_invoice_products_sync_inventory_and_food_cost_memory(client, app):
     assert inventory_payload["total"] == 2
     assert inventory_payload["total_inventory_value"] == 100.0
     assert {item["product_name"] for item in inventory_payload["items"]} == {"Beef", "Water"}
-    assert {item["category"] for item in inventory_payload["items"]} == {"Food Ingredients"}
+    assert {item["category"] for item in inventory_payload["items"]} == {"Meat", "Drinks"}
     assert {item["supplier_name"] for item in inventory_payload["items"]} == {"Metro Supplier"}
 
     inventory_items_by_name = {item["product_name"]: item for item in inventory_payload["items"]}
@@ -2555,11 +2556,37 @@ def test_invoice_products_sync_inventory_and_food_cost_memory(client, app):
 
     categories_response = client.get("/api/v1/restaurant/inventory/categories", headers=headers)
     assert categories_response.status_code == 200
-    assert "Food Ingredients" in {item["name"] for item in categories_response.json()["items"]}
+    assert {"Meat", "Drinks"} <= {item["name"] for item in categories_response.json()["items"]}
 
     suppliers_response = client.get("/api/v1/restaurant/inventory/suppliers", headers=headers)
     assert suppliers_response.status_code == 200
     assert "Metro Supplier" in {item["name"] for item in suppliers_response.json()["items"]}
+
+    update_document_response = client.patch(
+        f"/api/v1/restaurant/documents/{expense_document_id}",
+        headers=headers,
+        json={
+            "supplier_name": "Fresh Market",
+            "invoice_number": "EXP-INV-SYNC-1",
+            "invoice_date": today_iso,
+            "total_amount": 110.0,
+            "line_items": [
+                {"product_name": "Beef", "category": "Fish", "unit_type": "unit", "quantity": 5, "unit_price": 10.0, "total_price": 50.0, "vat_rate": 10.0, "vat_amount": 5.0},
+                {"product_name": "Water", "category": "Drinks", "unit_type": "unit", "quantity": 10, "unit_price": 5.0, "total_price": 50.0, "vat_rate": 10.0, "vat_amount": 5.0},
+            ],
+        },
+    )
+    assert update_document_response.status_code == 200
+
+    updated_inventory_response = client.get("/api/v1/restaurant/inventory", headers=headers)
+    assert updated_inventory_response.status_code == 200
+    updated_inventory_payload = updated_inventory_response.json()
+    assert {item["supplier_name"] for item in updated_inventory_payload["items"]} == {"Fresh Market"}
+    assert {item["category"] for item in updated_inventory_payload["items"]} == {"Fish", "Drinks"}
+
+    updated_categories_response = client.get("/api/v1/restaurant/inventory/categories", headers=headers)
+    assert updated_categories_response.status_code == 200
+    assert {"Fish", "Drinks"} <= {item["name"] for item in updated_categories_response.json()["items"]}
 
     analytics_response = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_response.status_code == 200
@@ -2626,7 +2653,7 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
     )
     assert create_daily_response.status_code == 201
     record_id = create_daily_response.json()["id"]
-    assert create_daily_response.json()["total_expenses"] == 6.0
+    assert create_daily_response.json()["total_expenses"] == 0.0
 
     inventory_after_create = client.get("/api/v1/restaurant/inventory", headers=headers)
     assert inventory_after_create.status_code == 200
@@ -2638,12 +2665,12 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
     home_metrics_after_create = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
     assert home_metrics_after_create.status_code == 200
     food_cost_metric_after_create = next(item for item in home_metrics_after_create.json()["items"] if item["label"] == "Food Cost")
-    assert food_cost_metric_after_create["value"] == 6.0
+    assert food_cost_metric_after_create["value"] == 0.0
 
     analytics_after_create = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_after_create.status_code == 200
     food_cost_breakdown_after_create = next(item for item in analytics_after_create.json()["cost_breakdown"] if item["label"] == "Food Cost")
-    assert food_cost_breakdown_after_create["value"] == 4.0
+    assert food_cost_breakdown_after_create["value"] == 0.0
 
     update_daily_response = client.patch(
         f"/api/v1/restaurant/manual-entry/{record_id}",
@@ -2670,7 +2697,7 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
         },
     )
     assert update_daily_response.status_code == 200
-    assert update_daily_response.json()["total_expenses"] == 2.0
+    assert update_daily_response.json()["total_expenses"] == 0.0
 
     inventory_after_update = client.get("/api/v1/restaurant/inventory", headers=headers)
     assert inventory_after_update.status_code == 200

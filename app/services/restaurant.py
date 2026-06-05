@@ -719,21 +719,21 @@ class RestaurantOperationsService(BaseService):
             or document.get("supplier_name")
             or ""
         ).strip() or None
-        category = str(document.get("document_label") or "Invoice Items").strip() or "Invoice Items"
         purchase_date = self._safe_parse_date(document.get("invoice_date")) or datetime.now(UTC).date()
         active_line_indexes: set[int] = set()
 
-        await self._upsert_inventory_category(current_user=current_user, name=category)
         await self._upsert_inventory_supplier(current_user=current_user, name=supplier_name)
 
         for index, raw_item in enumerate(line_items):
             product_name = str(raw_item.get("product_name") or "").strip()
+            category = str(raw_item.get("category") or "").strip() or "Uncategorized"
             stock_quantity = self._safe_float(raw_item.get("quantity"))
             unit_price = self._safe_float(raw_item.get("unit_price"))
             if not product_name or stock_quantity <= 0:
                 continue
 
             active_line_indexes.add(index)
+            await self._upsert_inventory_category(current_user=current_user, name=category)
             existing = existing_by_line.get(index)
             history = list(existing.get("history", [])) if existing else []
             if existing is None:
@@ -2222,14 +2222,13 @@ class RestaurantOperationsService(BaseService):
             scope_id=scope_id,
             usage=payload.inventory_usage,
         )
-        inventory_usage_cost = round(sum(float(item.get("total_cost", 0) or 0) for item in inventory_usage_entries), 2)
         if payload.method == "method_1":
             if payload.method_one is None:
                 raise ValidationException("method_one is required when method is method_1")
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
             total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
-            total_expenses = round(data["expenses_in_cash"] + inventory_usage_cost, 2)
+            total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
             closing_cash = data["closing_cash"] if data["closing_cash"] > 0 else max(data["cash_in"] - data["cash_out"], 0)
@@ -2245,7 +2244,7 @@ class RestaurantOperationsService(BaseService):
             data = payload.method_two.model_dump(mode="json")
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
-            total_expenses = round(data["expenses_in_cash"] + inventory_usage_cost, 2)
+            total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
@@ -2309,14 +2308,13 @@ class RestaurantOperationsService(BaseService):
             scope_id=scope_id,
             usage=payload.inventory_usage,
         )
-        inventory_usage_cost = round(sum(float(item.get("total_cost", 0) or 0) for item in inventory_usage_entries), 2)
         if payload.method == "method_1":
             if payload.method_one is None:
                 raise ValidationException("method_one is required when method is method_1")
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
             total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
-            total_expenses = round(data["expenses_in_cash"] + inventory_usage_cost, 2)
+            total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
             closing_cash = data["closing_cash"] if data["closing_cash"] > 0 else max(data["cash_in"] - data["cash_out"], 0)
@@ -2332,7 +2330,7 @@ class RestaurantOperationsService(BaseService):
             data = payload.method_two.model_dump(mode="json")
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
-            total_expenses = round(data["expenses_in_cash"] + inventory_usage_cost, 2)
+            total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = data["lunch_covers"]
             dinner_covers = data["dinner_covers"]
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
@@ -3202,20 +3200,12 @@ class RestaurantOperationsService(BaseService):
                 covers_activity_lunch = int(latest_cover_record.get("lunch_covers", 0) or 0)
                 covers_activity_dinner = int(latest_cover_record.get("dinner_covers", 0) or 0)
         analytics_language = self._resolve_chat_language(current_user)
-        inventory_usage_food_cost = round(
-            sum(
-                float(usage.get("total_cost", 0) or 0)
-                for record in serialized_records
-                for usage in (record.get("inventory_usage") or [])
-            ),
-            2,
-        )
         food_cost_total = round(
             sum(
                 float(item.get("amount", 0))
                 for item in serialized_expenses
-                if "food" in str(item.get("category", "")).lower() or "inventory" in str(item.get("category", "")).lower()
-            ) + inventory_usage_food_cost,
+                if self._is_food_cost_expense(item)
+            ),
             2,
         )
         staff_cost_total = round(sum(float(item.get("amount", 0)) for item in serialized_expenses if "staff" in str(item.get("category", "")).lower()), 2)
@@ -4095,17 +4085,8 @@ class RestaurantOperationsService(BaseService):
         serialized_expenses = self.serialize_list(expenses)
         revenue_total = round(sum(item["total_revenue"] for item in serialized_records), 2)
         expenses_total = round(sum(float(item.get("total_expenses", 0)) for item in serialized_records), 2)
-        inventory_usage_food_cost = round(
-            sum(
-                float(usage.get("total_cost", 0) or 0)
-                for record in serialized_records
-                for usage in (record.get("inventory_usage") or [])
-            ),
-            2,
-        )
         food_cost_total = round(
-            sum(item["amount"] for item in serialized_expenses if "food" in item["category"].lower() or "inventory" in item["category"].lower())
-            + inventory_usage_food_cost,
+            sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if self._is_food_cost_expense(item)),
             2,
         )
         profit_total = round(sum(float(item.get("profit", 0)) for item in serialized_records), 2)
@@ -4113,21 +4094,17 @@ class RestaurantOperationsService(BaseService):
         recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
         recent_food_cost = (
-            sum(item["amount"] for item in serialized_expenses if item["expense_date"][:10] >= last_7_start.isoformat() and ("food" in item["category"].lower() or "inventory" in item["category"].lower()))
-            + sum(
-                float(usage.get("total_cost", 0) or 0)
-                for record in serialized_records
-                if record["business_date"] >= last_7_start.isoformat()
-                for usage in (record.get("inventory_usage") or [])
+            sum(
+                float(item.get("amount", 0) or 0)
+                for item in serialized_expenses
+                if item["expense_date"][:10] >= last_7_start.isoformat() and self._is_food_cost_expense(item)
             )
         )
         previous_food_cost = (
-            sum(item["amount"] for item in serialized_expenses if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and ("food" in item["category"].lower() or "inventory" in item["category"].lower()))
-            + sum(
-                float(usage.get("total_cost", 0) or 0)
-                for record in serialized_records
-                if prev_7_start.isoformat() <= record["business_date"] <= prev_7_end.isoformat()
-                for usage in (record.get("inventory_usage") or [])
+            sum(
+                float(item.get("amount", 0) or 0)
+                for item in serialized_expenses
+                if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and self._is_food_cost_expense(item)
             )
         )
         recent_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
@@ -6248,6 +6225,13 @@ class RestaurantOperationsService(BaseService):
             return "low_stock"
         return "in_stock"
 
+    def _is_food_cost_expense(self, item: dict[str, Any]) -> bool:
+        source_kind = str(item.get("source_kind") or "").strip().lower()
+        if source_kind in {"document", "inventory"}:
+            return True
+        category = str(item.get("category") or "").strip().lower()
+        return "food" in category or "inventory" in category
+
     def _build_document_updates(self, *, current_user: dict, payload: DocumentConfirmRequest, mark_processed: bool) -> dict[str, Any]:
         updates = payload.model_dump(exclude_none=True)
         if "invoice_date" in updates and updates["invoice_date"] is not None:
@@ -6549,6 +6533,8 @@ class RestaurantOperationsService(BaseService):
             normalized_items.append(
                 {
                     "product_name": str(item.get("product_name") or "").strip() or "Line item",
+                    "category": str(item.get("category") or "").strip() or None,
+                    "unit_type": str(item.get("unit_type") or "").strip() or "unit",
                     "quantity": quantity,
                     "unit_price": round(unit_price, 2),
                     "total_price": total_price,

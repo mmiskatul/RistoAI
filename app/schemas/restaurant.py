@@ -198,6 +198,8 @@ class InsightDetailResponse(BaseSchema):
 
 class DocumentLineItemSchema(BaseSchema):
     product_name: str
+    category: str | None = None
+    unit_type: str | None = None
     quantity: float = Field(ge=0)
     unit_price: float = Field(ge=0)
     total_price: float = Field(ge=0)
