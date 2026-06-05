@@ -2632,7 +2632,7 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
         headers=headers,
         json={
             "method": "method_2",
-            "inventory_usage": [
+            "stock_usage": [
                 {
                     "inventory_item_id": inventory_id,
                     "quantity_used": 3,
@@ -2654,6 +2654,8 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
     assert create_daily_response.status_code == 201
     record_id = create_daily_response.json()["id"]
     assert create_daily_response.json()["total_expenses"] == 0.0
+    assert create_daily_response.json()["stock_usage"][0]["inventory_item_id"] == inventory_id
+    assert create_daily_response.json()["inventory_usage"][0]["inventory_item_id"] == inventory_id
 
     inventory_after_create = client.get("/api/v1/restaurant/inventory", headers=headers)
     assert inventory_after_create.status_code == 200
@@ -2677,7 +2679,7 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
         headers=headers,
         json={
             "method": "method_2",
-            "inventory_usage": [
+            "stock_usage": [
                 {
                     "inventory_item_id": inventory_id,
                     "quantity_used": 1,

@@ -561,6 +561,18 @@ class DailyDataCreateRequest(BaseSchema):
     method_one: DailyDataMethodOneRequest | None = None
     method_two: DailyDataMethodTwoRequest | None = None
     inventory_usage: list[DailyDataInventoryUsageRequest] = Field(default_factory=list)
+    stock_usage: list[DailyDataInventoryUsageRequest] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def sync_stock_usage_fields(self) -> "DailyDataCreateRequest":
+        if not self.stock_usage and self.inventory_usage:
+            self.stock_usage = list(self.inventory_usage)
+        if not self.inventory_usage and self.stock_usage:
+            self.inventory_usage = list(self.stock_usage)
+        return self
+
+    def resolved_stock_usage(self) -> list["DailyDataInventoryUsageRequest"]:
+        return self.stock_usage or self.inventory_usage
 
 
 
@@ -649,6 +661,7 @@ class DailyDataResponse(BaseSchema):
     opening_cash: float = 0.0
     closing_cash: float = 0.0
     notes: str = ""
+    stock_usage: list[DailyDataInventoryUsageEntryResponse] = Field(default_factory=list)
     inventory_usage: list[DailyDataInventoryUsageEntryResponse] = Field(default_factory=list)
     revenue_breakdown: list[DailyDataRevenueBreakdownItemResponse] = Field(default_factory=list)
     covers_summary: DailyDataCoversSummaryResponse = Field(default_factory=DailyDataCoversSummaryResponse)
@@ -703,6 +716,7 @@ class DailyDataListItemResponse(BaseSchema):
     opening_cash: float | None = None
     closing_cash: float | None = None
     notes: str | None = None
+    stock_usage: list[DailyDataInventoryUsageEntryResponse] = Field(default_factory=list)
     inventory_usage: list[DailyDataInventoryUsageEntryResponse] = Field(default_factory=list)
     method_sections: list[DailyDataSectionResponse] = Field(default_factory=list)
     created_at: str

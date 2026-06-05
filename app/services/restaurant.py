@@ -2218,9 +2218,10 @@ class RestaurantOperationsService(BaseService):
 
     async def create_daily_data(self, current_user: dict, payload: DailyDataCreateRequest) -> DailyDataResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
+        resolved_stock_usage = payload.resolved_stock_usage()
         inventory_usage_entries = await self._build_daily_inventory_usage_entries(
             scope_id=scope_id,
-            usage=payload.inventory_usage,
+            usage=resolved_stock_usage,
         )
         if payload.method == "method_1":
             if payload.method_one is None:
@@ -2279,7 +2280,7 @@ class RestaurantOperationsService(BaseService):
             scope_id=scope_id,
             current_user=current_user,
             record_id=serialized_document["id"],
-            usage=payload.inventory_usage,
+            usage=resolved_stock_usage,
         )
         await self._replace_transactions_for_source(
             scope_id=scope_id,
@@ -2304,9 +2305,10 @@ class RestaurantOperationsService(BaseService):
     async def update_daily_data(self, current_user: dict, record_id: str, payload: DailyDataCreateRequest) -> DailyDataResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         existing_record = await self.daily_record_repository.get_scoped_by_id(record_id, scope_id)
+        resolved_stock_usage = payload.resolved_stock_usage()
         inventory_usage_entries = await self._build_daily_inventory_usage_entries(
             scope_id=scope_id,
-            usage=payload.inventory_usage,
+            usage=resolved_stock_usage,
         )
         if payload.method == "method_1":
             if payload.method_one is None:
@@ -2371,7 +2373,7 @@ class RestaurantOperationsService(BaseService):
             scope_id=scope_id,
             current_user=current_user,
             record_id=serialized_updated["id"],
-            usage=payload.inventory_usage,
+            usage=resolved_stock_usage,
         )
         await self._replace_transactions_for_source(
             scope_id=scope_id,
@@ -7041,6 +7043,17 @@ class RestaurantOperationsService(BaseService):
                 DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0))),
                 DailyDataRevenueBreakdownItemResponse(label="Cash In", amount=float(serialized.get("cash_in", 0))),
             ]
+        stock_usage_entries = [
+            DailyDataInventoryUsageEntryResponse(
+                inventory_item_id=str(item.get("inventory_item_id") or ""),
+                product_name=str(item.get("product_name") or ""),
+                quantity_used=float(item.get("quantity_used", 0.0) or 0.0),
+                unit_type=str(item.get("unit_type") or ""),
+                unit_cost=float(item.get("unit_cost", 0.0) or 0.0),
+                total_cost=float(item.get("total_cost", 0.0) or 0.0),
+            )
+            for item in (serialized.get("inventory_usage") or [])
+        ]
         return DailyDataResponse(
             id=serialized["id"],
             business_date=serialized["business_date"],
@@ -7065,17 +7078,8 @@ class RestaurantOperationsService(BaseService):
             opening_cash=float(serialized.get("opening_cash", 0.0) or 0.0),
             closing_cash=float(serialized.get("closing_cash", 0.0) or 0.0),
             notes=str(serialized.get("notes") or ""),
-            inventory_usage=[
-                DailyDataInventoryUsageEntryResponse(
-                    inventory_item_id=str(item.get("inventory_item_id") or ""),
-                    product_name=str(item.get("product_name") or ""),
-                    quantity_used=float(item.get("quantity_used", 0.0) or 0.0),
-                    unit_type=str(item.get("unit_type") or ""),
-                    unit_cost=float(item.get("unit_cost", 0.0) or 0.0),
-                    total_cost=float(item.get("total_cost", 0.0) or 0.0),
-                )
-                for item in (serialized.get("inventory_usage") or [])
-            ],
+            stock_usage=stock_usage_entries,
+            inventory_usage=stock_usage_entries,
             revenue_breakdown=revenue_breakdown,
             covers_summary=DailyDataCoversSummaryResponse(lunch=lunch_covers, dinner=dinner_covers, total=total_covers),
             register_summary=self._build_register_summary(serialized),
@@ -7134,6 +7138,17 @@ class RestaurantOperationsService(BaseService):
         lunch_covers = int(serialized.get("lunch_covers", 0) or 0)
         dinner_covers = int(serialized.get("dinner_covers", 0) or 0)
         total_covers = lunch_covers + dinner_covers
+        stock_usage_entries = [
+            DailyDataInventoryUsageEntryResponse(
+                inventory_item_id=str(item.get("inventory_item_id") or ""),
+                product_name=str(item.get("product_name") or ""),
+                quantity_used=float(item.get("quantity_used", 0.0) or 0.0),
+                unit_type=str(item.get("unit_type") or ""),
+                unit_cost=float(item.get("unit_cost", 0.0) or 0.0),
+                total_cost=float(item.get("total_cost", 0.0) or 0.0),
+            )
+            for item in (serialized.get("inventory_usage") or [])
+        ]
         return DailyDataListItemResponse(
             id=str(serialized["id"]),
             record_id=str(serialized["id"]),
@@ -7159,17 +7174,8 @@ class RestaurantOperationsService(BaseService):
             opening_cash=float(serialized.get("opening_cash", 0.0) or 0.0),
             closing_cash=float(serialized.get("closing_cash", 0.0) or 0.0),
             notes=str(serialized.get("notes") or ""),
-            inventory_usage=[
-                DailyDataInventoryUsageEntryResponse(
-                    inventory_item_id=str(item.get("inventory_item_id") or ""),
-                    product_name=str(item.get("product_name") or ""),
-                    quantity_used=float(item.get("quantity_used", 0.0) or 0.0),
-                    unit_type=str(item.get("unit_type") or ""),
-                    unit_cost=float(item.get("unit_cost", 0.0) or 0.0),
-                    total_cost=float(item.get("total_cost", 0.0) or 0.0),
-                )
-                for item in (serialized.get("inventory_usage") or [])
-            ],
+            stock_usage=stock_usage_entries,
+            inventory_usage=stock_usage_entries,
             method_sections=self._build_daily_data_sections(serialized),
             created_at=str(serialized.get("created_at") or datetime.now(UTC).isoformat()),
         )
