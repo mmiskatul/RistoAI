@@ -1242,6 +1242,24 @@ class RestaurantOperationsService(BaseService):
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> RestaurantHomeCashManagementResponse:
+        if from_date is None and to_date is None:
+            cash_overview = await self.get_cash_management(current_user)
+            period_key = {
+                "today": "today",
+                "weekly": "this_week",
+                "monthly": "this_month",
+            }.get(period, "this_week")
+            period_data = getattr(cash_overview.periods, period_key)
+            return RestaurantHomeCashManagementResponse(
+                period=period,
+                items=self._build_home_cash_management_items_from_summary(
+                    total_collected=float(period_data.summary.total_collected),
+                    pos_payments=float(period_data.summary.pos_payments),
+                    cash_available=float(period_data.summary.cash_available),
+                    bank_deposits=float(period_data.summary.bank_deposits),
+                ),
+            )
+
         _, daily_records, _, _, cash_deposits, _ = await self._load_home_dependencies(current_user)
         filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
         filtered_cash_deposits = self._filter_home_cash_deposits(cash_deposits, period=period, from_date=from_date, to_date=to_date)
@@ -1466,29 +1484,65 @@ class RestaurantOperationsService(BaseService):
         filtered_daily_records: list[dict],
         filtered_cash_deposits: list[dict],
     ) -> list[CashManagementItemResponse]:
-        cash_available = self._calculate_cash_available_flow(filtered_daily_records)
+        summary = self._build_cash_management_summary(
+            daily_records=filtered_daily_records,
+            cash_deposits=filtered_cash_deposits,
+        )
+        return self._build_home_cash_management_items_from_summary(
+            total_collected=summary["total_collected"],
+            pos_payments=summary["pos_payments"],
+            cash_available=summary["cash_available"],
+            bank_deposits=summary["bank_deposits"],
+        )
+
+    def _build_home_cash_management_items_from_summary(
+        self,
+        *,
+        total_collected: float,
+        pos_payments: float,
+        cash_available: float,
+        bank_deposits: float,
+    ) -> list[CashManagementItemResponse]:
+        return [
+            CashManagementItemResponse(label="Total Collection", amount=total_collected, subtitle="Cash and POS collections"),
+            CashManagementItemResponse(label="POS Payments", amount=pos_payments, subtitle="Card and POS settlements"),
+            CashManagementItemResponse(label="Available Cash", amount=cash_available, subtitle="Cash remaining after expenses and withdrawals"),
+            CashManagementItemResponse(label="Cash Deposit", amount=bank_deposits, subtitle="Bank transfers and recorded deposits"),
+        ]
+
+    def _build_cash_management_summary(
+        self,
+        *,
+        daily_records: list[dict],
+        cash_deposits: list[dict],
+    ) -> dict[str, float]:
+        cash_available = self._calculate_cash_available_flow(daily_records)
         cash_deposit_total = round(
             sum(
                 float(
                     item.get("bank_deposits_total", item.get("deposits_collection_total", 0)) or 0
                 )
-                for item in filtered_daily_records
+                for item in daily_records
             ),
             2,
         )
-        if not cash_deposit_total and filtered_cash_deposits:
-            cash_deposit_total = round(sum(float(item.get("amount", 0)) for item in filtered_cash_deposits), 2)
+        if not cash_deposit_total and cash_deposits:
+            cash_deposit_total = round(sum(float(item.get("amount", 0) or 0) for item in cash_deposits), 2)
         pos_payments_total = round(
-            sum(float(item.get("pos_payments_total", item.get("pos_payments", 0)) or 0) for item in filtered_daily_records),
+            sum(float(item.get("pos_payments_total", item.get("pos_payments", 0)) or 0) for item in daily_records),
             2,
         )
-        total_collection = round(cash_available + cash_deposit_total, 2)
-        return [
-            CashManagementItemResponse(label="Total Collection", amount=total_collection, subtitle="Cash and POS collections"),
-            CashManagementItemResponse(label="POS Payments", amount=pos_payments_total, subtitle="Card and POS settlements"),
-            CashManagementItemResponse(label="Available Cash", amount=cash_available, subtitle="Cash remaining after expenses and withdrawals"),
-            CashManagementItemResponse(label="Cash Deposit", amount=cash_deposit_total, subtitle="Bank transfers and recorded deposits"),
-        ]
+        return {
+            "total_collected": round(cash_available + cash_deposit_total, 2),
+            "cash_available": cash_available,
+            "pos_payments": pos_payments_total,
+            "withdrawals_total": round(
+                sum(float(item.get("cash_withdrawals", 0) or 0) for item in daily_records)
+                + sum(float(item.get("cash_out", 0) or 0) for item in daily_records),
+                2,
+            ),
+            "bank_deposits": cash_deposit_total,
+        }
 
     @staticmethod
     def _calculate_cash_available_flow(records: list[dict]) -> float:
@@ -2140,13 +2194,9 @@ class RestaurantOperationsService(BaseService):
         def build_period(start: date, end: date, label: str) -> CashPeriodOverviewResponse:
             daily_in_period = [item for item in serialized_daily if in_range(parse_iso_date(item.get("business_date")), start, end)]
             deposits_in_period = [item for item in serialized_deposits if in_range(parse_iso_date(item.get("deposit_date")), start, end)]
-            transactions_in_period = [
-                item for item in serialized_transactions
-                if in_range(parse_iso_date(item.get("business_date")), start, end)
-            ]
-            live_snapshot = build_aggregate_snapshot(
-                manual_records=daily_in_period,
-                finance_transactions=transactions_in_period,
+            cash_summary = self._build_cash_management_summary(
+                daily_records=daily_in_period,
+                cash_deposits=deposits_in_period,
             )
             period_status = CashPeriodStatusResponse(
                 total_collected=label,
@@ -2158,11 +2208,11 @@ class RestaurantOperationsService(BaseService):
                 deposits_collection=label,
             )
             period_summary = CashPeriodSummaryResponse(
-                total_collected=round(float(live_snapshot.get("cash_collected_total", 0)), 2),
-                cash_available=round(float(live_snapshot.get("cash_available", 0)), 2),
-                pos_payments=round(float(live_snapshot.get("pos_payments_total", 0)), 2),
-                withdrawals_total=round(float(live_snapshot.get("withdrawals_total", 0)), 2),
-                bank_deposits=round(float(live_snapshot.get("bank_deposits_total", 0)), 2),
+                total_collected=round(float(cash_summary["total_collected"]), 2),
+                cash_available=round(float(cash_summary["cash_available"]), 2),
+                pos_payments=round(float(cash_summary["pos_payments"]), 2),
+                withdrawals_total=round(float(cash_summary["withdrawals_total"]), 2),
+                bank_deposits=round(float(cash_summary["bank_deposits"]), 2),
             )
             recent_deposits = self._build_recent_deposit_items(deposits=deposits_in_period, daily_records=daily_in_period)
             return CashPeriodOverviewResponse(
