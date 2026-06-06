@@ -38,6 +38,20 @@ def test_food_cost_filter_excludes_manual_entry_sources():
     }) is True
 
 
+def test_document_line_item_categories_resolve_to_uncategorized():
+    service = RestaurantOperationsService.__new__(RestaurantOperationsService)
+
+    resolved = service._resolve_document_line_item_categories(
+        [
+            {"product_name": "Salmon", "category": ""},
+            {"product_name": "Water", "category": "Drinks"},
+        ]
+    )
+
+    assert resolved[0]["category"] == "Uncategorized"
+    assert resolved[1]["category"] == "Drinks"
+
+
 def test_restaurant_document_upload_extract_and_confirm_flow(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(

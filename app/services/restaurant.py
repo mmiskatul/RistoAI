@@ -1679,6 +1679,7 @@ class RestaurantOperationsService(BaseService):
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         now = datetime.now(UTC)
         normalized = self._normalize_document_extraction(extraction=payload.model_dump(mode="json"), file_name=payload.source_file_name)
+        normalized["line_items"] = self._resolve_document_line_item_categories(normalized["line_items"])
         resolved_invoice_date = payload.invoice_date or now.date()
         document = await self.document_repository.create(
             {
@@ -6246,7 +6247,9 @@ class RestaurantOperationsService(BaseService):
         if "invoice_date" in updates and updates["invoice_date"] is not None:
             updates["invoice_date"] = updates["invoice_date"].isoformat()
         if "line_items" in updates and updates["line_items"] is not None:
-            updates["line_items"] = self._normalize_document_line_items([item.model_dump(mode="json") for item in payload.line_items or []])
+            updates["line_items"] = self._resolve_document_line_item_categories(
+                self._normalize_document_line_items([item.model_dump(mode="json") for item in payload.line_items or []])
+            )
         now = datetime.now(UTC)
         updates["last_edited_by_user_id"] = str(current_user["_id"])
         updates["last_edited_at"] = now
@@ -6552,6 +6555,15 @@ class RestaurantOperationsService(BaseService):
                 }
             )
         return normalized_items
+
+    @staticmethod
+    def _resolve_document_line_item_categories(line_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        resolved_items: list[dict[str, Any]] = []
+        for item in line_items:
+            resolved = dict(item)
+            resolved["category"] = str(resolved.get("category") or "").strip() or "Uncategorized"
+            resolved_items.append(resolved)
+        return resolved_items
 
     def _calculate_invoice_totals(self, line_items: list[dict[str, Any]]) -> dict[str, float]:
         net_total = round(sum(self._safe_float(item.get("total_price", 0)) for item in line_items), 2)
