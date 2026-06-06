@@ -7,6 +7,7 @@ from bson import ObjectId
 
 from app.db.migrations import MIGRATION_KEY, run_data_migrations
 from app.db.mongodb import get_database
+from app.services.restaurant import RestaurantOperationsService
 from app.tests.helpers import (
     complete_onboarding_profile,
     register_and_login,
@@ -18,6 +19,23 @@ from app.tests.helpers import (
 def select_subscription_plan(client, headers, *, billing_cycle: str = '1_month', start_trial: bool = True) -> None:
     select_subscription_plan_only(client, headers, billing_cycle=billing_cycle, start_trial=start_trial)
     complete_onboarding_profile(client, headers)
+
+
+def test_food_cost_filter_excludes_manual_entry_sources():
+    service = RestaurantOperationsService.__new__(RestaurantOperationsService)
+
+    assert service._is_food_cost_expense({
+        "source_kind": "manual_entry",
+        "category": "Inventory Adjustment",
+    }) is False
+    assert service._is_food_cost_expense({
+        "source_kind": "manual_entry_restore",
+        "category": "Food Inventory",
+    }) is False
+    assert service._is_food_cost_expense({
+        "source_kind": "inventory",
+        "category": "Inventory Adjustment",
+    }) is True
 
 
 def test_restaurant_document_upload_extract_and_confirm_flow(client, app):

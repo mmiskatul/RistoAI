@@ -156,6 +156,9 @@ from app.utils.pagination import build_pagination_meta
 
 logger = logging.getLogger(__name__)
 
+FOOD_COST_EXPENSE_SOURCE_KINDS = {"document", "inventory"}
+NON_FOOD_COST_EXPENSE_SOURCE_KINDS = {"manual_entry", "manual_entry_restore"}
+
 
 class RestaurantOperationsService(BaseService):
     DEFAULT_REVENUE_VAT_RATE = 0.1
@@ -2956,6 +2959,8 @@ class RestaurantOperationsService(BaseService):
                     "product_name": str(item.get("product_name") or ""),
                     "quantity_used": quantity_used,
                     "unit_type": str(item.get("unit_type") or ""),
+                    # Stored for inventory usage reporting only. Manual stock usage
+                    # must not create a food cost expense or change food cost totals.
                     "unit_cost": unit_price,
                     "total_cost": round(quantity_used * unit_price, 2),
                 }
@@ -6229,7 +6234,9 @@ class RestaurantOperationsService(BaseService):
 
     def _is_food_cost_expense(self, item: dict[str, Any]) -> bool:
         source_kind = str(item.get("source_kind") or "").strip().lower()
-        if source_kind in {"document", "inventory"}:
+        if source_kind in NON_FOOD_COST_EXPENSE_SOURCE_KINDS:
+            return False
+        if source_kind in FOOD_COST_EXPENSE_SOURCE_KINDS:
             return True
         category = str(item.get("category") or "").strip().lower()
         return "food" in category or "inventory" in category
