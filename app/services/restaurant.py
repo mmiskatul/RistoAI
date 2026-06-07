@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 from datetime import UTC, date, datetime, timedelta
@@ -31,6 +32,7 @@ from app.repositories.restaurant_ops import (
     RestaurantInventoryCategoryRepository,
     RestaurantInventoryRepository,
     RestaurantInventorySupplierRepository,
+    RestaurantNotificationRepository,
     ScopedRepository,
 )
 from app.repositories.onboarding_profile import OnboardingProfileRepository
@@ -443,6 +445,7 @@ class RestaurantOperationsService(BaseService):
         inventory_supplier_repository: RestaurantInventorySupplierRepository,
         chat_repository: RestaurantChatRepository,
         insight_repository: RestaurantInsightRepository,
+        notification_repository: RestaurantNotificationRepository,
         openai_service: OpenAIOperationsService,
         chat_memory_repository: RestaurantChatMemoryRepository | None = None,
         onboarding_repository: OnboardingProfileRepository | None = None,
@@ -465,6 +468,7 @@ class RestaurantOperationsService(BaseService):
         self.chat_repository = chat_repository
         self.chat_memory_repository = chat_memory_repository
         self.insight_repository = insight_repository
+        self.notification_repository = notification_repository
         self.onboarding_repository = onboarding_repository
         self.openai_service = openai_service
         self.image_storage_service = image_storage_service
@@ -1463,16 +1467,22 @@ class RestaurantOperationsService(BaseService):
 
     async def get_home_recent_activity(self, current_user: dict, *, limit: int = 6, diverse: bool = True) -> RestaurantHomeRecentActivityResponse:
         scope_id, _, expenses, documents, cash_deposits, inventory_items = await self._load_home_dependencies(current_user)
+        stored_notifications, _ = await self.notification_repository.list_by_scope(scope_id=scope_id, page=1, page_size=limit)
+        persisted_items = self._build_activity_items_from_stored_notifications(stored_notifications)
         return RestaurantHomeRecentActivityResponse(
-            items=self._build_recent_activity(
-                current_user=current_user,
-                daily_records=await self._load_recent_activity_daily_records(scope_id),
-                expenses=self.serialize_list(expenses),
-                documents=self.serialize_list(documents),
-                cash_deposits=self.serialize_list(cash_deposits),
-                inventory_items=self.serialize_list(inventory_items),
-                max_items=limit,
-                prefer_distinct_kinds=diverse,
+            items=self._merge_activity_items(
+                persisted_items,
+                self._build_recent_activity(
+                    current_user=current_user,
+                    daily_records=await self._load_recent_activity_daily_records(scope_id),
+                    expenses=self.serialize_list(expenses),
+                    documents=self.serialize_list(documents),
+                    cash_deposits=self.serialize_list(cash_deposits),
+                    inventory_items=self.serialize_list(inventory_items),
+                    max_items=limit,
+                    prefer_distinct_kinds=diverse,
+                ),
+                limit=limit,
             )
         )
 
@@ -1495,13 +1505,18 @@ class RestaurantOperationsService(BaseService):
         documents, _ = documents_result
         cash_deposits, _ = cash_deposits_result
         inventory_items, _ = inventory_result
+        stored_notifications, _ = await self.notification_repository.list_by_scope(scope_id=scope_id, page=1, page_size=25)
         return RestaurantNotificationFeedResponse(
-            items=self._build_notification_feed(
-                daily_records=daily_records,
-                expenses=self.serialize_list(expenses),
-                documents=self.serialize_list(documents),
-                cash_deposits=self.serialize_list(cash_deposits),
-                inventory_items=self.serialize_list(inventory_items),
+            items=self._merge_activity_items(
+                self._build_activity_items_from_stored_notifications(stored_notifications),
+                self._build_notification_feed(
+                    daily_records=daily_records,
+                    expenses=self.serialize_list(expenses),
+                    documents=self.serialize_list(documents),
+                    cash_deposits=self.serialize_list(cash_deposits),
+                    inventory_items=self.serialize_list(inventory_items),
+                ),
+                limit=25,
             )
         )
 
@@ -3673,6 +3688,11 @@ class RestaurantOperationsService(BaseService):
                 serialized_records=serialized_records,
             )
         ]
+        await self._store_revenue_monitoring_alert_notifications(
+            current_user=current_user,
+            period=period,
+            alerts=supplier_alerts,
+        )
 
         return {
             "insight_banner": (
@@ -6904,6 +6924,90 @@ class RestaurantOperationsService(BaseService):
 
         notifications.sort(key=lambda item: item.timestamp, reverse=True)
         return notifications[:limit]
+
+    @staticmethod
+    def _merge_activity_items(*groups: list[ActivityItemResponse], limit: int) -> list[ActivityItemResponse]:
+        items: list[ActivityItemResponse] = []
+        seen: set[tuple[str, str, str]] = set()
+        for group in groups:
+            for item in group:
+                key = (
+                    str(item.kind or ""),
+                    str(item.source_entity_id or item.entity_id or ""),
+                    str(item.timestamp or ""),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append(item)
+        items.sort(key=lambda item: item.timestamp, reverse=True)
+        return items[:limit]
+
+    def _build_activity_items_from_stored_notifications(self, notifications: list[dict[str, Any]]) -> list[ActivityItemResponse]:
+        items: list[ActivityItemResponse] = []
+        for item in self.serialize_list(notifications):
+            items.append(
+                ActivityItemResponse(
+                    kind=str(item.get("kind") or "notification"),
+                    title=str(item.get("title") or "Notification"),
+                    subtitle=str(item.get("subtitle") or ""),
+                    timestamp=str(item.get("created_at") or item.get("timestamp") or ""),
+                    entity_id=str(item.get("id") or ""),
+                    reference_date=str(item.get("reference_date") or ""),
+                    source_kind=str(item.get("source_kind") or item.get("kind") or ""),
+                    source_entity_id=str(item.get("source_entity_id") or item.get("id") or ""),
+                    route=str(item.get("route") or ""),
+                )
+            )
+        return items
+
+    @staticmethod
+    def _build_notification_dedupe_key(*parts: Any) -> str:
+        normalized = "|".join(str(part or "").strip() for part in parts)
+        return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+    async def _store_revenue_monitoring_alert_notifications(
+        self,
+        *,
+        current_user: dict,
+        period: str,
+        alerts: list[AnalyticsSupplierAlertResponse],
+    ) -> None:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        for alert in alerts:
+            title = str(alert.title or "").strip()
+            subtitle = str(alert.subtitle or "").strip()
+            if not title:
+                continue
+            dedupe_key = self._build_notification_dedupe_key("analytics_alert", period, title, subtitle)
+            payload = {
+                "kind": "analytics_alert",
+                "title": title,
+                "subtitle": subtitle,
+                "source_kind": "analytics_alert",
+                "reference_date": datetime.now(UTC).date().isoformat(),
+                "route": f"/(tabs)/analytics-alerts?period={period}",
+                "metadata": {
+                    "period": period,
+                    "ai_provider": str(alert.ai_provider or "fallback"),
+                },
+            }
+            _, created = await self.notification_repository.create_if_absent(
+                scope_id=scope_id,
+                dedupe_key=dedupe_key,
+                payload=payload,
+            )
+            if created:
+                await self._send_push_notification(
+                    current_user,
+                    title=title,
+                    body=subtitle or "New revenue monitoring alert",
+                    data={
+                        "kind": "analytics_alert",
+                        "route": f"/(tabs)/analytics-alerts?period={period}",
+                        "period": period,
+                    },
+                )
 
     @staticmethod
     def _top_category(items: list[dict[str, Any]]) -> str | None:

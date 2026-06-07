@@ -32,6 +32,7 @@ class RestaurantCollections:
     CHAT_MESSAGES = "restaurant_chat_messages"
     CHAT_MEMORIES = "restaurant_chat_memories"
     AI_INSIGHTS = "restaurant_ai_insights"
+    NOTIFICATIONS = "restaurant_notifications"
 
 
 ALL_COLLECTIONS = {
@@ -60,4 +61,5 @@ ALL_COLLECTIONS = {
     RestaurantCollections.CHAT_MESSAGES,
     RestaurantCollections.CHAT_MEMORIES,
     RestaurantCollections.AI_INSIGHTS,
+    RestaurantCollections.NOTIFICATIONS,
 }

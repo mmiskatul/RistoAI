@@ -19,6 +19,7 @@ from app.repositories.restaurant_ops import (
     RestaurantInventoryRepository,
     RestaurantInventorySupplierRepository,
     RestaurantMonthlyRecordRepository,
+    RestaurantNotificationRepository,
     RestaurantRecordRepository,
     RestaurantWeeklyRecordRepository,
 )
@@ -85,6 +86,9 @@ class RepositoryFactory:
 
     def restaurant_insights(self) -> RestaurantInsightRepository:
         return RestaurantInsightRepository(self.db)
+
+    def restaurant_notifications(self) -> RestaurantNotificationRepository:
+        return RestaurantNotificationRepository(self.db)
 
     def restaurant_inventory(self) -> RestaurantInventoryRepository:
         return RestaurantInventoryRepository(self.db)

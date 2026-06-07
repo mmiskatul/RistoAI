@@ -64,6 +64,7 @@ async def test_voice_transcription_auto_detects_then_translates_to_target_langua
         inventory_supplier_repository=None,
         chat_repository=None,
         insight_repository=None,
+        notification_repository=None,
         openai_service=openai_service,
     )
 
@@ -98,6 +99,7 @@ def test_chat_business_context_includes_invoice_line_items_inventory_and_profile
         inventory_supplier_repository=None,
         chat_repository=None,
         insight_repository=None,
+        notification_repository=None,
         openai_service=_FakeOpenAIService(),
     )
 
@@ -211,6 +213,7 @@ async def test_update_chat_memory_persists_summary_for_tenant() -> None:
         inventory_supplier_repository=None,
         chat_repository=None,
         insight_repository=None,
+        notification_repository=None,
         openai_service=_FakeOpenAIService(),
         chat_memory_repository=memory_repository,
     )

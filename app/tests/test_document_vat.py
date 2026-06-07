@@ -21,6 +21,7 @@ def _service() -> RestaurantOperationsService:
         inventory_supplier_repository=None,
         chat_repository=None,
         insight_repository=None,
+        notification_repository=None,
         openai_service=None,
     )
 

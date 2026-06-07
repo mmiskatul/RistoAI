@@ -547,6 +547,41 @@ class RestaurantInsightRepository(ScopedRepository):
         return document
 
 
+class RestaurantNotificationRepository(ScopedRepository):
+    collection_name = RestaurantCollections.NOTIFICATIONS
+
+    async def list_by_scope(
+        self,
+        *,
+        scope_id: str,
+        page: int = 1,
+        page_size: int = 25,
+        kind: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        filters = self.scope_filters(scope_id)
+        if kind:
+            filters["kind"] = kind
+        return await self.get_multi(
+            filters=filters,
+            page=page,
+            page_size=page_size,
+            sort=[("created_at", DESCENDING)],
+        )
+
+    async def create_if_absent(self, *, scope_id: str, dedupe_key: str, payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        existing = await self.get_one(self.scope_filters(scope_id, {"dedupe_key": dedupe_key}))
+        if existing:
+            return existing, False
+        created = await self.create(
+            {
+                "tenant_id": scope_id,
+                "dedupe_key": dedupe_key,
+                **payload,
+            }
+        )
+        return created, True
+
+
 class RestaurantFinanceTransactionRepository(ScopedRepository):
     collection_name = RestaurantCollections.FINANCE_TRANSACTIONS
 
