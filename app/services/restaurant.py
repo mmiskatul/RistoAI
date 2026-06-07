@@ -1336,6 +1336,9 @@ class RestaurantOperationsService(BaseService):
             daily_records=filtered_daily_records,
             expenses=filtered_expenses,
             cash_deposits=filtered_cash_deposits,
+            comparison_daily_records=daily_records,
+            comparison_expenses=expenses,
+            comparison_cash_deposits=cash_deposits,
             period=period,
             from_date=from_date,
             to_date=to_date,
@@ -1598,6 +1601,9 @@ class RestaurantOperationsService(BaseService):
             daily_records=filtered_daily_records,
             expenses=filtered_expenses,
             cash_deposits=filtered_cash_deposits,
+            comparison_daily_records=daily_records,
+            comparison_expenses=expenses,
+            comparison_cash_deposits=cash_deposits,
             period=period,
             from_date=from_date,
             to_date=to_date,
@@ -3607,6 +3613,14 @@ class RestaurantOperationsService(BaseService):
         context = self._build_metrics_context(
             daily_records=filtered_daily_records,
             expenses=filtered_expenses,
+            comparison_daily_records=daily_records,
+            comparison_expenses=expenses,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
+        current_start, current_end, previous_start, previous_end = self._resolve_comparison_date_ranges(
             period=period,
             from_date=from_date,
             to_date=to_date,
@@ -3615,10 +3629,19 @@ class RestaurantOperationsService(BaseService):
         serialized_records = filtered_daily_records
         serialized_expenses = filtered_expenses
         estimated_profit = float(context["profit_total"])
-        current_revenue = round(sum(float(item.get("total_revenue", 0)) for item in serialized_records), 2)
-        previous_revenue = round(current_revenue / 1.125, 2) if current_revenue else 0.0
+        current_revenue = float(context.get("current_revenue_value", context["revenue_total"]))
+        previous_revenue = float(context.get("previous_revenue_value", 0))
         lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in serialized_records))
         dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in serialized_records))
+        previous_records = [
+            item
+            for item in self.serialize_list(daily_records)
+            if previous_start is not None
+            and previous_end is not None
+            and previous_start <= self._safe_parse_date(item.get("business_date")) <= previous_end
+        ]
+        previous_lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in previous_records))
+        previous_dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in previous_records))
         covers_activity_lunch = lunch_covers
         covers_activity_dinner = dinner_covers
         if lunch_covers + dinner_covers <= 0:
@@ -3666,11 +3689,17 @@ class RestaurantOperationsService(BaseService):
             "revenue_change_percent": float(context["revenue_change_percent"]),
             "weekly_revenue": self._build_home_revenue_chart(filtered_daily_records, period=period, anchor_date=anchor_date),
             "metric_tiles": [
-                AnalyticsMetricTileResponse(label="Estimated Profit", value=estimated_profit, change_percent=8.2),
+                AnalyticsMetricTileResponse(
+                    label="Estimated Profit",
+                    value=estimated_profit,
+                    change_percent=float(context["profit_change_percent"]),
+                ),
                 self._build_peak_hour_metric(
                     language=analytics_language,
                     lunch_covers=lunch_covers,
                     dinner_covers=dinner_covers,
+                    previous_lunch_covers=previous_lunch_covers,
+                    previous_dinner_covers=previous_dinner_covers,
                     fallback_records=daily_records,
                 ),
             ],
@@ -4509,6 +4538,9 @@ class RestaurantOperationsService(BaseService):
         daily_records: list[dict],
         expenses: list[dict],
         cash_deposits: list[dict] | None = None,
+        comparison_daily_records: list[dict] | None = None,
+        comparison_expenses: list[dict] | None = None,
+        comparison_cash_deposits: list[dict] | None = None,
         period: str = "weekly",
         from_date: date | None = None,
         to_date: date | None = None,
@@ -4523,6 +4555,9 @@ class RestaurantOperationsService(BaseService):
         serialized_records = self.serialize_list(daily_records)
         serialized_expenses = self.serialize_list(expenses)
         serialized_cash_deposits = self.serialize_list(cash_deposits or [])
+        comparison_records = self.serialize_list(comparison_daily_records if comparison_daily_records is not None else daily_records)
+        comparison_expense_items = self.serialize_list(comparison_expenses if comparison_expenses is not None else expenses)
+        comparison_cash_items = self.serialize_list(comparison_cash_deposits if comparison_cash_deposits is not None else (cash_deposits or []))
 
         def _record_in_range(item: dict[str, Any], start: date | None, end: date | None) -> bool:
             candidate = self._parse_optional_date(item.get("business_date"))
@@ -4576,42 +4611,42 @@ class RestaurantOperationsService(BaseService):
         )
         profit_total = round(sum(float(item.get("profit", 0)) for item in serialized_records), 2)
         covers_total = sum(int(item.get("total_covers", item.get("lunch_covers", 0) + item.get("dinner_covers", 0))) for item in serialized_records)
-        recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if _record_in_range(item, current_start, current_end)) + sum(
+        recent_revenue = sum(float(item.get("total_revenue", 0)) for item in comparison_records if _record_in_range(item, current_start, current_end)) + sum(
             float(item.get("amount", 0) or 0)
-            for item in serialized_cash_deposits
+            for item in comparison_cash_items
             if self._is_manual_revenue_entry(item) and _cash_deposit_in_range(item, current_start, current_end)
         )
-        previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if _record_in_range(item, previous_start, previous_end)) + sum(
+        previous_revenue = sum(float(item.get("total_revenue", 0)) for item in comparison_records if _record_in_range(item, previous_start, previous_end)) + sum(
             float(item.get("amount", 0) or 0)
-            for item in serialized_cash_deposits
+            for item in comparison_cash_items
             if self._is_manual_revenue_entry(item) and _cash_deposit_in_range(item, previous_start, previous_end)
         )
         recent_inventory_expense = sum(
             float(item.get("amount", 0) or 0)
-            for item in serialized_expenses
+            for item in comparison_expense_items
             if _expense_in_range(item, current_start, current_end) and self._is_food_cost_expense(item)
         )
         previous_inventory_expense = sum(
             float(item.get("amount", 0) or 0)
-            for item in serialized_expenses
+            for item in comparison_expense_items
             if _expense_in_range(item, previous_start, previous_end) and self._is_food_cost_expense(item)
         )
         recent_food_cost = recent_inventory_expense
         previous_food_cost = previous_inventory_expense
         recent_other_expense = sum(
             float(item.get("amount", 0) or 0)
-            for item in serialized_expenses
+            for item in comparison_expense_items
             if _expense_in_range(item, current_start, current_end) and not self._is_food_cost_expense(item)
         )
         previous_other_expense = sum(
             float(item.get("amount", 0) or 0)
-            for item in serialized_expenses
+            for item in comparison_expense_items
             if _expense_in_range(item, previous_start, previous_end) and not self._is_food_cost_expense(item)
         )
-        recent_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if _record_in_range(item, current_start, current_end))
-        previous_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if _record_in_range(item, previous_start, previous_end))
-        recent_profit = sum(float(item.get("profit", 0)) for item in serialized_records if _record_in_range(item, current_start, current_end))
-        previous_profit = sum(float(item.get("profit", 0)) for item in serialized_records if _record_in_range(item, previous_start, previous_end))
+        recent_expenses = sum(float(item.get("total_expenses", 0)) for item in comparison_records if _record_in_range(item, current_start, current_end))
+        previous_expenses = sum(float(item.get("total_expenses", 0)) for item in comparison_records if _record_in_range(item, previous_start, previous_end))
+        recent_profit = sum(float(item.get("profit", 0)) for item in comparison_records if _record_in_range(item, current_start, current_end))
+        previous_profit = sum(float(item.get("profit", 0)) for item in comparison_records if _record_in_range(item, previous_start, previous_end))
         cash_available = self._calculate_cash_available_flow(serialized_records)
         cash_deposit_total = round(
             sum(
@@ -4648,6 +4683,12 @@ class RestaurantOperationsService(BaseService):
             "comparison_label": comparison_meta["comparison_label"],
             "current_period_label": comparison_meta["current_period_label"],
             "previous_period_label": comparison_meta["previous_period_label"],
+            "current_revenue_value": round(recent_revenue, 2),
+            "previous_revenue_value": round(previous_revenue, 2),
+            "current_profit_value": round(recent_profit, 2),
+            "previous_profit_value": round(previous_profit, 2),
+            "current_food_cost_value": round(recent_food_cost, 2),
+            "previous_food_cost_value": round(previous_food_cost, 2),
         }
 
     @staticmethod
@@ -4712,6 +4753,8 @@ class RestaurantOperationsService(BaseService):
         language: str,
         lunch_covers: int,
         dinner_covers: int,
+        previous_lunch_covers: int = 0,
+        previous_dinner_covers: int = 0,
         fallback_records: list[dict] | None = None,
     ) -> AnalyticsMetricTileResponse:
         total_covers = max(lunch_covers + dinner_covers, 0)
@@ -4738,11 +4781,15 @@ class RestaurantOperationsService(BaseService):
         is_dinner_peak = dinner_covers >= lunch_covers
         peak_covers = dinner_covers if is_dinner_peak else lunch_covers
         peak_share = round((peak_covers / total_covers) * 100)
+        previous_total_covers = max(previous_lunch_covers + previous_dinner_covers, 0)
+        previous_peak_covers = max(previous_lunch_covers, previous_dinner_covers)
+        previous_peak_share = round((previous_peak_covers / previous_total_covers) * 100) if previous_total_covers > 0 else 0.0
         peak_service = "Dinner" if is_dinner_peak else "Lunch"
 
         return AnalyticsMetricTileResponse(
             label="Peak Hour",
             value="Cena" if language == "it" and is_dinner_peak else "Pranzo" if language == "it" else peak_service,
+            change_percent=self._percent_change(previous_peak_share, peak_share),
             subtitle=(
                 f"{peak_covers} covers, {peak_share}% of this period{subtitle_suffix}"
                 if language != "it"
