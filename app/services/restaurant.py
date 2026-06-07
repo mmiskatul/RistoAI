@@ -6986,7 +6986,7 @@ class RestaurantOperationsService(BaseService):
                 "subtitle": subtitle,
                 "source_kind": "analytics_alert",
                 "reference_date": datetime.now(UTC).date().isoformat(),
-                "route": f"/(tabs)/analytics-alerts?period={period}",
+                "route": f"/analytics-alerts?period={period}",
                 "metadata": {
                     "period": period,
                     "ai_provider": str(alert.ai_provider or "fallback"),
@@ -7004,7 +7004,7 @@ class RestaurantOperationsService(BaseService):
                     body=subtitle or "New revenue monitoring alert",
                     data={
                         "kind": "analytics_alert",
-                        "route": f"/(tabs)/analytics-alerts?period={period}",
+                        "route": f"/analytics-alerts?period={period}",
                         "period": period,
                     },
                 )
