@@ -656,6 +656,7 @@ class DailyDataRegisterSummaryResponse(BaseSchema):
 class DailyDataSectionFieldResponse(BaseSchema):
     key: str
     label: str
+    label_translations: LocalizedTextResponse | None = None
     value: float | int | str | None = None
     value_type: Literal["currency", "integer", "text"] = "text"
 
@@ -663,6 +664,7 @@ class DailyDataSectionFieldResponse(BaseSchema):
 class DailyDataSectionResponse(BaseSchema):
     key: str
     title: str
+    title_translations: LocalizedTextResponse | None = None
     fields: list[DailyDataSectionFieldResponse] = Field(default_factory=list)
 
 

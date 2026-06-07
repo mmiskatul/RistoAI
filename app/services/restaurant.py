@@ -193,6 +193,38 @@ class RestaurantOperationsService(BaseService):
         "cash_expense",
     }
     CASH_OUTFLOW_TRANSACTION_TYPES = {"cash_withdrawal", "cash_out", "cash_expense"}
+    DAILY_DATA_SECTION_TITLE_TRANSLATIONS = {
+        "Deposit Section": {"en": "Deposit Section", "it": "Sezione depositi"},
+        "Expense Section": {"en": "Expense Section", "it": "Sezione spese"},
+        "Cash Movement Section": {"en": "Cash Movement Section", "it": "Sezione movimenti di cassa"},
+        "Register Section": {"en": "Register Section", "it": "Sezione cassa"},
+        "Coperti Section": {"en": "Covers Section", "it": "Sezione coperti"},
+        "Notes Section": {"en": "Notes Section", "it": "Sezione note"},
+    }
+    DAILY_DATA_FIELD_LABEL_TRANSLATIONS = {
+        "POS Payments": {"en": "POS Payments", "it": "Pagamenti POS"},
+        "Cash Payments": {"en": "Cash Payments", "it": "Pagamenti in contanti"},
+        "Bank Transfer Payments": {"en": "Bank Transfer Payments", "it": "Pagamenti con bonifico"},
+        "Bank Transfer": {"en": "Bank Transfer", "it": "Bonifico"},
+        "Cash In": {"en": "Cash In", "it": "Entrate cassa"},
+        "Cash Withdrawals": {"en": "Cash Withdrawals", "it": "Prelievi di cassa"},
+        "Cash Out": {"en": "Cash Out", "it": "Uscite di cassa"},
+        "Total Deposits": {"en": "Total Deposits", "it": "Totale depositi"},
+        "Expenses in Cash": {"en": "Expenses in Cash", "it": "Spese in contanti"},
+        "Daily Data Cash Expense": {"en": "Daily Data Cash Expense", "it": "Spesa di cassa dati giornalieri"},
+        "Additional Manual Expenses": {"en": "Additional Manual Expenses", "it": "Spese manuali aggiuntive"},
+        "Uploaded Documents": {"en": "Uploaded Documents", "it": "Documenti caricati"},
+        "Total Expense Collection": {"en": "Total Expense Collection", "it": "Totale raccolta spese"},
+        "Opening Cash": {"en": "Opening Cash", "it": "Cassa iniziale"},
+        "Closing Cash": {"en": "Closing Cash", "it": "Cassa finale"},
+        "Cash Payments in Register": {"en": "Cash Payments in Register", "it": "Pagamenti in contanti in cassa"},
+        "Total Cash On Hand": {"en": "Total Cash On Hand", "it": "Totale contanti in cassa"},
+        "Daily Cash Difference": {"en": "Daily Cash Difference", "it": "Differenza giornaliera di cassa"},
+        "Lunch Coperti": {"en": "Lunch Covers", "it": "Coperti pranzo"},
+        "Dinner Coperti": {"en": "Dinner Covers", "it": "Coperti cena"},
+        "Total Coperti": {"en": "Total Covers", "it": "Totale coperti"},
+        "Notes": {"en": "Notes", "it": "Note"},
+    }
 
     @staticmethod
     def _resolve_chat_language(current_user: dict, requested_language: str | None = None) -> str:
@@ -259,6 +291,46 @@ class RestaurantOperationsService(BaseService):
     @staticmethod
     def _build_localized_actions(*, en: list[dict[str, str]], it: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
         return {"en": en, "it": it}
+
+    @classmethod
+    def _daily_data_section_title_translations(cls, title: str) -> dict[str, str]:
+        translations = cls.DAILY_DATA_SECTION_TITLE_TRANSLATIONS.get(title)
+        if translations is not None:
+            return translations
+        return {"en": title, "it": title}
+
+    @classmethod
+    def _daily_data_field_label_translations(cls, label: str) -> dict[str, str]:
+        translations = cls.DAILY_DATA_FIELD_LABEL_TRANSLATIONS.get(label)
+        if translations is not None:
+            return translations
+        return {"en": label, "it": label}
+
+    def _localize_daily_data_sections(
+        self,
+        sections: list[DailyDataSectionResponse],
+    ) -> list[DailyDataSectionResponse]:
+        localized_sections: list[DailyDataSectionResponse] = []
+        for section in sections:
+            localized_fields = [
+                DailyDataSectionFieldResponse(
+                    key=field.key,
+                    label=field.label,
+                    label_translations=self._build_localized_text(**self._daily_data_field_label_translations(field.label)),
+                    value=field.value,
+                    value_type=field.value_type,
+                )
+                for field in section.fields
+            ]
+            localized_sections.append(
+                DailyDataSectionResponse(
+                    key=section.key,
+                    title=section.title,
+                    title_translations=self._build_localized_text(**self._daily_data_section_title_translations(section.title)),
+                    fields=localized_fields,
+                )
+            )
+        return localized_sections
 
     @classmethod
     def _normalize_business_type(cls, value: Any) -> str:
@@ -7243,7 +7315,7 @@ class RestaurantOperationsService(BaseService):
 
     def _build_daily_data_sections(self, payload: dict[str, Any]) -> list[DailyDataSectionResponse]:
         if payload.get("method") == "method_2":
-            return [
+            return self._localize_daily_data_sections([
                 DailyDataSectionResponse(
                     key="deposit_section",
                     title="Deposit Section",
@@ -7333,9 +7405,9 @@ class RestaurantOperationsService(BaseService):
                         ),
                     ],
                 ),
-            ]
+            ])
 
-        return [
+        return self._localize_daily_data_sections([
             DailyDataSectionResponse(
                 key="deposit_section",
                 title="Deposit Section",
@@ -7405,7 +7477,7 @@ class RestaurantOperationsService(BaseService):
                     ),
                 ],
             )
-        ]
+        ])
 
     def _build_grouped_daily_data_sections(
         self,
@@ -7515,7 +7587,7 @@ class RestaurantOperationsService(BaseService):
                 )
             )
 
-        return sections
+        return self._localize_daily_data_sections(sections)
 
     def _to_daily_data_response(self, record: dict) -> DailyDataResponse:
         serialized = self.serialize(record)
