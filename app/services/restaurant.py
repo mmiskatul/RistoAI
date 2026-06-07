@@ -4172,17 +4172,15 @@ class RestaurantOperationsService(BaseService):
             sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if not self._is_inventory_linked_expense(item)),
             2,
         )
-        food_cost_total = self._sum_inventory_usage_cost(serialized_records)
+        # Home food cost follows inventory purchase expense, while manual
+        # inventory usage remains inventory-dashboard-only reporting.
+        food_cost_total = inventory_expense_total
         profit_total = round(sum(float(item.get("profit", 0)) for item in serialized_records), 2)
         covers_total = sum(int(item.get("total_covers", item.get("lunch_covers", 0) + item.get("dinner_covers", 0))) for item in serialized_records)
         recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
-        recent_food_cost = self._sum_inventory_usage_cost(
-            [item for item in serialized_records if item["business_date"] >= last_7_start.isoformat()]
-        )
-        previous_food_cost = self._sum_inventory_usage_cost(
-            [item for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat()]
-        )
+        recent_food_cost = recent_inventory_expense
+        previous_food_cost = previous_inventory_expense
         recent_inventory_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses

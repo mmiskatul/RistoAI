@@ -2707,18 +2707,18 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
     home_metrics_after_create = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
     assert home_metrics_after_create.status_code == 200
     food_cost_metric_after_create = next(item for item in home_metrics_after_create.json()["items"] if item["label"] == "Food Cost")
-    assert food_cost_metric_after_create["value"] == 6.0
+    assert food_cost_metric_after_create["value"] == 20.0
     home_metrics_monthly_after_create = client.get("/api/v1/restaurant/home/metrics?period=monthly", headers=headers)
     assert home_metrics_monthly_after_create.status_code == 200
     monthly_food_cost_metric_after_create = next(
         item for item in home_metrics_monthly_after_create.json()["items"] if item["label"] == "Food Cost"
     )
-    assert monthly_food_cost_metric_after_create["value"] == 6.0
+    assert monthly_food_cost_metric_after_create["value"] == 20.0
 
     analytics_after_create = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_after_create.status_code == 200
     food_cost_breakdown_after_create = next(item for item in analytics_after_create.json()["cost_breakdown"] if item["label"] == "Food Cost")
-    assert food_cost_breakdown_after_create["value"] == 0.0
+    assert food_cost_breakdown_after_create["value"] == 20.0
 
     update_daily_response = client.patch(
         f"/api/v1/restaurant/manual-entry/{record_id}",
