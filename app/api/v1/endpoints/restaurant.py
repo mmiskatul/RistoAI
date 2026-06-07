@@ -42,6 +42,9 @@ from app.schemas.restaurant import (
     DocumentListResponse,
     DocumentSaveRequest,
     ExpenseCreateRequest,
+    FoodCostEntryCreateRequest,
+    FoodCostEntryListResponse,
+    FoodCostEntryResponse,
     ExpenseListResponse,
     ExpenseResponse,
     InsightDetailResponse,
@@ -69,6 +72,9 @@ from app.schemas.restaurant import (
     RestaurantNotificationFeedResponse,
     RestaurantNotificationSettingsResponse,
     RestaurantNotificationSettingsUpdateRequest,
+    RevenueEntryCreateRequest,
+    RevenueEntryListResponse,
+    RevenueEntryResponse,
     PushDeviceRegistrationRequest,
     PushDeviceUnregisterRequest,
     RestaurantChangePasswordRequest,
@@ -396,10 +402,30 @@ async def get_expense_detail(expense_id: str, current_user: dict = Depends(get_c
     return await service.get_expense_detail(current_user, expense_id)
 
 
+@router.post('/food-cost-entries', response_model=FoodCostEntryResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Expenses'], summary='Create Food Cost Entry', description='Creates a direct food cost entry with title and amount.')
+async def create_food_cost_entry(payload: FoodCostEntryCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> FoodCostEntryResponse:
+    return await service.create_food_cost_entry(current_user, payload)
+
+
+@router.get('/food-cost-entries', response_model=FoodCostEntryListResponse, tags=['Restaurant Expenses'], summary='List Food Cost Entries', description='Lists direct manual food cost entries.')
+async def list_food_cost_entries(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> FoodCostEntryListResponse:
+    return await service.list_food_cost_entries(current_user)
+
+
 @router.delete('/expenses/{expense_id}', status_code=status.HTTP_204_NO_CONTENT, tags=['Restaurant Expenses'], summary='Delete Expense', description='Deletes a direct manual expense. Source-generated expenses must be deleted from their source record.')
 async def delete_expense(expense_id: str, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> Response:
     await service.delete_expense(current_user, expense_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post('/revenue-entries', response_model=RevenueEntryResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Cash Management'], summary='Create Revenue Entry', description='Creates a direct revenue entry with title and amount.')
+async def create_revenue_entry(payload: RevenueEntryCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RevenueEntryResponse:
+    return await service.create_revenue_entry(current_user, payload)
+
+
+@router.get('/revenue-entries', response_model=RevenueEntryListResponse, tags=['Restaurant Cash Management'], summary='List Revenue Entries', description='Lists direct revenue entries.')
+async def list_revenue_entries(current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> RevenueEntryListResponse:
+    return await service.list_revenue_entries(current_user)
 
 
 @router.post('/cash/deposits', response_model=CashDepositResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Cash Management'], summary='Create Bank Deposit', description='Creates a cash deposit or bank drop record.')

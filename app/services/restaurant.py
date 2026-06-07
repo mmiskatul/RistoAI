@@ -97,6 +97,9 @@ from app.schemas.restaurant import (
     DocumentSaveRequest,
     DocumentUploadExtractRequest,
     ExpenseCreateRequest,
+    FoodCostEntryCreateRequest,
+    FoodCostEntryListResponse,
+    FoodCostEntryResponse,
     ExpenseDistributionItemResponse,
     ExpenseListResponse,
     ExpensePeriodResponse,
@@ -146,6 +149,9 @@ from app.schemas.restaurant import (
     SettingsActionItemResponse,
     SettingsLanguageOptionResponse,
     QuickActionResponse,
+    RevenueEntryCreateRequest,
+    RevenueEntryListResponse,
+    RevenueEntryResponse,
     VatOverviewResponse,
 )
 from app.schemas.common import MessageResponse
@@ -157,7 +163,7 @@ from app.utils.pagination import build_pagination_meta
 
 logger = logging.getLogger(__name__)
 
-FOOD_COST_EXPENSE_SOURCE_KINDS = {"document", "inventory"}
+FOOD_COST_EXPENSE_SOURCE_KINDS = {"document", "inventory", "food_cost_manual"}
 NON_FOOD_COST_EXPENSE_SOURCE_KINDS = {"manual_entry", "manual_entry_restore"}
 
 
@@ -1227,8 +1233,12 @@ class RestaurantOperationsService(BaseService):
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> RestaurantHomeMetricsResponse:
-        _, daily_records, expenses, _, _, _ = await self._load_home_dependencies(current_user)
-        anchor_date = self._resolve_home_activity_anchor_date(daily_records=daily_records, expenses=expenses)
+        _, daily_records, expenses, _, cash_deposits, _ = await self._load_home_dependencies(current_user)
+        anchor_date = self._resolve_home_activity_anchor_date(
+            daily_records=daily_records,
+            expenses=expenses,
+            cash_deposits=cash_deposits,
+        )
         filtered_daily_records = self._filter_home_daily_records(
             daily_records,
             period=period,
@@ -1243,8 +1253,22 @@ class RestaurantOperationsService(BaseService):
             to_date=to_date,
             anchor_date=anchor_date,
         )
-        metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
-        home_revenue_total = round(sum(self._resolve_home_revenue_amount(item) for item in filtered_daily_records), 2)
+        filtered_cash_deposits = self._filter_home_cash_deposits(
+            cash_deposits,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
+        metrics_context = self._build_metrics_context(
+            daily_records=filtered_daily_records,
+            expenses=filtered_expenses,
+            cash_deposits=filtered_cash_deposits,
+        )
+        home_revenue_total = self._calculate_home_revenue_total(
+            daily_records=filtered_daily_records,
+            cash_deposits=filtered_cash_deposits,
+        )
         return RestaurantHomeMetricsResponse(
             period=period,
             items=self._build_home_metric_cards(home_revenue_total=home_revenue_total, metrics_context=metrics_context),
@@ -1309,7 +1333,19 @@ class RestaurantOperationsService(BaseService):
             to_date=to_date,
             anchor_date=anchor_date,
         )
-        revenue_points = self._build_home_revenue_chart(filtered_daily_records, period=period, anchor_date=anchor_date)
+        filtered_cash_deposits = self._filter_home_cash_deposits(
+            cash_deposits,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
+        revenue_points = self._build_home_revenue_chart(
+            filtered_daily_records,
+            cash_deposits=filtered_cash_deposits,
+            period=period,
+            anchor_date=anchor_date,
+        )
         if period == 'monthly':
             revenue_points = [ChartPointResponse(label=point.label.replace('W', 'Week '), value=point.value) for point in revenue_points]
         return RestaurantHomeRevenueResponse(period=period, items=revenue_points)
@@ -1477,17 +1513,30 @@ class RestaurantOperationsService(BaseService):
                 scope_id=scope_id,
                 daily_records=filtered_daily_records,
                 expenses=filtered_expenses,
+                cash_deposits=filtered_cash_deposits,
             )
             if include_featured_insight
             else []
         )
-        metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
-        home_revenue_total = round(sum(self._resolve_home_revenue_amount(item) for item in filtered_daily_records), 2)
+        metrics_context = self._build_metrics_context(
+            daily_records=filtered_daily_records,
+            expenses=filtered_expenses,
+            cash_deposits=filtered_cash_deposits,
+        )
+        home_revenue_total = self._calculate_home_revenue_total(
+            daily_records=filtered_daily_records,
+            cash_deposits=filtered_cash_deposits,
+        )
         revenue_vat_rate = await self._resolve_revenue_vat_rate(current_user)
 
         revenue_points: list[ChartPointResponse] = []
         if include_revenue:
-            revenue_points = self._build_home_revenue_chart(filtered_daily_records, period=period, anchor_date=anchor_date)
+            revenue_points = self._build_home_revenue_chart(
+                filtered_daily_records,
+                cash_deposits=filtered_cash_deposits,
+                period=period,
+                anchor_date=anchor_date,
+            )
             if period == 'monthly':
                 revenue_points = [ChartPointResponse(label=point.label.replace('W', 'Week '), value=point.value) for point in revenue_points]
         invoice_document_total = round(sum(float(item.get("total_amount", 0)) for item in filtered_documents if item.get("status") == "processed"), 2)
@@ -1963,6 +2012,67 @@ class RestaurantOperationsService(BaseService):
         await self._send_activity_push_for_expense(current_user, serialized_expense)
         return self._to_expense_response(document)
 
+    async def create_food_cost_entry(self, current_user: dict, payload: FoodCostEntryCreateRequest) -> FoodCostEntryResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        expense_date = payload.expense_date or datetime.now(UTC).date()
+        document = await self.expense_repository.create(
+            {
+                "tenant_id": scope_id,
+                "category": "Food Cost",
+                "amount": payload.amount,
+                "expense_date": datetime.combine(expense_date, datetime.min.time(), tzinfo=UTC),
+                "section": "bank",
+                "notes": payload.title,
+                "source_kind": "food_cost_manual",
+                "created_by_user_id": str(current_user["_id"]),
+            }
+        )
+        serialized_expense = self.serialize(document)
+        await self._replace_transactions_for_source(
+            scope_id=scope_id,
+            source_kind="food_cost_manual",
+            source_id=serialized_expense["id"],
+            transactions=self._build_expense_transactions(serialized_expense),
+        )
+        await self._sync_restaurant_record(scope_id=scope_id, business_date=expense_date, current_user=current_user)
+        await self._send_activity_push_for_expense(current_user, serialized_expense)
+        return FoodCostEntryResponse(
+            id=serialized_expense["id"],
+            title=str(serialized_expense.get("notes") or serialized_expense.get("category") or "Food Cost"),
+            amount=float(serialized_expense.get("amount", 0) or 0),
+            expense_date=str(serialized_expense.get("expense_date") or ""),
+            created_at=str(serialized_expense.get("created_at") or ""),
+            source_kind=str(serialized_expense.get("source_kind") or "") or None,
+        )
+
+    async def list_food_cost_entries(self, current_user: dict) -> FoodCostEntryListResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        serialized_expenses = sorted(
+            [
+                item for item in self.serialize_list(expenses)
+                if str(item.get("source_kind") or "").lower() == "food_cost_manual"
+            ],
+            key=lambda item: (
+                str(item.get("expense_date") or ""),
+                str(item.get("created_at") or ""),
+            ),
+            reverse=True,
+        )
+        return FoodCostEntryListResponse(
+            items=[
+                FoodCostEntryResponse(
+                    id=item["id"],
+                    title=str(item.get("notes") or item.get("category") or "Food Cost"),
+                    amount=float(item.get("amount", 0) or 0),
+                    expense_date=str(item.get("expense_date") or ""),
+                    created_at=str(item.get("created_at") or ""),
+                    source_kind=str(item.get("source_kind") or "") or None,
+                )
+                for item in serialized_expenses
+            ]
+        )
+
     async def list_expenses(self, current_user: dict, *, page: int, page_size: int, reference_date: date | None = None) -> ExpenseListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         items, _ = await self.expense_repository.list_by_scope(
@@ -2027,13 +2137,75 @@ class RestaurantOperationsService(BaseService):
     async def delete_expense(self, current_user: dict, expense_id: str) -> None:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         expense = await self.expense_repository.get_scoped_by_id(expense_id, scope_id)
-        if expense.get("source_kind"):
+        if expense.get("source_kind") and str(expense.get("source_kind") or "").lower() != "food_cost_manual":
             raise ValidationException("Generated expenses must be deleted from their source record.")
         expense_date = self._safe_parse_date(expense.get("expense_date"))
-        await self._delete_transactions_for_source(scope_id=scope_id, source_kind="expense", source_id=str(expense["_id"]))
+        transaction_source_kind = "food_cost_manual" if str(expense.get("source_kind") or "").lower() == "food_cost_manual" else "expense"
+        await self._delete_transactions_for_source(scope_id=scope_id, source_kind=transaction_source_kind, source_id=str(expense["_id"]))
         await self.expense_repository.delete(expense["_id"])
         if expense_date is not None:
             await self._sync_restaurant_record(scope_id=scope_id, business_date=expense_date, current_user=current_user)
+
+    async def create_revenue_entry(self, current_user: dict, payload: RevenueEntryCreateRequest) -> RevenueEntryResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        revenue_date = payload.revenue_date or datetime.now(UTC).date()
+        document = await self.cash_repository.create(
+            {
+                "tenant_id": scope_id,
+                "deposit_date": datetime.combine(revenue_date, datetime.min.time(), tzinfo=UTC),
+                "amount": payload.amount,
+                "type": "cash_in",
+                "bank_account": payload.title,
+                "notes": "Manual revenue entry",
+                "source_kind": "revenue_entry",
+                "created_by_user_id": str(current_user["_id"]),
+            }
+        )
+        serialized_deposit = self.serialize(document)
+        await self._replace_transactions_for_source(
+            scope_id=scope_id,
+            source_kind="revenue_entry",
+            source_id=serialized_deposit["id"],
+            transactions=self._build_cash_deposit_transactions(serialized_deposit),
+        )
+        await self._sync_restaurant_record(scope_id=scope_id, business_date=revenue_date, current_user=current_user)
+        await self._send_activity_push_for_cash_deposit(current_user, serialized_deposit)
+        return RevenueEntryResponse(
+            id=serialized_deposit["id"],
+            title=str(serialized_deposit.get("bank_account") or "Revenue"),
+            amount=float(serialized_deposit.get("amount", 0) or 0),
+            revenue_date=str(serialized_deposit.get("deposit_date") or ""),
+            created_at=str(serialized_deposit.get("created_at") or ""),
+            source_kind=str(serialized_deposit.get("source_kind") or "") or None,
+        )
+
+    async def list_revenue_entries(self, current_user: dict) -> RevenueEntryListResponse:
+        scope_id = ScopedRepository.resolve_scope_id(current_user)
+        deposits, _ = await self.cash_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
+        serialized_deposits = sorted(
+            [
+                item for item in self.serialize_list(deposits)
+                if str(item.get("source_kind") or "").lower() == "revenue_entry"
+            ],
+            key=lambda item: (
+                str(item.get("deposit_date") or ""),
+                str(item.get("created_at") or ""),
+            ),
+            reverse=True,
+        )
+        return RevenueEntryListResponse(
+            items=[
+                RevenueEntryResponse(
+                    id=item["id"],
+                    title=str(item.get("bank_account") or "Revenue"),
+                    amount=float(item.get("amount", 0) or 0),
+                    revenue_date=str(item.get("deposit_date") or ""),
+                    created_at=str(item.get("created_at") or ""),
+                    source_kind=str(item.get("source_kind") or "") or None,
+                )
+                for item in serialized_deposits
+            ]
+        )
 
     async def create_cash_deposit(self, current_user: dict, payload: CashDepositCreateRequest) -> CashDepositResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -2067,7 +2239,7 @@ class RestaurantOperationsService(BaseService):
     async def update_cash_deposit(self, current_user: dict, deposit_id: str, payload: CashDepositUpdateRequest) -> CashDepositResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         deposit = await self.cash_repository.get_scoped_by_id(deposit_id, scope_id)
-        if deposit.get("source_kind"):
+        if deposit.get("source_kind") and str(deposit.get("source_kind") or "").lower() != "revenue_entry":
             raise ValidationException("Generated cash transactions must be edited from their source record.")
         previous_deposit_date = self._safe_parse_date(deposit.get("deposit_date")) or payload.deposit_date
         updated = await self.cash_repository.update(
@@ -2083,22 +2255,22 @@ class RestaurantOperationsService(BaseService):
         serialized_updated = self.serialize(updated)
         await self._replace_transactions_for_source(
             scope_id=scope_id,
-            source_kind="deposit",
+            source_kind="revenue_entry" if str(deposit.get("source_kind") or "").lower() == "revenue_entry" else "deposit",
             source_id=serialized_updated["id"],
             transactions=self._build_cash_deposit_transactions(serialized_updated),
         )
         await self._sync_restaurant_record(scope_id=scope_id, business_date=previous_deposit_date, current_user=current_user)
-        if payload.deposit_date != previous_deposit_date:
-            await self._sync_restaurant_record(scope_id=scope_id, business_date=payload.deposit_date, current_user=current_user)
+        await self._sync_restaurant_record(scope_id=scope_id, business_date=payload.deposit_date, current_user=current_user)
         return self._to_cash_deposit_response(updated)
 
     async def delete_cash_deposit(self, current_user: dict, deposit_id: str) -> None:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         deposit = await self.cash_repository.get_scoped_by_id(deposit_id, scope_id)
-        if deposit.get("source_kind"):
+        if deposit.get("source_kind") and str(deposit.get("source_kind") or "").lower() != "revenue_entry":
             raise ValidationException("Generated cash transactions must be deleted from their source record.")
         previous_deposit_date = self._safe_parse_date(deposit.get("deposit_date"))
-        await self._delete_transactions_for_source(scope_id=scope_id, source_kind="deposit", source_id=str(deposit["_id"]))
+        transaction_source_kind = "revenue_entry" if str(deposit.get("source_kind") or "").lower() == "revenue_entry" else "deposit"
+        await self._delete_transactions_for_source(scope_id=scope_id, source_kind=transaction_source_kind, source_id=str(deposit["_id"]))
         await self.cash_repository.delete(deposit["_id"])
         if previous_deposit_date is not None:
             await self._sync_restaurant_record(scope_id=scope_id, business_date=previous_deposit_date, current_user=current_user)
@@ -2893,12 +3065,35 @@ class RestaurantOperationsService(BaseService):
     async def list_inventory(self, current_user: dict, *, page: int, page_size: int, search: str | None, status: str | None, category: str | None) -> InventoryListResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         items, total = await self.inventory_repository.list_by_scope(scope_id=scope_id, page=page, page_size=page_size, search=search, status=status, category=category)
+        expenses, _ = await self.expense_repository.list_by_scope(scope_id=scope_id, page=1, page_size=500)
         serialized_items = self.serialize_list(items)
+        serialized_expenses = self.serialize_list(expenses)
         total_inventory_value = round(sum(item["stock_quantity"] * item["unit_price"] for item in serialized_items), 2)
         return InventoryListResponse(
             total_inventory_value=total_inventory_value,
             usage_summary=self._build_inventory_usage_summary(serialized_items),
             items=[self._to_inventory_item_response(item) for item in items],
+            food_cost_entries=[
+                FoodCostEntryResponse(
+                    id=item["id"],
+                    title=str(item.get("notes") or item.get("category") or "Food Cost"),
+                    amount=float(item.get("amount", 0) or 0),
+                    expense_date=str(item.get("expense_date") or ""),
+                    created_at=str(item.get("created_at") or ""),
+                    source_kind=str(item.get("source_kind") or "") or None,
+                )
+                for item in sorted(
+                    [
+                        expense for expense in serialized_expenses
+                        if str(expense.get("source_kind") or "").lower() == "food_cost_manual"
+                    ],
+                    key=lambda expense: (
+                        str(expense.get("expense_date") or ""),
+                        str(expense.get("created_at") or ""),
+                    ),
+                    reverse=True,
+                )
+            ],
             **build_pagination_meta(total=total, page=page, page_size=page_size),
         )
 
@@ -4190,51 +4385,73 @@ class RestaurantOperationsService(BaseService):
             for item in serialized
         ]
 
-    def _build_metrics_context(self, *, daily_records: list[dict], expenses: list[dict]) -> dict[str, float | int]:
+    def _build_metrics_context(
+        self,
+        *,
+        daily_records: list[dict],
+        expenses: list[dict],
+        cash_deposits: list[dict] | None = None,
+    ) -> dict[str, float | int]:
         today = datetime.now(UTC).date()
         last_7_start = today - timedelta(days=6)
         prev_7_start = today - timedelta(days=13)
         prev_7_end = today - timedelta(days=7)
         serialized_records = self.serialize_list(daily_records)
         serialized_expenses = self.serialize_list(expenses)
-        revenue_total = round(sum(item["total_revenue"] for item in serialized_records), 2)
+        serialized_cash_deposits = self.serialize_list(cash_deposits or [])
+        manual_revenue_total = round(
+            sum(float(item.get("amount", 0) or 0) for item in serialized_cash_deposits if self._is_manual_revenue_entry(item)),
+            2,
+        )
+        revenue_total = round(sum(item["total_revenue"] for item in serialized_records) + manual_revenue_total, 2)
         expenses_total = round(sum(float(item.get("total_expenses", 0)) for item in serialized_records), 2)
         inventory_expense_total = round(
             sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if self._is_inventory_linked_expense(item)),
             2,
         )
         other_expense_total = round(
-            sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if not self._is_inventory_linked_expense(item)),
+            sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if not self._is_food_cost_expense(item)),
             2,
         )
         # Home food cost follows inventory purchase expense, while manual
         # inventory usage remains inventory-dashboard-only reporting.
-        food_cost_total = inventory_expense_total
+        food_cost_total = round(
+            sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if self._is_food_cost_expense(item)),
+            2,
+        )
         profit_total = round(sum(float(item.get("profit", 0)) for item in serialized_records), 2)
         covers_total = sum(int(item.get("total_covers", item.get("lunch_covers", 0) + item.get("dinner_covers", 0))) for item in serialized_records)
-        recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
-        previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
+        recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat()) + sum(
+            float(item.get("amount", 0) or 0)
+            for item in serialized_cash_deposits
+            if self._is_manual_revenue_entry(item) and str(item.get("deposit_date") or "")[:10] >= last_7_start.isoformat()
+        )
+        previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat()) + sum(
+            float(item.get("amount", 0) or 0)
+            for item in serialized_cash_deposits
+            if self._is_manual_revenue_entry(item) and prev_7_start.isoformat() <= str(item.get("deposit_date") or "")[:10] <= prev_7_end.isoformat()
+        )
         recent_inventory_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
-            if item["expense_date"][:10] >= last_7_start.isoformat() and self._is_inventory_linked_expense(item)
+            if item["expense_date"][:10] >= last_7_start.isoformat() and self._is_food_cost_expense(item)
         )
         previous_inventory_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
-            if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and self._is_inventory_linked_expense(item)
+            if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and self._is_food_cost_expense(item)
         )
         recent_food_cost = recent_inventory_expense
         previous_food_cost = previous_inventory_expense
         recent_other_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
-            if item["expense_date"][:10] >= last_7_start.isoformat() and not self._is_inventory_linked_expense(item)
+            if item["expense_date"][:10] >= last_7_start.isoformat() and not self._is_food_cost_expense(item)
         )
         previous_other_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
-            if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and not self._is_inventory_linked_expense(item)
+            if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and not self._is_food_cost_expense(item)
         )
         recent_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
@@ -5441,20 +5658,34 @@ class RestaurantOperationsService(BaseService):
         self,
         daily_records: list[dict],
         *,
+        cash_deposits: list[dict] | None = None,
         period: str,
         anchor_date: date | None = None,
     ) -> list[ChartPointResponse]:
         if period == 'monthly':
-            return self._build_monthly_revenue_chart(daily_records, anchor_date=anchor_date)
-        return self._build_weekly_revenue_chart(daily_records, anchor_date=anchor_date)
+            return self._build_monthly_revenue_chart(daily_records, cash_deposits=cash_deposits, anchor_date=anchor_date)
+        return self._build_weekly_revenue_chart(daily_records, cash_deposits=cash_deposits, anchor_date=anchor_date)
 
-    def _build_monthly_revenue_chart(self, daily_records: list[dict], *, anchor_date: date | None = None) -> list[ChartPointResponse]:
+    def _build_monthly_revenue_chart(
+        self,
+        daily_records: list[dict],
+        *,
+        cash_deposits: list[dict] | None = None,
+        anchor_date: date | None = None,
+    ) -> list[ChartPointResponse]:
         target_date = anchor_date or datetime.now(UTC).date()
         start_date = target_date - timedelta(days=29)
         by_day: dict[str, float] = {}
         for item in self.serialize_list(daily_records):
             key = item['business_date']
             by_day[key] = by_day.get(key, 0.0) + self._resolve_home_revenue_amount(item)
+        for item in self.serialize_list(cash_deposits or []):
+            if not self._is_manual_revenue_entry(item):
+                continue
+            key = str(item.get("deposit_date") or "")[:10]
+            if not key:
+                continue
+            by_day[key] = by_day.get(key, 0.0) + float(item.get("amount", 0) or 0)
 
         points: list[ChartPointResponse] = []
         for index in range(4):
@@ -5839,16 +6070,42 @@ class RestaurantOperationsService(BaseService):
         resolved_expense_vat_rate = self.DEFAULT_EXPENSE_VAT_RATE if expense_vat_rate is None else expense_vat_rate
         return round((revenue_total * resolved_revenue_vat_rate) - (expenses_total * resolved_expense_vat_rate), 2)
 
-    def _build_weekly_revenue_chart(self, daily_records: list[dict], *, anchor_date: date | None = None) -> list[ChartPointResponse]:
+    def _build_weekly_revenue_chart(
+        self,
+        daily_records: list[dict],
+        *,
+        cash_deposits: list[dict] | None = None,
+        anchor_date: date | None = None,
+    ) -> list[ChartPointResponse]:
         today = anchor_date or datetime.now(UTC).date()
         by_day: dict[str, float] = {}
         for item in self.serialize_list(daily_records):
             by_day[item["business_date"]] = by_day.get(item["business_date"], 0.0) + self._resolve_home_revenue_amount(item)
+        for item in self.serialize_list(cash_deposits or []):
+            if not self._is_manual_revenue_entry(item):
+                continue
+            key = str(item.get("deposit_date") or "")[:10]
+            if not key:
+                continue
+            by_day[key] = by_day.get(key, 0.0) + float(item.get("amount", 0) or 0)
         points: list[ChartPointResponse] = []
         for offset in range(6, -1, -1):
             target = today - timedelta(days=offset)
             points.append(ChartPointResponse(label=target.strftime("%a").upper(), value=round(by_day.get(target.isoformat(), 0.0), 2)))
         return points
+
+    def _calculate_home_revenue_total(
+        self,
+        *,
+        daily_records: list[dict],
+        cash_deposits: list[dict] | None = None,
+    ) -> float:
+        daily_total = round(sum(self._resolve_home_revenue_amount(item) for item in daily_records), 2)
+        manual_total = round(
+            sum(float(item.get("amount", 0) or 0) for item in self.serialize_list(cash_deposits or []) if self._is_manual_revenue_entry(item)),
+            2,
+        )
+        return round(daily_total + manual_total, 2)
 
     @staticmethod
     def _resolve_home_revenue_amount(record: dict[str, Any]) -> float:
@@ -5953,12 +6210,14 @@ class RestaurantOperationsService(BaseService):
                     "manual_entry": "Spesa dati giornalieri",
                     "document": "Spesa documento",
                     "inventory": "Spesa inventario",
+                    "food_cost_manual": "Costo cibo aggiunto",
                 }.get(source_kind, "Spesa aggiunta")
                 if activity_language == "it"
                 else {
                     "manual_entry": "Daily data expense",
                     "document": "Document expense",
                     "inventory": "Inventory expense",
+                    "food_cost_manual": "Food cost added",
                 }.get(source_kind, "Expense added")
             )
 
@@ -5985,8 +6244,9 @@ class RestaurantOperationsService(BaseService):
         )
         for item in serialized_cash_deposits[:max_items]:
             transaction_type = str(item.get("type") or "bank_deposit")
+            deposit_source_kind = str(item.get("source_kind") or "").lower()
             cash_title = (
-                {
+                ("Ricavo aggiunto" if deposit_source_kind == "revenue_entry" else {
                     "bank_deposit": "Deposito bancario registrato",
                     "cash_deposit": "Deposito cassa registrato",
                     "pos_payment": "Pagamento POS registrato",
@@ -5995,9 +6255,9 @@ class RestaurantOperationsService(BaseService):
                     "cash_withdrawal": "Prelievo cassa registrato",
                     "cash_out": "Uscita cassa registrata",
                     "cash_expense": "Spesa in contanti registrata",
-                }.get(transaction_type, "Movimento di cassa registrato")
+                }.get(transaction_type, "Movimento di cassa registrato"))
                 if activity_language == "it"
-                else {
+                else ("Revenue added" if deposit_source_kind == "revenue_entry" else {
                     "bank_deposit": "Bank deposit logged",
                     "cash_deposit": "Cash deposit logged",
                     "pos_payment": "POS payment recorded",
@@ -6006,7 +6266,7 @@ class RestaurantOperationsService(BaseService):
                     "cash_withdrawal": "Cash withdrawal recorded",
                     "cash_out": "Cash out recorded",
                     "cash_expense": "Cash expense recorded",
-                }.get(transaction_type, "Cash transaction recorded")
+                }.get(transaction_type, "Cash transaction recorded"))
             )
             items.append(
                 ActivityItemResponse(
@@ -6308,7 +6568,10 @@ class RestaurantOperationsService(BaseService):
         for item in expenses:
             amount = float(item.get("amount", 0) or 0)
             section = str(item.get("section") or "cash").lower()
-            if section == "cash":
+            source_kind = str(item.get("source_kind") or "").lower()
+            if source_kind == "food_cost_manual":
+                title = f"Food cost increased by {self._format_notification_currency(amount)}"
+            elif section == "cash":
                 title = f"Cash available decreased by {self._format_notification_currency(amount)}"
             else:
                 title = f"Expenses increased by {self._format_notification_currency(amount)}"
@@ -6329,7 +6592,9 @@ class RestaurantOperationsService(BaseService):
         for item in cash_deposits:
             amount = float(item.get("amount", 0) or 0)
             transaction_type = str(item.get("type") or "bank_deposit")
-            if transaction_type in {"bank_deposit", "cash_deposit", "cash_withdrawal", "cash_out", "cash_expense"}:
+            if self._is_manual_revenue_entry(item):
+                title = f"Revenue increased by {self._format_notification_currency(amount)}"
+            elif transaction_type in {"bank_deposit", "cash_deposit", "cash_withdrawal", "cash_out", "cash_expense"}:
                 title = f"Cash available decreased by {self._format_notification_currency(amount)}"
             elif transaction_type == "cash_in":
                 title = f"Cash available increased by {self._format_notification_currency(amount)}"
@@ -6395,6 +6660,10 @@ class RestaurantOperationsService(BaseService):
             return True
         category = str(item.get("category") or "").strip().lower()
         return "food" in category or "inventory" in category
+
+    @staticmethod
+    def _is_manual_revenue_entry(item: dict[str, Any]) -> bool:
+        return str(item.get("source_kind") or "").strip().lower() == "revenue_entry"
 
     @staticmethod
     def _is_inventory_linked_expense(item: dict[str, Any]) -> bool:

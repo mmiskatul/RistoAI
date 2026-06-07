@@ -402,6 +402,44 @@ class ExpenseListResponse(BaseSchema):
     this_year: ExpensePeriodResponse
 
 
+class RevenueEntryCreateRequest(BaseSchema):
+    title: str = Field(min_length=2, max_length=120)
+    amount: float = Field(gt=0)
+    revenue_date: date | None = None
+
+
+class RevenueEntryResponse(BaseSchema):
+    id: str
+    title: str
+    amount: float
+    revenue_date: str
+    created_at: str
+    source_kind: str | None = None
+
+
+class RevenueEntryListResponse(BaseSchema):
+    items: list[RevenueEntryResponse] = Field(default_factory=list)
+
+
+class FoodCostEntryCreateRequest(BaseSchema):
+    title: str = Field(min_length=2, max_length=120)
+    amount: float = Field(gt=0)
+    expense_date: date | None = None
+
+
+class FoodCostEntryResponse(BaseSchema):
+    id: str
+    title: str
+    amount: float
+    expense_date: str
+    created_at: str
+    source_kind: str | None = None
+
+
+class FoodCostEntryListResponse(BaseSchema):
+    items: list[FoodCostEntryResponse] = Field(default_factory=list)
+
+
 class BankAccountCreateRequest(BaseSchema):
     bank_account: str = Field(
         min_length=2,
@@ -879,6 +917,7 @@ class InventoryUsageSummaryResponse(BaseSchema):
 class InventoryListResponse(BaseSchema):
     total_inventory_value: float
     usage_summary: InventoryUsageSummaryResponse = Field(default_factory=InventoryUsageSummaryResponse)
+    food_cost_entries: list[FoodCostEntryResponse] = Field(default_factory=list)
     total: int
     page: int
     page_size: int
