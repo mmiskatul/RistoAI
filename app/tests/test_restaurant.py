@@ -1560,6 +1560,49 @@ def test_home_metrics_include_uploaded_document_expenses_like_inventory(client, 
     assert restaurant_record["total_expenses"] == 188.0
 
 
+def test_home_food_cost_uses_inventory_add_cost_without_daily_records(client, app):
+    seed_subscription_plan(app)
+    headers = register_and_login(
+        client,
+        {
+            "full_name": "Inventory Only Owner",
+            "email": "inventory-only-owner@example.com",
+            "password": "InventoryOnly123",
+            "phone": "+1555000314",
+        },
+    )
+    select_subscription_plan(client, headers)
+
+    today_iso = datetime.now(UTC).date().isoformat()
+
+    inventory_response = client.post(
+        "/api/v1/restaurant/inventory",
+        headers=headers,
+        json={
+            "product_name": "Rice",
+            "category": "Food Supplies",
+            "stock_quantity": 30,
+            "unit_type": "kg",
+            "supplier_name": "Market Supplier",
+            "unit_price": 100.0,
+            "alert_threshold": 5,
+            "purchase_date": today_iso,
+        },
+    )
+    assert inventory_response.status_code == 201
+
+    home_metrics_response = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
+    assert home_metrics_response.status_code == 200
+    home_metrics_payload = home_metrics_response.json()
+    food_cost_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Food Cost")
+    assert food_cost_metric["value"] == 3000.0
+
+    home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
+    assert home_response.status_code == 200
+    weekly_food_cost_metric = next(item for item in home_response.json()["weekly"]["metrics"] if item["label"] == "Food Cost")
+    assert weekly_food_cost_metric["value"] == 3000.0
+
+
 def test_restaurant_cash_api_contracts_remain_stable(client, app):
     seed_subscription_plan(app)
     headers = register_and_login(

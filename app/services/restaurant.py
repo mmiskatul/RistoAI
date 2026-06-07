@@ -1228,8 +1228,21 @@ class RestaurantOperationsService(BaseService):
         to_date: date | None = None,
     ) -> RestaurantHomeMetricsResponse:
         _, daily_records, expenses, _, _, _ = await self._load_home_dependencies(current_user)
-        filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
-        filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
+        anchor_date = self._resolve_home_activity_anchor_date(daily_records=daily_records, expenses=expenses)
+        filtered_daily_records = self._filter_home_daily_records(
+            daily_records,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
+        filtered_expenses = self._filter_home_expenses(
+            expenses,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
         metrics_context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
         home_revenue_total = round(sum(self._resolve_home_revenue_amount(item) for item in filtered_daily_records), 2)
         return RestaurantHomeMetricsResponse(
@@ -1282,8 +1295,13 @@ class RestaurantOperationsService(BaseService):
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> RestaurantHomeRevenueResponse:
-        _, daily_records, _, _, _, _ = await self._load_home_dependencies(current_user)
-        anchor_date = self._resolve_latest_business_date(daily_records)
+        _, daily_records, expenses, documents, cash_deposits, _ = await self._load_home_dependencies(current_user)
+        anchor_date = self._resolve_home_activity_anchor_date(
+            daily_records=daily_records,
+            expenses=expenses,
+            documents=documents,
+            cash_deposits=cash_deposits,
+        )
         filtered_daily_records = self._filter_home_daily_records(
             daily_records,
             period=period,
@@ -1305,8 +1323,21 @@ class RestaurantOperationsService(BaseService):
         to_date: date | None = None,
     ) -> RestaurantHomeInsightResponse:
         scope_id, daily_records, expenses, _, _, _ = await self._load_home_dependencies(current_user)
-        filtered_daily_records = self._filter_home_daily_records(daily_records, period=period, from_date=from_date, to_date=to_date)
-        filtered_expenses = self._filter_home_expenses(expenses, period=period, from_date=from_date, to_date=to_date)
+        anchor_date = self._resolve_home_activity_anchor_date(daily_records=daily_records, expenses=expenses)
+        filtered_daily_records = self._filter_home_daily_records(
+            daily_records,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
+        filtered_expenses = self._filter_home_expenses(
+            expenses,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
         insights = await self._get_or_generate_insights(
             current_user=current_user,
             scope_id=scope_id,
@@ -1405,7 +1436,12 @@ class RestaurantOperationsService(BaseService):
         include_revenue: bool = True,
         include_featured_insight: bool = True,
     ) -> RestaurantHomePeriodResponse:
-        anchor_date = self._resolve_latest_business_date(daily_records)
+        anchor_date = self._resolve_home_activity_anchor_date(
+            daily_records=daily_records,
+            expenses=expenses,
+            documents=documents,
+            cash_deposits=cash_deposits,
+        )
         filtered_daily_records = self._filter_home_daily_records(
             daily_records,
             period=period,
@@ -5670,6 +5706,33 @@ class RestaurantOperationsService(BaseService):
             candidate = self._safe_parse_date(item.get("business_date"))
             if latest is None or candidate > latest:
                 latest = candidate
+        return latest
+
+    def _resolve_home_activity_anchor_date(
+        self,
+        *,
+        daily_records: list[dict] | None = None,
+        expenses: list[dict] | None = None,
+        documents: list[dict] | None = None,
+        cash_deposits: list[dict] | None = None,
+    ) -> date | None:
+        values: list[Any] = []
+        if daily_records:
+            values.extend(item.get("business_date") for item in self.serialize_list(daily_records))
+        if expenses:
+            values.extend(item.get("expense_date") for item in self.serialize_list(expenses))
+        if documents:
+            values.extend(item.get("invoice_date") for item in self.serialize_list(documents))
+        if cash_deposits:
+            values.extend(item.get("deposit_date") for item in self.serialize_list(cash_deposits))
+
+        latest: date | None = None
+        for value in values:
+            parsed = self._parse_optional_date(value)
+            if parsed is None:
+                continue
+            if latest is None or parsed > latest:
+                latest = parsed
         return latest
 
     def _find_latest_record_with_cover_data(self, records: list[dict]) -> dict[str, Any] | None:
