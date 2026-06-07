@@ -1467,22 +1467,16 @@ class RestaurantOperationsService(BaseService):
 
     async def get_home_recent_activity(self, current_user: dict, *, limit: int = 6, diverse: bool = True) -> RestaurantHomeRecentActivityResponse:
         scope_id, _, expenses, documents, cash_deposits, inventory_items = await self._load_home_dependencies(current_user)
-        stored_notifications, _ = await self.notification_repository.list_by_scope(scope_id=scope_id, page=1, page_size=limit)
-        persisted_items = self._build_activity_items_from_stored_notifications(stored_notifications)
         return RestaurantHomeRecentActivityResponse(
-            items=self._merge_activity_items(
-                persisted_items,
-                self._build_recent_activity(
-                    current_user=current_user,
-                    daily_records=await self._load_recent_activity_daily_records(scope_id),
-                    expenses=self.serialize_list(expenses),
-                    documents=self.serialize_list(documents),
-                    cash_deposits=self.serialize_list(cash_deposits),
-                    inventory_items=self.serialize_list(inventory_items),
-                    max_items=limit,
-                    prefer_distinct_kinds=diverse,
-                ),
-                limit=limit,
+            items=self._build_recent_activity(
+                current_user=current_user,
+                daily_records=await self._load_recent_activity_daily_records(scope_id),
+                expenses=self.serialize_list(expenses),
+                documents=self.serialize_list(documents),
+                cash_deposits=self.serialize_list(cash_deposits),
+                inventory_items=self.serialize_list(inventory_items),
+                max_items=limit,
+                prefer_distinct_kinds=diverse,
             )
         )
 
