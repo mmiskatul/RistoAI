@@ -25,6 +25,7 @@ from app.repositories.restaurant_ops import (
     RestaurantMonthlyRecordRepository,
     RestaurantDocumentRepository,
     RestaurantExpenseRepository,
+    RestaurantFoodCostRepository,
     RestaurantFinanceTransactionRepository,
     RestaurantInsightRepository,
     RestaurantInventoryCategoryRepository,
@@ -351,6 +352,7 @@ class RestaurantOperationsService(BaseService):
         user_repository: UserRepository,
         document_repository: RestaurantDocumentRepository,
         expense_repository: RestaurantExpenseRepository,
+        food_cost_repository: RestaurantFoodCostRepository,
         cash_repository: RestaurantCashDepositRepository,
         bank_account_repository: RestaurantBankAccountRepository,
         daily_record_repository: RestaurantDailyRecordRepository,
@@ -371,6 +373,7 @@ class RestaurantOperationsService(BaseService):
         self.user_repository = user_repository
         self.document_repository = document_repository
         self.expense_repository = expense_repository
+        self.food_cost_repository = food_cost_repository
         self.cash_repository = cash_repository
         self.bank_account_repository = bank_account_repository
         self.daily_record_repository = daily_record_repository
@@ -2336,6 +2339,10 @@ class RestaurantOperationsService(BaseService):
             record_id=serialized_document["id"],
             usage=resolved_stock_usage,
         )
+        await self._sync_daily_record_food_cost_entries(
+            scope_id=scope_id,
+            record=serialized_document,
+        )
         await self._replace_transactions_for_source(
             scope_id=scope_id,
             source_kind="manual_entry",
@@ -2428,6 +2435,10 @@ class RestaurantOperationsService(BaseService):
             current_user=current_user,
             record_id=serialized_updated["id"],
             usage=resolved_stock_usage,
+        )
+        await self._sync_daily_record_food_cost_entries(
+            scope_id=scope_id,
+            record=serialized_updated,
         )
         await self._replace_transactions_for_source(
             scope_id=scope_id,
@@ -2729,6 +2740,11 @@ class RestaurantOperationsService(BaseService):
             record_id=str(record["_id"]),
             usage=record.get("inventory_usage") or [],
         )
+        await self.food_cost_repository.delete_for_source(
+            scope_id=scope_id,
+            source_kind="manual_entry",
+            source_id=str(record["_id"]),
+        )
         await self._delete_transactions_for_source(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
         await self._delete_source_linked_expense(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
         await self._delete_source_linked_cash_deposits(scope_id=scope_id, source_kind="manual_entry", source_id=str(record["_id"]))
@@ -2766,6 +2782,11 @@ class RestaurantOperationsService(BaseService):
                 current_user=current_user,
                 record_id=record["id"],
                 usage=record.get("inventory_usage") or [],
+            )
+            await self.food_cost_repository.delete_for_source(
+                scope_id=scope_id,
+                source_kind="manual_entry",
+                source_id=record["id"],
             )
             await self._delete_transactions_for_source(scope_id=scope_id, source_kind="manual_entry", source_id=record["id"])
             await self._delete_source_linked_expense(scope_id=scope_id, source_kind="manual_entry", source_id=record["id"])
@@ -6329,6 +6350,37 @@ class RestaurantOperationsService(BaseService):
                 unit_cost = self._safe_float(usage.get("unit_cost"))
                 total += quantity_used * unit_cost
         return round(total, 2)
+
+    def _build_food_cost_entries_for_record(self, *, scope_id: str, record: dict[str, Any]) -> list[dict[str, Any]]:
+        business_date = str(record.get("business_date") or "")
+        entries: list[dict[str, Any]] = []
+        for usage in record.get("inventory_usage") or []:
+            quantity_used = self._safe_float(usage.get("quantity_used"))
+            unit_cost = self._safe_float(usage.get("unit_cost"))
+            total_cost = self._safe_float(usage.get("total_cost")) or round(quantity_used * unit_cost, 2)
+            if not usage.get("inventory_item_id") or quantity_used <= 0 or total_cost <= 0:
+                continue
+            entries.append(
+                {
+                    "tenant_id": scope_id,
+                    "business_date": business_date,
+                    "inventory_item_id": str(usage.get("inventory_item_id") or ""),
+                    "product_name": str(usage.get("product_name") or ""),
+                    "quantity_used": quantity_used,
+                    "unit_type": str(usage.get("unit_type") or ""),
+                    "unit_cost": unit_cost,
+                    "total_cost": total_cost,
+                }
+            )
+        return entries
+
+    async def _sync_daily_record_food_cost_entries(self, *, scope_id: str, record: dict[str, Any]) -> None:
+        await self.food_cost_repository.replace_for_source(
+            scope_id=scope_id,
+            source_kind="manual_entry",
+            source_id=str(record.get("id") or record.get("_id") or ""),
+            entries=self._build_food_cost_entries_for_record(scope_id=scope_id, record=record),
+        )
 
     def _build_document_updates(self, *, current_user: dict, payload: DocumentConfirmRequest, mark_processed: bool) -> dict[str, Any]:
         updates = payload.model_dump(exclude_none=True)

@@ -23,6 +23,7 @@ class RestaurantCollections:
     WEEKLY_RECORDS = FINANCE_SNAPSHOTS
     MONTHLY_RECORDS = FINANCE_SNAPSHOTS
     EXPENSES = "restaurant_expenses"
+    FOOD_COSTS = "restaurant_food_costs"
     CASH_DEPOSITS = "restaurant_cash_deposits"
     BANK_ACCOUNTS = "restaurant_bank_accounts"
     INVENTORY_ITEMS = "restaurant_inventory_items"
@@ -50,6 +51,7 @@ ALL_COLLECTIONS = {
     RestaurantCollections.MONTHLY_RECORDS,
     RestaurantCollections.FINANCE_TRANSACTIONS,
     RestaurantCollections.EXPENSES,
+    RestaurantCollections.FOOD_COSTS,
     RestaurantCollections.CASH_DEPOSITS,
     RestaurantCollections.BANK_ACCOUNTS,
     RestaurantCollections.INVENTORY_ITEMS,

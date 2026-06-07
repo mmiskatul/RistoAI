@@ -165,6 +165,53 @@ class RestaurantExpenseRepository(ScopedRepository):
         )
 
 
+class RestaurantFoodCostRepository(ScopedRepository):
+    collection_name = RestaurantCollections.FOOD_COSTS
+
+    async def list_by_scope(
+        self,
+        *,
+        scope_id: str,
+        page: int = 1,
+        page_size: int = 100,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        filters = self.scope_filters(scope_id)
+        if start_date or end_date:
+            date_filters: dict[str, Any] = {}
+            if start_date:
+                date_filters["$gte"] = start_date.isoformat()
+            if end_date:
+                date_filters["$lte"] = end_date.isoformat()
+            filters["business_date"] = date_filters
+        return await self.get_multi(
+            filters=filters,
+            page=page,
+            page_size=page_size,
+            sort=[("business_date", DESCENDING), ("created_at", DESCENDING)],
+        )
+
+    async def replace_for_source(self, *, scope_id: str, source_kind: str, source_id: str, entries: list[dict[str, Any]]) -> None:
+        await self.collection.delete_many(self.scope_filters(scope_id, {"source_kind": source_kind, "source_id": source_id}))
+        if not entries:
+            return
+        now = datetime.now(UTC)
+        documents = []
+        for entry in entries:
+            payload = dict(entry)
+            payload.setdefault("tenant_id", scope_id)
+            payload.setdefault("source_kind", source_kind)
+            payload.setdefault("source_id", source_id)
+            payload.setdefault("created_at", now)
+            payload["updated_at"] = now
+            documents.append(payload)
+        await self.collection.insert_many(documents)
+
+    async def delete_for_source(self, *, scope_id: str, source_kind: str, source_id: str) -> None:
+        await self.collection.delete_many(self.scope_filters(scope_id, {"source_kind": source_kind, "source_id": source_id}))
+
+
 class RestaurantCashDepositRepository(ScopedRepository):
     collection_name = RestaurantCollections.CASH_DEPOSITS
 

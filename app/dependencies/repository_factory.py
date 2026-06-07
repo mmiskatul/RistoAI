@@ -12,6 +12,7 @@ from app.repositories.restaurant_ops import (
     RestaurantDailyRecordRepository,
     RestaurantDocumentRepository,
     RestaurantExpenseRepository,
+    RestaurantFoodCostRepository,
     RestaurantFinanceTransactionRepository,
     RestaurantInsightRepository,
     RestaurantInventoryCategoryRepository,
@@ -75,6 +76,9 @@ class RepositoryFactory:
 
     def restaurant_expenses(self) -> RestaurantExpenseRepository:
         return RestaurantExpenseRepository(self.db)
+
+    def restaurant_food_costs(self) -> RestaurantFoodCostRepository:
+        return RestaurantFoodCostRepository(self.db)
 
     def restaurant_finance_transactions(self) -> RestaurantFinanceTransactionRepository:
         return RestaurantFinanceTransactionRepository(self.db)

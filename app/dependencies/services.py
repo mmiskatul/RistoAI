@@ -85,6 +85,7 @@ def build_restaurant_operations_service(db) -> RestaurantOperationsService:
         repos.users(),
         repos.restaurant_documents(),
         repos.restaurant_expenses(),
+        repos.restaurant_food_costs(),
         repos.restaurant_cash_deposits(),
         repos.restaurant_bank_accounts(),
         repos.restaurant_daily_records(),

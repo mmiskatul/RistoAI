@@ -2697,6 +2697,12 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
     assert inventory_after_create_payload["items"][0]["stock_quantity"] == 7.0
     assert inventory_after_create_payload["usage_summary"]["total_quantity_used"] == 3.0
     assert inventory_after_create_payload["usage_summary"]["total_usage_cost"] == 6.0
+    db = asyncio.run(app.dependency_overrides[get_database]())
+    stored_food_cost_entries = asyncio.run(
+        db["restaurant_food_costs"].find({"source_kind": "manual_entry", "source_id": record_id}).to_list(length=None)
+    )
+    assert len(stored_food_cost_entries) == 1
+    assert stored_food_cost_entries[0]["total_cost"] == 6.0
 
     home_metrics_after_create = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
     assert home_metrics_after_create.status_code == 200
@@ -2751,3 +2757,7 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
     assert inventory_after_delete_payload["items"][0]["stock_quantity"] == 10.0
     assert inventory_after_delete_payload["usage_summary"]["total_quantity_used"] == 0.0
     assert inventory_after_delete_payload["usage_summary"]["total_usage_cost"] == 0.0
+    remaining_food_cost_entries = asyncio.run(
+        db["restaurant_food_costs"].find({"source_kind": "manual_entry", "source_id": record_id}).to_list(length=None)
+    )
+    assert remaining_food_cost_entries == []

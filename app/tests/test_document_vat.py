@@ -8,6 +8,7 @@ def _service() -> RestaurantOperationsService:
         user_repository=None,
         document_repository=None,
         expense_repository=None,
+        food_cost_repository=None,
         cash_repository=None,
         bank_account_repository=None,
         daily_record_repository=None,
