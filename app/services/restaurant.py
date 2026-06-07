@@ -6278,7 +6278,7 @@ class RestaurantOperationsService(BaseService):
     @staticmethod
     def _percent_change(previous: float, current: float) -> float:
         if previous == 0:
-            return 0.0 if current == 0 else 100.0
+            return 0.0 if current == 0 else round(current, 1)
         return round(((current - previous) / abs(previous)) * 100, 1)
 
     def _calculate_vat_balance(
