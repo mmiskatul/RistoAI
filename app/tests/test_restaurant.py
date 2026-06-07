@@ -1536,15 +1536,17 @@ def test_home_metrics_include_uploaded_document_expenses_like_inventory(client, 
     home_metrics_response = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
     assert home_metrics_response.status_code == 200
     home_metrics_payload = home_metrics_response.json()
-    expense_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Expenses")
+    other_expense_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Other Expense")
+    food_cost_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Food Cost")
     profit_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Profit")
-    assert expense_metric["value"] == 188.0
+    assert other_expense_metric["value"] == 0.0
+    assert food_cost_metric["value"] == 0.0
     assert profit_metric["value"] == -188.0
 
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
-    weekly_expense_metric = next(item for item in home_response.json()["weekly"]["metrics"] if item["label"] == "Expenses")
-    assert weekly_expense_metric["value"] == 188.0
+    weekly_other_expense_metric = next(item for item in home_response.json()["weekly"]["metrics"] if item["label"] == "Other Expense")
+    assert weekly_other_expense_metric["value"] == 0.0
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     restaurant_record = asyncio.run(
@@ -2699,7 +2701,7 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
     home_metrics_after_create = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
     assert home_metrics_after_create.status_code == 200
     food_cost_metric_after_create = next(item for item in home_metrics_after_create.json()["items"] if item["label"] == "Food Cost")
-    assert food_cost_metric_after_create["value"] == 0.0
+    assert food_cost_metric_after_create["value"] == 6.0
 
     analytics_after_create = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_after_create.status_code == 200

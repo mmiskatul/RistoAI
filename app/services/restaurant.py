@@ -1473,7 +1473,7 @@ class RestaurantOperationsService(BaseService):
     def _build_home_metric_cards(self, *, home_revenue_total: float, metrics_context: dict[str, float | int]) -> list[MetricCardResponse]:
         return [
             MetricCardResponse(label="Revenue", value=home_revenue_total, change_percent=float(metrics_context["revenue_change_percent"])),
-            MetricCardResponse(label="Expenses", value=float(metrics_context["expenses_total"]), change_percent=float(metrics_context["expense_change_percent"])),
+            MetricCardResponse(label="Other Expense", value=float(metrics_context["other_expense_total"]), change_percent=float(metrics_context["other_expense_change_percent"])),
             MetricCardResponse(label="Food Cost", value=float(metrics_context["food_cost_total"]), change_percent=float(metrics_context["food_cost_change_percent"])),
             MetricCardResponse(label="Profit", value=float(metrics_context["profit_total"]), change_percent=float(metrics_context["profit_change_percent"])),
         ]
@@ -4143,27 +4143,44 @@ class RestaurantOperationsService(BaseService):
         serialized_expenses = self.serialize_list(expenses)
         revenue_total = round(sum(item["total_revenue"] for item in serialized_records), 2)
         expenses_total = round(sum(float(item.get("total_expenses", 0)) for item in serialized_records), 2)
-        food_cost_total = round(
-            sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if self._is_food_cost_expense(item)),
+        inventory_expense_total = round(
+            sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if self._is_inventory_linked_expense(item)),
             2,
         )
+        other_expense_total = round(
+            sum(float(item.get("amount", 0) or 0) for item in serialized_expenses if not self._is_inventory_linked_expense(item)),
+            2,
+        )
+        food_cost_total = self._sum_inventory_usage_cost(serialized_records)
         profit_total = round(sum(float(item.get("profit", 0)) for item in serialized_records), 2)
         covers_total = sum(int(item.get("total_covers", item.get("lunch_covers", 0) + item.get("dinner_covers", 0))) for item in serialized_records)
         recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
-        recent_food_cost = (
-            sum(
-                float(item.get("amount", 0) or 0)
-                for item in serialized_expenses
-                if item["expense_date"][:10] >= last_7_start.isoformat() and self._is_food_cost_expense(item)
-            )
+        recent_food_cost = self._sum_inventory_usage_cost(
+            [item for item in serialized_records if item["business_date"] >= last_7_start.isoformat()]
         )
-        previous_food_cost = (
-            sum(
-                float(item.get("amount", 0) or 0)
-                for item in serialized_expenses
-                if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and self._is_food_cost_expense(item)
-            )
+        previous_food_cost = self._sum_inventory_usage_cost(
+            [item for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat()]
+        )
+        recent_inventory_expense = sum(
+            float(item.get("amount", 0) or 0)
+            for item in serialized_expenses
+            if item["expense_date"][:10] >= last_7_start.isoformat() and self._is_inventory_linked_expense(item)
+        )
+        previous_inventory_expense = sum(
+            float(item.get("amount", 0) or 0)
+            for item in serialized_expenses
+            if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and self._is_inventory_linked_expense(item)
+        )
+        recent_other_expense = sum(
+            float(item.get("amount", 0) or 0)
+            for item in serialized_expenses
+            if item["expense_date"][:10] >= last_7_start.isoformat() and not self._is_inventory_linked_expense(item)
+        )
+        previous_other_expense = sum(
+            float(item.get("amount", 0) or 0)
+            for item in serialized_expenses
+            if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and not self._is_inventory_linked_expense(item)
         )
         recent_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
@@ -4181,10 +4198,14 @@ class RestaurantOperationsService(BaseService):
         return {
             "revenue_total": revenue_total,
             "expenses_total": expenses_total,
+            "inventory_expense_total": inventory_expense_total,
+            "other_expense_total": other_expense_total,
             "food_cost_total": food_cost_total,
             "profit_total": profit_total,
             "revenue_change_percent": self._percent_change(previous_revenue, recent_revenue),
             "expense_change_percent": self._percent_change(previous_expenses, recent_expenses),
+            "inventory_expense_change_percent": self._percent_change(previous_inventory_expense, recent_inventory_expense),
+            "other_expense_change_percent": self._percent_change(previous_other_expense, recent_other_expense),
             "food_cost_change_percent": self._percent_change(previous_food_cost, recent_food_cost),
             "profit_change_percent": self._percent_change(previous_profit, recent_profit),
             "covers_total": covers_total,
@@ -6291,6 +6312,23 @@ class RestaurantOperationsService(BaseService):
             return True
         category = str(item.get("category") or "").strip().lower()
         return "food" in category or "inventory" in category
+
+    @staticmethod
+    def _is_inventory_linked_expense(item: dict[str, Any]) -> bool:
+        return str(item.get("source_kind") or "").strip().lower() in {"inventory", "document"}
+
+    def _sum_inventory_usage_cost(self, records: list[dict[str, Any]]) -> float:
+        total = 0.0
+        for record in records:
+            for usage in record.get("inventory_usage") or []:
+                explicit_total = self._safe_float(usage.get("total_cost"))
+                if explicit_total > 0:
+                    total += explicit_total
+                    continue
+                quantity_used = self._safe_float(usage.get("quantity_used"))
+                unit_cost = self._safe_float(usage.get("unit_cost"))
+                total += quantity_used * unit_cost
+        return round(total, 2)
 
     def _build_document_updates(self, *, current_user: dict, payload: DocumentConfirmRequest, mark_processed: bool) -> dict[str, Any]:
         updates = payload.model_dump(exclude_none=True)
