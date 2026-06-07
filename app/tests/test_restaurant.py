@@ -2708,6 +2708,12 @@ def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary
     assert home_metrics_after_create.status_code == 200
     food_cost_metric_after_create = next(item for item in home_metrics_after_create.json()["items"] if item["label"] == "Food Cost")
     assert food_cost_metric_after_create["value"] == 6.0
+    home_metrics_monthly_after_create = client.get("/api/v1/restaurant/home/metrics?period=monthly", headers=headers)
+    assert home_metrics_monthly_after_create.status_code == 200
+    monthly_food_cost_metric_after_create = next(
+        item for item in home_metrics_monthly_after_create.json()["items"] if item["label"] == "Food Cost"
+    )
+    assert monthly_food_cost_metric_after_create["value"] == 6.0
 
     analytics_after_create = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
     assert analytics_after_create.status_code == 200
