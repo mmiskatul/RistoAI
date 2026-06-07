@@ -1336,6 +1336,10 @@ class RestaurantOperationsService(BaseService):
             daily_records=filtered_daily_records,
             expenses=filtered_expenses,
             cash_deposits=filtered_cash_deposits,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
         )
         home_revenue_total = self._calculate_home_revenue_total(
             daily_records=filtered_daily_records,
@@ -1594,6 +1598,10 @@ class RestaurantOperationsService(BaseService):
             daily_records=filtered_daily_records,
             expenses=filtered_expenses,
             cash_deposits=filtered_cash_deposits,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
         )
         home_revenue_total = self._calculate_home_revenue_total(
             daily_records=filtered_daily_records,
@@ -1631,11 +1639,42 @@ class RestaurantOperationsService(BaseService):
         )
 
     def _build_home_metric_cards(self, *, home_revenue_total: float, metrics_context: dict[str, float | int]) -> list[MetricCardResponse]:
+        comparison_label = str(metrics_context.get("comparison_label") or "")
+        current_period_label = str(metrics_context.get("current_period_label") or "")
+        previous_period_label = str(metrics_context.get("previous_period_label") or "")
         return [
-            MetricCardResponse(label="Revenue", value=home_revenue_total, change_percent=float(metrics_context["revenue_change_percent"])),
-            MetricCardResponse(label="Other Expense", value=float(metrics_context["other_expense_total"]), change_percent=float(metrics_context["other_expense_change_percent"])),
-            MetricCardResponse(label="Food Cost", value=float(metrics_context["food_cost_total"]), change_percent=float(metrics_context["food_cost_change_percent"])),
-            MetricCardResponse(label="Profit", value=float(metrics_context["profit_total"]), change_percent=float(metrics_context["profit_change_percent"])),
+            MetricCardResponse(
+                label="Revenue",
+                value=home_revenue_total,
+                change_percent=float(metrics_context["revenue_change_percent"]),
+                comparison_label=comparison_label,
+                current_period_label=current_period_label,
+                previous_period_label=previous_period_label,
+            ),
+            MetricCardResponse(
+                label="Other Expense",
+                value=float(metrics_context["other_expense_total"]),
+                change_percent=float(metrics_context["other_expense_change_percent"]),
+                comparison_label=comparison_label,
+                current_period_label=current_period_label,
+                previous_period_label=previous_period_label,
+            ),
+            MetricCardResponse(
+                label="Food Cost",
+                value=float(metrics_context["food_cost_total"]),
+                change_percent=float(metrics_context["food_cost_change_percent"]),
+                comparison_label=comparison_label,
+                current_period_label=current_period_label,
+                previous_period_label=previous_period_label,
+            ),
+            MetricCardResponse(
+                label="Profit",
+                value=float(metrics_context["profit_total"]),
+                change_percent=float(metrics_context["profit_change_percent"]),
+                comparison_label=comparison_label,
+                current_period_label=current_period_label,
+                previous_period_label=previous_period_label,
+            ),
         ]
 
     def _build_home_cash_management_items(
@@ -3565,7 +3604,14 @@ class RestaurantOperationsService(BaseService):
                 continue
             filtered_documents.append(item)
 
-        context = self._build_metrics_context(daily_records=filtered_daily_records, expenses=filtered_expenses)
+        context = self._build_metrics_context(
+            daily_records=filtered_daily_records,
+            expenses=filtered_expenses,
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
         serialized_records = filtered_daily_records
         serialized_expenses = filtered_expenses
         estimated_profit = float(context["profit_total"])
@@ -4463,14 +4509,51 @@ class RestaurantOperationsService(BaseService):
         daily_records: list[dict],
         expenses: list[dict],
         cash_deposits: list[dict] | None = None,
-    ) -> dict[str, float | int]:
-        today = datetime.now(UTC).date()
-        last_7_start = today - timedelta(days=6)
-        prev_7_start = today - timedelta(days=13)
-        prev_7_end = today - timedelta(days=7)
+        period: str = "weekly",
+        from_date: date | None = None,
+        to_date: date | None = None,
+        anchor_date: date | None = None,
+    ) -> dict[str, float | int | str]:
+        current_start, current_end, previous_start, previous_end = self._resolve_comparison_date_ranges(
+            period=period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
         serialized_records = self.serialize_list(daily_records)
         serialized_expenses = self.serialize_list(expenses)
         serialized_cash_deposits = self.serialize_list(cash_deposits or [])
+
+        def _record_in_range(item: dict[str, Any], start: date | None, end: date | None) -> bool:
+            candidate = self._parse_optional_date(item.get("business_date"))
+            if candidate is None:
+                return False
+            if start is not None and candidate < start:
+                return False
+            if end is not None and candidate > end:
+                return False
+            return True
+
+        def _expense_in_range(item: dict[str, Any], start: date | None, end: date | None) -> bool:
+            candidate = self._parse_optional_date(item.get("expense_date"))
+            if candidate is None:
+                return False
+            if start is not None and candidate < start:
+                return False
+            if end is not None and candidate > end:
+                return False
+            return True
+
+        def _cash_deposit_in_range(item: dict[str, Any], start: date | None, end: date | None) -> bool:
+            candidate = self._parse_optional_date(item.get("deposit_date"))
+            if candidate is None:
+                return False
+            if start is not None and candidate < start:
+                return False
+            if end is not None and candidate > end:
+                return False
+            return True
+
         manual_revenue_total = round(
             sum(float(item.get("amount", 0) or 0) for item in serialized_cash_deposits if self._is_manual_revenue_entry(item)),
             2,
@@ -4493,42 +4576,42 @@ class RestaurantOperationsService(BaseService):
         )
         profit_total = round(sum(float(item.get("profit", 0)) for item in serialized_records), 2)
         covers_total = sum(int(item.get("total_covers", item.get("lunch_covers", 0) + item.get("dinner_covers", 0))) for item in serialized_records)
-        recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat()) + sum(
+        recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if _record_in_range(item, current_start, current_end)) + sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_cash_deposits
-            if self._is_manual_revenue_entry(item) and str(item.get("deposit_date") or "")[:10] >= last_7_start.isoformat()
+            if self._is_manual_revenue_entry(item) and _cash_deposit_in_range(item, current_start, current_end)
         )
-        previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat()) + sum(
+        previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if _record_in_range(item, previous_start, previous_end)) + sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_cash_deposits
-            if self._is_manual_revenue_entry(item) and prev_7_start.isoformat() <= str(item.get("deposit_date") or "")[:10] <= prev_7_end.isoformat()
+            if self._is_manual_revenue_entry(item) and _cash_deposit_in_range(item, previous_start, previous_end)
         )
         recent_inventory_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
-            if item["expense_date"][:10] >= last_7_start.isoformat() and self._is_food_cost_expense(item)
+            if _expense_in_range(item, current_start, current_end) and self._is_food_cost_expense(item)
         )
         previous_inventory_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
-            if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and self._is_food_cost_expense(item)
+            if _expense_in_range(item, previous_start, previous_end) and self._is_food_cost_expense(item)
         )
         recent_food_cost = recent_inventory_expense
         previous_food_cost = previous_inventory_expense
         recent_other_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
-            if item["expense_date"][:10] >= last_7_start.isoformat() and not self._is_food_cost_expense(item)
+            if _expense_in_range(item, current_start, current_end) and not self._is_food_cost_expense(item)
         )
         previous_other_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
-            if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and not self._is_food_cost_expense(item)
+            if _expense_in_range(item, previous_start, previous_end) and not self._is_food_cost_expense(item)
         )
-        recent_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
-        previous_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
-        recent_profit = sum(float(item.get("profit", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
-        previous_profit = sum(float(item.get("profit", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
+        recent_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if _record_in_range(item, current_start, current_end))
+        previous_expenses = sum(float(item.get("total_expenses", 0)) for item in serialized_records if _record_in_range(item, previous_start, previous_end))
+        recent_profit = sum(float(item.get("profit", 0)) for item in serialized_records if _record_in_range(item, current_start, current_end))
+        previous_profit = sum(float(item.get("profit", 0)) for item in serialized_records if _record_in_range(item, previous_start, previous_end))
         cash_available = self._calculate_cash_available_flow(serialized_records)
         cash_deposit_total = round(
             sum(
@@ -4538,6 +4621,13 @@ class RestaurantOperationsService(BaseService):
             2,
         )
         cash_collected_total = round(cash_available + cash_deposit_total, 2)
+        comparison_meta = self._build_metric_comparison_metadata(
+            period=period,
+            current_start=current_start,
+            current_end=current_end,
+            previous_start=previous_start,
+            previous_end=previous_end,
+        )
         return {
             "revenue_total": revenue_total,
             "expenses_total": expenses_total,
@@ -4555,7 +4645,66 @@ class RestaurantOperationsService(BaseService):
             "avg_revenue_per_cover": round(revenue_total / max(covers_total, 1), 2),
             "cash_collected_total": cash_collected_total,
             "cash_available": cash_available,
+            "comparison_label": comparison_meta["comparison_label"],
+            "current_period_label": comparison_meta["current_period_label"],
+            "previous_period_label": comparison_meta["previous_period_label"],
         }
+
+    @staticmethod
+    def _resolve_comparison_date_ranges(
+        *,
+        period: str,
+        from_date: date | None = None,
+        to_date: date | None = None,
+        anchor_date: date | None = None,
+    ) -> tuple[date | None, date | None, date | None, date | None]:
+        current_start, current_end = RestaurantOperationsService._resolve_home_date_range(
+            period,
+            from_date=from_date,
+            to_date=to_date,
+            anchor_date=anchor_date,
+        )
+        if current_start is None and current_end is None:
+            return None, None, None, None
+        if current_start is None:
+            current_start = current_end
+        if current_end is None:
+            current_end = current_start
+        window_days = max((current_end - current_start).days + 1, 1)
+        previous_end = current_start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=window_days - 1)
+        return current_start, current_end, previous_start, previous_end
+
+    def _build_metric_comparison_metadata(
+        self,
+        *,
+        period: str,
+        current_start: date | None,
+        current_end: date | None,
+        previous_start: date | None,
+        previous_end: date | None,
+    ) -> dict[str, str]:
+        current_period_label = self._format_metric_period_label(period=period, start=current_start, end=current_end)
+        previous_period_label = self._format_metric_period_label(period=period, start=previous_start, end=previous_end)
+        comparison_label = f"{current_period_label} vs {previous_period_label}".strip()
+        return {
+            "comparison_label": comparison_label,
+            "current_period_label": current_period_label,
+            "previous_period_label": previous_period_label,
+        }
+
+    def _format_metric_period_label(self, *, period: str, start: date | None, end: date | None) -> str:
+        if start is None and end is None:
+            return period.replace("_", " ").title()
+        if start is None:
+            start = end
+        if end is None:
+            end = start
+        if start is None or end is None:
+            return period.replace("_", " ").title()
+        if start == end:
+            return start.strftime("%b %d, %Y")
+        return f"{start.strftime('%b %d, %Y')} - {end.strftime('%b %d, %Y')}"
 
     def _build_peak_hour_metric(
         self,
@@ -5952,6 +6101,8 @@ class RestaurantOperationsService(BaseService):
         if from_date is not None or to_date is not None:
             return from_date, to_date
         today = anchor_date or datetime.now(UTC).date()
+        if period == 'today':
+            return today, today
         if period == 'weekly':
             return today - timedelta(days=6), today
         if period == 'monthly':

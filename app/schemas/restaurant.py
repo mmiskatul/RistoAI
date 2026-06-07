@@ -50,6 +50,9 @@ class MetricCardResponse(BaseSchema):
     value: float
     change_percent: float = 0.0
     currency: str = "EUR"
+    comparison_label: str | None = None
+    current_period_label: str | None = None
+    previous_period_label: str | None = None
 
 
 class CashManagementItemResponse(BaseSchema):
