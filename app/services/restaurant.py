@@ -2976,8 +2976,7 @@ class RestaurantOperationsService(BaseService):
             )
         if previous_purchase_date is not None:
             await self._sync_restaurant_record(scope_id=scope_id, business_date=previous_purchase_date, current_user=current_user)
-        if new_purchase_date != previous_purchase_date:
-            await self._sync_restaurant_record(scope_id=scope_id, business_date=new_purchase_date, current_user=current_user)
+        await self._sync_restaurant_record(scope_id=scope_id, business_date=new_purchase_date, current_user=current_user)
         return self._to_inventory_detail_response(updated)
 
     async def delete_inventory_item(self, current_user: dict, item_id: str) -> None:

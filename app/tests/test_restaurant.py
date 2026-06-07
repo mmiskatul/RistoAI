@@ -1540,13 +1540,15 @@ def test_home_metrics_include_uploaded_document_expenses_like_inventory(client, 
     food_cost_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Food Cost")
     profit_metric = next(item for item in home_metrics_payload["items"] if item["label"] == "Profit")
     assert other_expense_metric["value"] == 0.0
-    assert food_cost_metric["value"] == 0.0
+    assert food_cost_metric["value"] == 100.0
     assert profit_metric["value"] == -188.0
 
     home_response = client.get("/api/v1/restaurant/home?period=weekly", headers=headers)
     assert home_response.status_code == 200
     weekly_other_expense_metric = next(item for item in home_response.json()["weekly"]["metrics"] if item["label"] == "Other Expense")
+    weekly_food_cost_metric = next(item for item in home_response.json()["weekly"]["metrics"] if item["label"] == "Food Cost")
     assert weekly_other_expense_metric["value"] == 0.0
+    assert weekly_food_cost_metric["value"] == 100.0
 
     db = asyncio.run(app.dependency_overrides[get_database]())
     restaurant_record = asyncio.run(
