@@ -4214,8 +4214,6 @@ class RestaurantOperationsService(BaseService):
         covers_total = sum(int(item.get("total_covers", item.get("lunch_covers", 0) + item.get("dinner_covers", 0))) for item in serialized_records)
         recent_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if item["business_date"] >= last_7_start.isoformat())
         previous_revenue = sum(float(item.get("total_revenue", 0)) for item in serialized_records if prev_7_start.isoformat() <= item["business_date"] <= prev_7_end.isoformat())
-        recent_food_cost = recent_inventory_expense
-        previous_food_cost = previous_inventory_expense
         recent_inventory_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
@@ -4226,6 +4224,8 @@ class RestaurantOperationsService(BaseService):
             for item in serialized_expenses
             if prev_7_start.isoformat() <= item["expense_date"][:10] <= prev_7_end.isoformat() and self._is_inventory_linked_expense(item)
         )
+        recent_food_cost = recent_inventory_expense
+        previous_food_cost = previous_inventory_expense
         recent_other_expense = sum(
             float(item.get("amount", 0) or 0)
             for item in serialized_expenses
