@@ -816,6 +816,16 @@ class InventoryCreateRequest(BaseSchema):
     alert_threshold: float = Field(default=0, ge=0)
     purchase_date: date | None = None
 
+    @field_validator("supplier_name", mode="before")
+    @classmethod
+    def normalize_optional_supplier_name(cls, value: object) -> object:
+        return _blank_to_none(value)
+
+    @field_validator("purchase_date", mode="before")
+    @classmethod
+    def parse_purchase_date(cls, value: object) -> object:
+        return _parse_flexible_date(value)
+
 
 class InventoryUpdateRequest(BaseSchema):
     product_name: str | None = Field(default=None, min_length=2, max_length=120)
@@ -826,6 +836,16 @@ class InventoryUpdateRequest(BaseSchema):
     unit_price: float | None = Field(default=None, ge=0)
     alert_threshold: float | None = Field(default=None, ge=0)
     purchase_date: date | None = None
+
+    @field_validator("supplier_name", mode="before")
+    @classmethod
+    def normalize_optional_supplier_name(cls, value: object) -> object:
+        return _blank_to_none(value)
+
+    @field_validator("purchase_date", mode="before")
+    @classmethod
+    def parse_purchase_date(cls, value: object) -> object:
+        return _parse_flexible_date(value)
 
 
 class InventoryCategoryCreateRequest(BaseSchema):

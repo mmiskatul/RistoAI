@@ -16,7 +16,6 @@ htmlcov/
 .env.local
 .env.*.local
 .idea/
-.vscode/
 *.log
 dist/
 build/
@@ -25,3 +24,7 @@ build/
 Thumbs.db
 
 .venv/
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
