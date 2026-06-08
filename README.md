@@ -11,6 +11,11 @@ RistoAI uses a layered FastAPI backend built around clean architecture boundarie
 
 The application is designed for MongoDB Atlas, async request handling, JWT authentication, and modular domain growth. All domain features are wired through dependency injection so repositories and services stay replaceable.
 
+## Deployment Notes
+- If the backend is deployed on Render and the dashboard is deployed on Vercel, set the dashboard `API_BASE_URL` env var on Vercel to the Render backend URL, for example `https://your-service.onrender.com`.
+- The mobile app must use `EXPO_PUBLIC_API_URL` pointing to the same backend URL.
+- Backend CORS origins can be provided either as a JSON array like `["https://app.example.com","https://admin.example.com"]` or as a comma-separated string.
+
 ## 2. Folder Structure
 ```text
 app/

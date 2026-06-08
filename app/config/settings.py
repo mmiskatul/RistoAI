@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -124,7 +125,18 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def normalize_cors_origins(self) -> "Settings":
         if isinstance(self.cors_origins, str):
-            self.cors_origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+            raw_value = self.cors_origins.strip()
+            if raw_value.startswith("["):
+                try:
+                    parsed = json.loads(raw_value)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, list):
+                    self.cors_origins = [str(origin).strip() for origin in parsed if str(origin).strip()]
+                else:
+                    self.cors_origins = [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+            else:
+                self.cors_origins = [origin.strip() for origin in raw_value.split(",") if origin.strip()]
         if not self.cors_origins:
             self.cors_origins = ["*"]
         return self
