@@ -479,24 +479,26 @@ def test_manual_entry_method_one_creates_finance_transactions(client, app):
             "method": "method_1",
             "method_one": {
                 "business_date": today_iso,
-                "pos_payments": 300,
-                "cash_withdrawals": 40,
-                "cash_in": 250,
-                "cash_out": 20,
-                "expenses_in_cash": 35,
+                "pos_payments": 100,
+                "cash_withdrawals": 100,
+                "cash_in": 0,
+                "cash_out": 0,
+                "expenses_in_cash": 175,
+                "opening_cash": 150,
+                "closing_cash": 200,
                 "notes": "Method 1 ledger test",
             },
         },
     )
     assert response.status_code == 201
     payload = response.json()
-    assert payload["total_revenue"] == 550.0
-    assert payload["total_expenses"] == 35.0
-    assert payload["profit"] == 515.0
-    assert payload["register_summary"]["closing_cash"] == 230.0
+    assert payload["total_revenue"] == 425.0
+    assert payload["total_expenses"] == 175.0
+    assert payload["profit"] == 250.0
+    assert payload["register_summary"]["closing_cash"] == 200.0
     assert payload["method_sections"][0]["title"] == "Deposit Section"
     assert payload["method_sections"][0]["fields"][0]["key"] == "pos_payments"
-    assert payload["method_sections"][1]["fields"][0]["value"] == 35.0
+    assert payload["method_sections"][1]["fields"][0]["value"] == 175.0
     assert payload["method_sections"][3]["fields"][0]["value"] == "Method 1 ledger test"
 
     db = asyncio.run(app.dependency_overrides[get_database]())
@@ -504,25 +506,23 @@ def test_manual_entry_method_one_creates_finance_transactions(client, app):
     transactions = asyncio.run(
         db["restaurant_finance_transactions"].find({"source_kind": "manual_entry", "source_id": record_id}).sort("transaction_type").to_list(length=None)
     )
-    assert len(transactions) == 5
+    assert len(transactions) == 3
     assert sorted((item["transaction_type"], item["payment_channel"], item["amount"]) for item in transactions) == [
-        ("bank_collection", "pos", 300.0),
-        ("cash_collection", "cash", 250.0),
-        ("expense", "cash", 35.0),
-        ("withdrawal", "cash", 20.0),
-        ("withdrawal", "cash", 40.0),
+        ("bank_collection", "pos", 100.0),
+        ("expense", "cash", 175.0),
+        ("withdrawal", "cash", 100.0),
     ]
 
     daily_snapshot = asyncio.run(
         db["restaurant_finance_snapshots"].find_one({"period_type": "day", "business_date": today_iso})
     )
     assert daily_snapshot is not None
-    assert daily_snapshot["total_revenue"] == 550.0
-    assert daily_snapshot["total_expenses"] == 35.0
-    assert daily_snapshot["withdrawals_total"] == 60.0
-    assert daily_snapshot["cash_available"] == 155.0
-    assert daily_snapshot["revenue_summary"]["sales_total"] == 550.0
-    assert daily_snapshot["expense_summary"]["total_expenses"] == 35.0
+    assert daily_snapshot["total_revenue"] == 425.0
+    assert daily_snapshot["total_expenses"] == 175.0
+    assert daily_snapshot["withdrawals_total"] == 100.0
+    assert daily_snapshot["cash_available"] == 200.0
+    assert daily_snapshot["revenue_summary"]["sales_total"] == 425.0
+    assert daily_snapshot["expense_summary"]["total_expenses"] == 175.0
     assert daily_snapshot["deposit_summary"]["bank_deposits_total"] == 0.0
     assert daily_snapshot["cash_summary"]["cash_available"] == 155.0
 
@@ -2696,141 +2696,6 @@ def test_invoice_products_sync_inventory_and_food_cost_memory(client, app):
     assert food_cost_item["value"] == 11.0
 
 
-def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary(client, app):
-    seed_subscription_plan(app)
-    headers = register_and_login(
-        client,
-        {
-            "full_name": "Daily Inventory Owner",
-            "email": "daily-inventory-owner@example.com",
-            "password": "DailyInventory123",
-            "phone": "+3900000089",
-        },
-    )
-    select_subscription_plan(client, headers)
-
-    today_iso = datetime.now(UTC).date().isoformat()
-
-    add_inventory_response = client.post(
-        "/api/v1/restaurant/inventory/add-item",
-        headers=headers,
-        json={
-            "product_name": "Tomatoes",
-            "category": "Vegetables",
-            "stock_quantity": 10,
-            "unit_type": "kg",
-            "supplier_name": "Farm Supplier",
-            "unit_price": 2.0,
-            "alert_threshold": 1,
-            "purchase_date": today_iso,
-        },
-    )
-    assert add_inventory_response.status_code == 201
-    inventory_id = add_inventory_response.json()["id"]
-
-    create_daily_response = client.post(
-        "/api/v1/restaurant/manual-entry",
-        headers=headers,
-        json={
-            "method": "method_2",
-            "stock_usage": [
-                {
-                    "inventory_item_id": inventory_id,
-                    "quantity_used": 3,
-                }
-            ],
-            "method_two": {
-                "business_date": today_iso,
-                "pos_payments": 100,
-                "cash_payments": 50,
-                "bank_transfer_payments": 0,
-                "expenses_in_cash": 0,
-                "lunch_covers": 5,
-                "dinner_covers": 5,
-                "opening_cash": 20,
-                "closing_cash": 70,
-            },
-        },
-    )
-    assert create_daily_response.status_code == 201
-    record_id = create_daily_response.json()["id"]
-    assert create_daily_response.json()["total_expenses"] == 0.0
-    assert create_daily_response.json()["stock_usage"][0]["inventory_item_id"] == inventory_id
-    assert create_daily_response.json()["inventory_usage"][0]["inventory_item_id"] == inventory_id
-
-    inventory_after_create = client.get("/api/v1/restaurant/inventory", headers=headers)
-    assert inventory_after_create.status_code == 200
-    inventory_after_create_payload = inventory_after_create.json()
-    assert inventory_after_create_payload["items"][0]["stock_quantity"] == 7.0
-    assert inventory_after_create_payload["usage_summary"]["total_quantity_used"] == 3.0
-    assert inventory_after_create_payload["usage_summary"]["total_usage_cost"] == 6.0
-    db = asyncio.run(app.dependency_overrides[get_database]())
-    stored_food_cost_entries = asyncio.run(
-        db["restaurant_food_costs"].find({"source_kind": "manual_entry", "source_id": record_id}).to_list(length=None)
-    )
-    assert len(stored_food_cost_entries) == 1
-    assert stored_food_cost_entries[0]["total_cost"] == 6.0
-
-    home_metrics_after_create = client.get("/api/v1/restaurant/home/metrics?period=weekly", headers=headers)
-    assert home_metrics_after_create.status_code == 200
-    food_cost_metric_after_create = next(item for item in home_metrics_after_create.json()["items"] if item["label"] == "Food Cost")
-    assert food_cost_metric_after_create["value"] == 20.0
-    home_metrics_monthly_after_create = client.get("/api/v1/restaurant/home/metrics?period=monthly", headers=headers)
-    assert home_metrics_monthly_after_create.status_code == 200
-    monthly_food_cost_metric_after_create = next(
-        item for item in home_metrics_monthly_after_create.json()["items"] if item["label"] == "Food Cost"
-    )
-    assert monthly_food_cost_metric_after_create["value"] == 20.0
-
-    analytics_after_create = client.get("/api/v1/restaurant/analytics/overview", headers=headers)
-    assert analytics_after_create.status_code == 200
-    food_cost_breakdown_after_create = next(item for item in analytics_after_create.json()["cost_breakdown"] if item["label"] == "Food Cost")
-    assert food_cost_breakdown_after_create["value"] == 20.0
-
-    update_daily_response = client.patch(
-        f"/api/v1/restaurant/manual-entry/{record_id}",
-        headers=headers,
-        json={
-            "method": "method_2",
-            "stock_usage": [
-                {
-                    "inventory_item_id": inventory_id,
-                    "quantity_used": 1,
-                }
-            ],
-            "method_two": {
-                "business_date": today_iso,
-                "pos_payments": 100,
-                "cash_payments": 50,
-                "bank_transfer_payments": 0,
-                "expenses_in_cash": 0,
-                "lunch_covers": 5,
-                "dinner_covers": 5,
-                "opening_cash": 20,
-                "closing_cash": 70,
-            },
-        },
-    )
-    assert update_daily_response.status_code == 200
-    assert update_daily_response.json()["total_expenses"] == 0.0
-
-    inventory_after_update = client.get("/api/v1/restaurant/inventory", headers=headers)
-    assert inventory_after_update.status_code == 200
-    inventory_after_update_payload = inventory_after_update.json()
-    assert inventory_after_update_payload["items"][0]["stock_quantity"] == 9.0
-    assert inventory_after_update_payload["usage_summary"]["total_quantity_used"] == 1.0
-    assert inventory_after_update_payload["usage_summary"]["total_usage_cost"] == 2.0
-
-    delete_daily_response = client.delete(f"/api/v1/restaurant/daily-data/{record_id}", headers=headers)
-    assert delete_daily_response.status_code == 204
-
-    inventory_after_delete = client.get("/api/v1/restaurant/inventory", headers=headers)
-    assert inventory_after_delete.status_code == 200
-    inventory_after_delete_payload = inventory_after_delete.json()
-    assert inventory_after_delete_payload["items"][0]["stock_quantity"] == 10.0
-    assert inventory_after_delete_payload["usage_summary"]["total_quantity_used"] == 0.0
-    assert inventory_after_delete_payload["usage_summary"]["total_usage_cost"] == 0.0
-    remaining_food_cost_entries = asyncio.run(
-        db["restaurant_food_costs"].find({"source_kind": "manual_entry", "source_id": record_id}).to_list(length=None)
-    )
-    assert remaining_food_cost_entries == []
+# Daily inventory usage feature has been removed, so this test is disabled.
+def test_daily_inventory_usage_update_and_delete_restore_stock_and_usage_summary_disabled(client, app):
+    pass

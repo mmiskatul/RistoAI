@@ -1,0 +1,203 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-9.1.0, pluggy-1.6.0
+rootdir: C:\Miskat\aldo\RistoAI
+configfile: pytest.ini
+plugins: anyio-4.13.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 28 items / 27 deselected / 1 selected
+
+app\tests\test_restaurant.py F                                           [100%]
+
+================================== FAILURES ===================================
+____ test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record ____
+
+client = <starlette.testclient.TestClient object at 0x00000173909BE510>
+app = <fastapi.applications.FastAPI object at 0x00000173905A34D0>
+
+    def test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record(client, app):
+        seed_subscription_plan(app)
+        headers = register_and_login(
+            client,
+            {
+                "full_name": "Fallback Owner",
+                "email": "fallback-owner@example.com",
+                "password": "FallbackOwner123",
+                "phone": "+1555000777",
+            },
+        )
+        select_subscription_plan(client, headers)
+    
+        today = datetime.now(UTC).date()
+        previous_day = today - timedelta(days=1)
+        older_day = today - timedelta(days=20)
+    
+        older_entry_response = client.post(
+            "/api/v1/restaurant/manual-entry",
+            headers=headers,
+            json={
+                "method": "method_2",
+                "method_two": {
+                    "business_date": older_day.isoformat(),
+                    "pos_payments": 300,
+                    "cash_payments": 100,
+                    "bank_transfer_payments": 50,
+                    "lunch_covers": 14,
+                    "dinner_covers": 36,
+                    "opening_cash": 100,
+                    "closing_cash": 200,
+                },
+            },
+        )
+        assert older_entry_response.status_code == 201
+    
+        current_period_entry_response = client.post(
+            "/api/v1/restaurant/manual-entry",
+            headers=headers,
+            json={
+                "method": "method_1",
+                "method_one": {
+                    "business_date": previous_day.isoformat(),
+                    "pos_payments": 250,
+                    "cash_withdrawals": 0,
+                    "cash_in": 20,
+                    "cash_out": 0,
+                    "expenses_in_cash": 0,
+                    "notes": "No cover split",
+                },
+            },
+        )
+        assert current_period_entry_response.status_code == 201
+    
+        analytics_response = client.get("/api/v1/restaurant/analytics/overview?period=weekly", headers=headers)
+        assert analytics_response.status_code == 200
+        analytics_payload = analytics_response.json()
+        assert analytics_payload["metric_tiles"][1]["label"] == "Peak Hour"
+        assert analytics_payload["metric_tiles"][1]["value"] == "Dinner"
+        assert analytics_payload["metric_tiles"][1]["subtitle"] == "36 covers, 72% of this period using latest available record"
+        analytics_revenue_comparison_response = client.get("/api/v1/restaurant/analytics/revenue-comparison", headers=headers)
+        assert analytics_revenue_comparison_response.status_code == 200
+        analytics_revenue_comparison_payload = analytics_revenue_comparison_response.json()
+        assert analytics_revenue_comparison_payload["period"] == "weekly"
+        assert analytics_revenue_comparison_payload["items"][0]["label"] == "This Week Revenue"
+    
+        analytics_covers_activity_response = client.get("/api/v1/restaurant/analytics/covers-activity", headers=headers)
+        assert analytics_covers_activity_response.status_code == 200
+        analytics_covers_activity_payload = analytics_covers_activity_response.json()
+        assert analytics_covers_activity_payload["period"] == "weekly"
+        assert analytics_covers_activity_payload["items"][0]["label"] == "Lunch"
+        assert analytics_covers_activity_payload["items"][0]["value"] == 14
+        assert analytics_covers_activity_payload["items"][1]["label"] == "Dinner"
+        assert analytics_covers_activity_payload["items"][1]["value"] == 36
+    
+        analytics_cost_breakdown_response = client.get("/api/v1/restaurant/analytics/cost-breakdown", headers=headers)
+        assert analytics_cost_breakdown_response.status_code == 200
+        analytics_cost_breakdown_payload = analytics_cost_breakdown_response.json()
+        assert analytics_cost_breakdown_payload["period"] == "weekly"
+        assert analytics_cost_breakdown_payload["items"][0]["label"] == "Food Cost"
+        assert analytics_cost_breakdown_payload["items"][0]["value"] == 0.0
+        assert analytics_cost_breakdown_payload["items"][1]["label"] == "Staff Cost"
+        assert analytics_cost_breakdown_payload["items"][1]["value"] == 0
+    
+        analytics_supplier_alerts_response = client.get("/api/v1/restaurant/analytics/supplier-alerts", headers=headers)
+        assert analytics_supplier_alerts_response.status_code == 200
+        analytics_supplier_alerts_payload = analytics_supplier_alerts_response.json()
+        assert analytics_supplier_alerts_payload["period"] == "weekly"
+        assert len(analytics_supplier_alerts_payload["items"]) >= 1
+        assert analytics_supplier_alerts_payload["items"][0]["title"]
+        assert analytics_supplier_alerts_payload["items"][0]["subtitle"]
+    
+        analytics_export_response = client.get("/api/v1/restaurant/analytics/export?period=weekly&format=pdf", headers=headers)
+        assert analytics_export_response.status_code == 404
+    
+        chat_list_response = client.get("/api/v1/restaurant/chat/messages", headers=headers)
+        assert chat_list_response.status_code == 200
+        chat_list_payload = chat_list_response.json()
+        assert set(chat_list_payload.keys()) == {"messages"}
+        assert len(chat_list_payload["messages"]) >= 1
+    
+        chat_response = client.post("/api/v1/restaurant/chat/messages", headers=headers, json={"message": "How can I improve profit?"})
+        assert chat_response.status_code == 201
+        chat_payload = chat_response.json()
+        assert set(chat_payload.keys()) == {"messages"}
+        messages = chat_payload["messages"]
+        assert any(message["role"] == "insight" for message in messages)
+        assert messages[-1]["role"] == "assistant"
+>       assert "revenue" in messages[-1]["message"].lower()
+E       AssertionError: assert 'revenue' in 'the ai service is currently unavailable because the api key is not configured. please contact your administrator to enable the ai service.'
+E        +  where 'the ai service is currently unavailable because the api key is not configured. please contact your administrator to enable the ai service.' = <built-in method lower of str object at 0x0000017390A0B4B0>()
+E        +    where <built-in method lower of str object at 0x0000017390A0B4B0> = 'The AI service is currently unavailable because the API key is not configured. Please contact your administrator to enable the AI service.'.lower
+
+app\tests\test_restaurant.py:2152: AssertionError
+---------------------------- Captured stderr call -----------------------------
+2026-06-16 04:18:51,241 | INFO | app.services.email | Email provider disabled. Verification code for fallback-owner@example.com (restaurant_registration): 4486
+2026-06-16 04:18:51,242 | INFO | app.middleware.request_context | request_id=d4b68b04-a4af-4dcd-bb35-c7a581ea0d1c client=testclient POST /api/v1/auth/restaurant/register -> 201 in 234.04ms
+2026-06-16 04:18:51,243 | INFO | httpx | HTTP Request: POST http://testserver/api/v1/auth/restaurant/register "HTTP/1.1 201 Created"
+2026-06-16 04:18:51,245 | INFO | app.middleware.request_context | request_id=db6d72d9-454d-4dd5-a493-908a5bedf4eb client=testclient POST /api/v1/auth/restaurant/verify-registration -> 200 in 2.05ms
+2026-06-16 04:18:51,246 | INFO | httpx | HTTP Request: POST http://testserver/api/v1/auth/restaurant/verify-registration "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,448 | INFO | app.middleware.request_context | request_id=aea4f8a3-d1a0-4a1f-beab-62e8e5e9f711 client=testclient POST /api/v1/auth/restaurant/login -> 200 in 200.62ms
+2026-06-16 04:18:51,448 | INFO | httpx | HTTP Request: POST http://testserver/api/v1/auth/restaurant/login "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,617 | INFO | app.middleware.request_context | request_id=5c3dd586-8f05-4107-a7d5-91073d4c410b client=testclient POST /api/v1/subscriptions/user/select -> 200 in 167.82ms
+2026-06-16 04:18:51,617 | INFO | httpx | HTTP Request: POST http://testserver/api/v1/subscriptions/user/select "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,620 | INFO | app.middleware.request_context | request_id=bdaf76e7-e43d-44cd-b07e-de2bf7808074 client=testclient POST /api/v1/onboarding/profile -> 200 in 2.35ms
+2026-06-16 04:18:51,621 | INFO | httpx | HTTP Request: POST http://testserver/api/v1/onboarding/profile "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,626 | INFO | app.middleware.request_context | request_id=3689b992-e6d6-4531-abb6-e702790b98e4 client=testclient POST /api/v1/restaurant/manual-entry -> 201 in 3.99ms
+2026-06-16 04:18:51,626 | INFO | httpx | HTTP Request: POST http://testserver/api/v1/restaurant/manual-entry "HTTP/1.1 201 Created"
+2026-06-16 04:18:51,630 | INFO | app.middleware.request_context | request_id=1e9604e5-041e-4369-a2e5-1029cedb2c49 client=testclient POST /api/v1/restaurant/manual-entry -> 201 in 3.78ms
+2026-06-16 04:18:51,631 | INFO | httpx | HTTP Request: POST http://testserver/api/v1/restaurant/manual-entry "HTTP/1.1 201 Created"
+2026-06-16 04:18:51,634 | INFO | app.middleware.request_context | request_id=2cb9f548-6060-4ff9-b369-9f2731d7c788 client=testclient GET /api/v1/restaurant/analytics/overview -> 200 in 2.35ms
+2026-06-16 04:18:51,634 | INFO | httpx | HTTP Request: GET http://testserver/api/v1/restaurant/analytics/overview?period=weekly "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,637 | INFO | app.middleware.request_context | request_id=b9e471f7-7a75-40a8-946f-825849b62ed6 client=testclient GET /api/v1/restaurant/analytics/revenue-comparison -> 200 in 2.25ms
+2026-06-16 04:18:51,638 | INFO | httpx | HTTP Request: GET http://testserver/api/v1/restaurant/analytics/revenue-comparison "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,641 | INFO | app.middleware.request_context | request_id=0446cc32-a37a-4905-a748-10921d1876f4 client=testclient GET /api/v1/restaurant/analytics/covers-activity -> 200 in 2.29ms
+2026-06-16 04:18:51,641 | INFO | httpx | HTTP Request: GET http://testserver/api/v1/restaurant/analytics/covers-activity "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,644 | INFO | app.middleware.request_context | request_id=793bcf6e-7cab-48d8-83d7-69101fc36743 client=testclient GET /api/v1/restaurant/analytics/cost-breakdown -> 200 in 2.0ms
+2026-06-16 04:18:51,644 | INFO | httpx | HTTP Request: GET http://testserver/api/v1/restaurant/analytics/cost-breakdown "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,648 | INFO | app.middleware.request_context | request_id=90a72413-bc02-44b7-bb99-58e9f1d7924d client=testclient GET /api/v1/restaurant/analytics/supplier-alerts -> 200 in 2.29ms
+2026-06-16 04:18:51,648 | INFO | httpx | HTTP Request: GET http://testserver/api/v1/restaurant/analytics/supplier-alerts "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,674 | INFO | app.middleware.request_context | request_id=6bfe41d9-5fc9-4f91-9308-b154691d034f client=testclient GET /api/v1/restaurant/analytics/export -> 404 in 25.72ms
+2026-06-16 04:18:51,675 | INFO | httpx | HTTP Request: GET http://testserver/api/v1/restaurant/analytics/export?period=weekly&format=pdf "HTTP/1.1 404 Not Found"
+2026-06-16 04:18:51,677 | INFO | app.middleware.request_context | request_id=98fb3b01-a74e-4e15-8181-7b13489908e8 client=testclient GET /api/v1/restaurant/chat/messages -> 200 in 1.34ms
+2026-06-16 04:18:51,678 | INFO | httpx | HTTP Request: GET http://testserver/api/v1/restaurant/chat/messages "HTTP/1.1 200 OK"
+2026-06-16 04:18:51,682 | INFO | app.middleware.request_context | request_id=2f45c4ab-b8d7-4647-950a-ea7f986b17a8 client=testclient POST /api/v1/restaurant/chat/messages -> 201 in 3.28ms
+2026-06-16 04:18:51,682 | INFO | httpx | HTTP Request: POST http://testserver/api/v1/restaurant/chat/messages "HTTP/1.1 201 Created"
+------------------------------ Captured log call ------------------------------
+INFO     app.services.email:email.py:55 Email provider disabled. Verification code for fallback-owner@example.com (restaurant_registration): 4486
+INFO     app.middleware.request_context:request_context.py:43 request_id=d4b68b04-a4af-4dcd-bb35-c7a581ea0d1c client=testclient POST /api/v1/auth/restaurant/register -> 201 in 234.04ms
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/auth/restaurant/register "HTTP/1.1 201 Created"
+INFO     app.middleware.request_context:request_context.py:43 request_id=db6d72d9-454d-4dd5-a493-908a5bedf4eb client=testclient POST /api/v1/auth/restaurant/verify-registration -> 200 in 2.05ms
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/auth/restaurant/verify-registration "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=aea4f8a3-d1a0-4a1f-beab-62e8e5e9f711 client=testclient POST /api/v1/auth/restaurant/login -> 200 in 200.62ms
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/auth/restaurant/login "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=5c3dd586-8f05-4107-a7d5-91073d4c410b client=testclient POST /api/v1/subscriptions/user/select -> 200 in 167.82ms
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/subscriptions/user/select "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=bdaf76e7-e43d-44cd-b07e-de2bf7808074 client=testclient POST /api/v1/onboarding/profile -> 200 in 2.35ms
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/onboarding/profile "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=3689b992-e6d6-4531-abb6-e702790b98e4 client=testclient POST /api/v1/restaurant/manual-entry -> 201 in 3.99ms
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/restaurant/manual-entry "HTTP/1.1 201 Created"
+INFO     app.middleware.request_context:request_context.py:43 request_id=1e9604e5-041e-4369-a2e5-1029cedb2c49 client=testclient POST /api/v1/restaurant/manual-entry -> 201 in 3.78ms
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/restaurant/manual-entry "HTTP/1.1 201 Created"
+INFO     app.middleware.request_context:request_context.py:43 request_id=2cb9f548-6060-4ff9-b369-9f2731d7c788 client=testclient GET /api/v1/restaurant/analytics/overview -> 200 in 2.35ms
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/restaurant/analytics/overview?period=weekly "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=b9e471f7-7a75-40a8-946f-825849b62ed6 client=testclient GET /api/v1/restaurant/analytics/revenue-comparison -> 200 in 2.25ms
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/restaurant/analytics/revenue-comparison "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=0446cc32-a37a-4905-a748-10921d1876f4 client=testclient GET /api/v1/restaurant/analytics/covers-activity -> 200 in 2.29ms
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/restaurant/analytics/covers-activity "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=793bcf6e-7cab-48d8-83d7-69101fc36743 client=testclient GET /api/v1/restaurant/analytics/cost-breakdown -> 200 in 2.0ms
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/restaurant/analytics/cost-breakdown "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=90a72413-bc02-44b7-bb99-58e9f1d7924d client=testclient GET /api/v1/restaurant/analytics/supplier-alerts -> 200 in 2.29ms
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/restaurant/analytics/supplier-alerts "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=6bfe41d9-5fc9-4f91-9308-b154691d034f client=testclient GET /api/v1/restaurant/analytics/export -> 404 in 25.72ms
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/restaurant/analytics/export?period=weekly&format=pdf "HTTP/1.1 404 Not Found"
+INFO     app.middleware.request_context:request_context.py:43 request_id=98fb3b01-a74e-4e15-8181-7b13489908e8 client=testclient GET /api/v1/restaurant/chat/messages -> 200 in 1.34ms
+INFO     httpx:_client.py:1025 HTTP Request: GET http://testserver/api/v1/restaurant/chat/messages "HTTP/1.1 200 OK"
+INFO     app.middleware.request_context:request_context.py:43 request_id=2f45c4ab-b8d7-4647-950a-ea7f986b17a8 client=testclient POST /api/v1/restaurant/chat/messages -> 201 in 3.28ms
+INFO     httpx:_client.py:1025 HTTP Request: POST http://testserver/api/v1/restaurant/chat/messages "HTTP/1.1 201 Created"
+============================== warnings summary ===============================
+.venv_new\Lib\site-packages\fastapi\testclient.py:1
+  C:\Miskat\aldo\RistoAI\.venv_new\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED app/tests/test_restaurant.py::test_restaurant_analytics_peak_hour_falls_back_to_latest_cover_record
+================= 1 failed, 27 deselected, 1 warning in 0.84s =================

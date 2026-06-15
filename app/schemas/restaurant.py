@@ -573,8 +573,6 @@ class DailyDataMethodOneRequest(BaseSchema):
     cash_in: float = Field(default=0, ge=0)
     cash_out: float = Field(default=0, ge=0)
     expenses_in_cash: float = Field(default=0, ge=0)
-    lunch_covers: int = Field(default=0, ge=0)
-    dinner_covers: int = Field(default=0, ge=0)
     opening_cash: float = Field(default=0, ge=0)
     closing_cash: float = Field(default=0, ge=0)
     notes: str | None = Field(default=None, max_length=500)
@@ -586,8 +584,6 @@ class DailyDataMethodTwoRequest(BaseSchema):
     cash_payments: float = Field(default=0, ge=0)
     bank_transfer_payments: float = Field(default=0, ge=0)
     expenses_in_cash: float = Field(default=0, ge=0)
-    lunch_covers: int = Field(default=0, ge=0)
-    dinner_covers: int = Field(default=0, ge=0)
     opening_cash: float = Field(default=0, ge=0)
     closing_cash: float = Field(default=0, ge=0)
 
@@ -601,19 +597,6 @@ class DailyDataCreateRequest(BaseSchema):
     method: Literal["method_1", "method_2"]
     method_one: DailyDataMethodOneRequest | None = None
     method_two: DailyDataMethodTwoRequest | None = None
-    inventory_usage: list[DailyDataInventoryUsageRequest] = Field(default_factory=list)
-    stock_usage: list[DailyDataInventoryUsageRequest] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def sync_stock_usage_fields(self) -> "DailyDataCreateRequest":
-        if not self.stock_usage and self.inventory_usage:
-            self.stock_usage = list(self.inventory_usage)
-        if not self.inventory_usage and self.stock_usage:
-            self.inventory_usage = list(self.stock_usage)
-        return self
-
-    def resolved_stock_usage(self) -> list["DailyDataInventoryUsageRequest"]:
-        return self.stock_usage or self.inventory_usage
 
 
 

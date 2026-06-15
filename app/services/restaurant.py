@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import base64
@@ -1092,18 +1092,26 @@ class RestaurantOperationsService(BaseService):
                 )
             return
 
-        await self._upsert_source_linked_cash_deposit(
-            scope_id=scope_id,
-            current_user=current_user,
-            source_kind="manual_entry",
-            source_id=source_id,
-            source_subtype="cash_in",
-            deposit_date=business_date,
-            amount=self._safe_float(record.get("cash_in")),
-            deposit_type="cash_in",
-            bank_account="Cash In",
-            notes=str(record.get("notes") or "Entered from daily data"),
-        )
+        if self._safe_float(record.get("cash_in")) > 0:
+            await self._upsert_source_linked_cash_deposit(
+                scope_id=scope_id,
+                current_user=current_user,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype="cash_in",
+                deposit_date=business_date,
+                amount=self._safe_float(record.get("cash_in")),
+                deposit_type="cash_in",
+                bank_account="Cash In",
+                notes=str(record.get("notes") or "Entered from daily data"),
+            )
+        else:
+            await self.cash_repository.delete_source_linked_deposit(
+                scope_id=scope_id,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype="cash_in",
+            )
         await self._upsert_source_linked_cash_deposit(
             scope_id=scope_id,
             current_user=current_user,
@@ -1116,18 +1124,26 @@ class RestaurantOperationsService(BaseService):
             bank_account="Cash Withdrawals",
             notes=str(record.get("notes") or "Entered from daily data"),
         )
-        await self._upsert_source_linked_cash_deposit(
-            scope_id=scope_id,
-            current_user=current_user,
-            source_kind="manual_entry",
-            source_id=source_id,
-            source_subtype="cash_out",
-            deposit_date=business_date,
-            amount=self._safe_float(record.get("cash_out")),
-            deposit_type="cash_out",
-            bank_account="Cash Out",
-            notes=str(record.get("notes") or "Entered from daily data"),
-        )
+        if self._safe_float(record.get("cash_out")) > 0:
+            await self._upsert_source_linked_cash_deposit(
+                scope_id=scope_id,
+                current_user=current_user,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype="cash_out",
+                deposit_date=business_date,
+                amount=self._safe_float(record.get("cash_out")),
+                deposit_type="cash_out",
+                bank_account="Cash Out",
+                notes=str(record.get("notes") or "Entered from daily data"),
+            )
+        else:
+            await self.cash_repository.delete_source_linked_deposit(
+                scope_id=scope_id,
+                source_kind="manual_entry",
+                source_id=source_id,
+                source_subtype="cash_out",
+            )
         await self._upsert_source_linked_cash_deposit(
             scope_id=scope_id,
             current_user=current_user,
@@ -1208,10 +1224,12 @@ class RestaurantOperationsService(BaseService):
 
         if record.get("method") == "method_1":
             add_transaction(transaction_type="bank_collection", amount=self._safe_float(record.get("pos_payments")), payment_channel="pos", reference_label="POS Payments")
-            add_transaction(transaction_type="cash_collection", amount=self._safe_float(record.get("cash_in")), payment_channel="cash", reference_label="Cash In")
             add_transaction(transaction_type="withdrawal", amount=self._safe_float(record.get("cash_withdrawals")), payment_channel="cash", reference_label="Cash Withdrawals")
-            add_transaction(transaction_type="withdrawal", amount=self._safe_float(record.get("cash_out")), payment_channel="cash", reference_label="Cash Out")
             add_transaction(transaction_type="expense", amount=self._safe_float(record.get("expenses_in_cash")), payment_channel="cash", reference_label="Expenses in Cash")
+            if self._safe_float(record.get("cash_in")) > 0:
+                add_transaction(transaction_type="cash_collection", amount=self._safe_float(record.get("cash_in")), payment_channel="cash", reference_label="Cash In")
+            if self._safe_float(record.get("cash_out")) > 0:
+                add_transaction(transaction_type="withdrawal", amount=self._safe_float(record.get("cash_out")), payment_channel="cash", reference_label="Cash Out")
             return transactions
 
         add_transaction(transaction_type="bank_collection", amount=self._safe_float(record.get("pos_payments")), payment_channel="pos", reference_label="POS Payments")
@@ -2573,18 +2591,14 @@ class RestaurantOperationsService(BaseService):
                 DailyDataManualMethodResponse(
                     key="method_1",
                     label="Method 1",
-                    description="Cash tracking with POS, withdrawals, cash in/out, and cash expenses.",
+                    description="Revenue from POS, opening and closing cash, withdrawals, and cash expenses.",
                     fields=[
                         DailyDataFormFieldResponse(key="business_date", label="Business Date", value_type="date", required=True, section="cash_tracking"),
                         DailyDataFormFieldResponse(key="pos_payments", label="POS Payments", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="cash_in", label="Cash Sales", value_type="number", placeholder="0.00", section="cash_tracking"),
                         DailyDataFormFieldResponse(key="cash_withdrawals", label="Cash Withdrawals", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="cash_out", label="Cash Out / Transfers", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash", value_type="number", placeholder="0.00", section="cash_tracking"),
-                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Coperti", value_type="integer", placeholder="0", section="customer_covers"),
-                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Coperti", value_type="integer", placeholder="0", section="customer_covers"),
-                        DailyDataFormFieldResponse(key="opening_cash", label="Opening Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
-                        DailyDataFormFieldResponse(key="closing_cash", label="Closing Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
+                        DailyDataFormFieldResponse(key="expenses_in_cash", label="Cash expenses paid from the cash drawer", value_type="number", placeholder="0.00", section="cash_tracking"),
+                        DailyDataFormFieldResponse(key="opening_cash", label="Initial Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
+                        DailyDataFormFieldResponse(key="closing_cash", label="Final Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                         DailyDataFormFieldResponse(key="notes", label="Add Note", value_type="string", placeholder="Optional note", section="cash_tracking"),
                     ],
                 ),
@@ -2598,8 +2612,6 @@ class RestaurantOperationsService(BaseService):
                         DailyDataFormFieldResponse(key="cash_payments", label="Cash Payments (+)", value_type="number", placeholder="0.00", section="payment_inputs"),
                         DailyDataFormFieldResponse(key="bank_transfer_payments", label="Invoices Paid by Bank Transfer (+)", value_type="number", placeholder="0.00", section="payment_inputs"),
                         DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash (-)", value_type="number", placeholder="0.00", section="payment_inputs"),
-                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Coperti", value_type="integer", placeholder="0", section="customer_covers"),
-                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Coperti", value_type="integer", placeholder="0", section="customer_covers"),
                         DailyDataFormFieldResponse(key="opening_cash", label="Opening Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                         DailyDataFormFieldResponse(key="closing_cash", label="Closing Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                     ],
@@ -2607,28 +2619,49 @@ class RestaurantOperationsService(BaseService):
             ]
         )
 
+    def _resolve_method_1_cash_bounds(self, data: dict) -> tuple[float, float]:
+        opening_cash = float(data.get("opening_cash", 0) or 0)
+        closing_cash = float(data.get("closing_cash", 0) or 0)
+        legacy_initial_cash = float(data.get("cash_in", 0) or 0)
+        legacy_final_cash = float(data.get("cash_out", 0) or 0)
+
+        if opening_cash == 0 and closing_cash == 0 and (legacy_initial_cash or legacy_final_cash):
+            return legacy_initial_cash, legacy_final_cash
+
+        return opening_cash, closing_cash
+
+    def _calculate_method_1_total_revenue(self, data: dict) -> float:
+        initial_cash, final_cash = self._resolve_method_1_cash_bounds(data)
+        return round(
+            float(data.get("pos_payments", 0) or 0)
+            + float(data.get("cash_withdrawals", 0) or 0)
+            + float(data.get("expenses_in_cash", 0) or 0)
+            + final_cash
+            - initial_cash,
+            2,
+        )
+
     async def create_daily_data(self, current_user: dict, payload: DailyDataCreateRequest) -> DailyDataResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
-        resolved_stock_usage = payload.resolved_stock_usage()
-        inventory_usage_entries = await self._build_daily_inventory_usage_entries(
-            scope_id=scope_id,
-            usage=resolved_stock_usage,
-        )
+        resolved_stock_usage = []
+        inventory_usage_entries = []
         if payload.method == "method_1":
             if payload.method_one is None:
                 raise ValidationException("method_one is required when method is method_1")
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
-            total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
+            total_revenue = self._calculate_method_1_total_revenue(data)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = data["lunch_covers"]
-            dinner_covers = data["dinner_covers"]
-            closing_cash = data["closing_cash"] if data["closing_cash"] > 0 else max(data["cash_in"] - data["cash_out"], 0)
+            lunch_covers = 0
+            dinner_covers = 0
+            _, resolved_closing_cash = self._resolve_method_1_cash_bounds(data)
             record_payload = {
                 **data,
-                "cash_collected_total": round(data["cash_in"] + data["pos_payments"], 2),
-                "cash_available": max(data["cash_in"] - data["cash_out"] - data["cash_withdrawals"] - data["expenses_in_cash"], 0),
-                "closing_cash": closing_cash,
+                "cash_collected_total": total_revenue,
+                "cash_available": max(resolved_closing_cash, 0.0),
+                "cash_in": data["cash_in"],
+                "cash_out": data["cash_out"],
+                "closing_cash": resolved_closing_cash,
             }
         else:
             if payload.method_two is None:
@@ -2637,8 +2670,8 @@ class RestaurantOperationsService(BaseService):
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = data["lunch_covers"]
-            dinner_covers = data["dinner_covers"]
+            lunch_covers = 0
+            dinner_covers = 0
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
             cash_difference = round(data["closing_cash"] - expected_closing_cash, 2)
             cash_out = max(expected_closing_cash - data["closing_cash"], 0)
@@ -2700,26 +2733,25 @@ class RestaurantOperationsService(BaseService):
     async def update_daily_data(self, current_user: dict, record_id: str, payload: DailyDataCreateRequest) -> DailyDataResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
         existing_record = await self.daily_record_repository.get_scoped_by_id(record_id, scope_id)
-        resolved_stock_usage = payload.resolved_stock_usage()
-        inventory_usage_entries = await self._build_daily_inventory_usage_entries(
-            scope_id=scope_id,
-            usage=resolved_stock_usage,
-        )
+        resolved_stock_usage = []
+        inventory_usage_entries = []
         if payload.method == "method_1":
             if payload.method_one is None:
                 raise ValidationException("method_one is required when method is method_1")
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
-            total_revenue = round(data["pos_payments"] + data["cash_in"], 2)
+            total_revenue = self._calculate_method_1_total_revenue(data)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = data["lunch_covers"]
-            dinner_covers = data["dinner_covers"]
-            closing_cash = data["closing_cash"] if data["closing_cash"] > 0 else max(data["cash_in"] - data["cash_out"], 0)
+            lunch_covers = 0
+            dinner_covers = 0
+            _, resolved_closing_cash = self._resolve_method_1_cash_bounds(data)
             record_payload = {
                 **data,
-                "cash_collected_total": round(data["cash_in"] + data["pos_payments"], 2),
-                "cash_available": max(data["cash_in"] - data["cash_out"] - data["cash_withdrawals"] - data["expenses_in_cash"], 0),
-                "closing_cash": closing_cash,
+                "cash_collected_total": total_revenue,
+                "cash_available": max(resolved_closing_cash, 0.0),
+                "cash_in": data["cash_in"],
+                "cash_out": data["cash_out"],
+                "closing_cash": resolved_closing_cash,
             }
         else:
             if payload.method_two is None:
@@ -2728,8 +2760,8 @@ class RestaurantOperationsService(BaseService):
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = data["lunch_covers"]
-            dinner_covers = data["dinner_covers"]
+            lunch_covers = 0
+            dinner_covers = 0
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
             cash_difference = round(data["closing_cash"] - expected_closing_cash, 2)
             cash_out = max(expected_closing_cash - data["closing_cash"], 0)
@@ -7703,6 +7735,8 @@ class RestaurantOperationsService(BaseService):
                 ),
             ])
 
+        initial_cash, final_cash = self._resolve_method_1_cash_bounds(payload)
+
         return self._localize_daily_data_sections([
             DailyDataSectionResponse(
                 key="deposit_section",
@@ -7715,18 +7749,15 @@ class RestaurantOperationsService(BaseService):
                         value_type="currency",
                     ),
                     DailyDataSectionFieldResponse(
-                        key="cash_in",
-                        label="Cash In",
-                        value=float(payload.get("cash_in", 0) or 0),
+                        key="cash_withdrawals",
+                        label="Cash Withdrawals",
+                        value=float(payload.get("cash_withdrawals", 0) or 0),
                         value_type="currency",
                     ),
                     DailyDataSectionFieldResponse(
                         key="total_deposits",
-                        label="Total Deposits",
-                        value=round(
-                            float(payload.get("pos_payments", 0) or 0) + float(payload.get("cash_in", 0) or 0),
-                            2,
-                        ),
+                        label="Total Revenue",
+                        value=self._calculate_method_1_total_revenue(payload),
                         value_type="currency",
                     ),
                 ],
@@ -7744,19 +7775,19 @@ class RestaurantOperationsService(BaseService):
                 ],
             ),
             DailyDataSectionResponse(
-                key="cash_movement_section",
-                title="Cash Movement Section",
+                key="register_section",
+                title="Register Section",
                 fields=[
                     DailyDataSectionFieldResponse(
-                        key="cash_withdrawals",
-                        label="Cash Withdrawals",
-                        value=float(payload.get("cash_withdrawals", 0) or 0),
+                        key="opening_cash",
+                        label="Initial Cash",
+                        value=initial_cash,
                         value_type="currency",
                     ),
                     DailyDataSectionFieldResponse(
-                        key="cash_out",
-                        label="Cash Out",
-                        value=float(payload.get("cash_out", 0) or 0),
+                        key="closing_cash",
+                        label="Final Cash",
+                        value=final_cash,
                         value_type="currency",
                     ),
                 ],
@@ -7828,8 +7859,8 @@ class RestaurantOperationsService(BaseService):
                     DailyDataSectionFieldResponse(key="bank_transfer_payments", label="Bank Transfer Payments", value=bank_transfer_total, value_type="currency"),
                     DailyDataSectionFieldResponse(
                         key="total_deposits",
-                        label="Total Deposits",
-                        value=round(pos_total + cash_payments_total + cash_in_total + bank_transfer_total, 2),
+                        label="Total Revenue",
+                        value=float(bucket.get("total_revenue", 0) or 0),
                         value_type="currency",
                     ),
                 ],
@@ -7897,9 +7928,13 @@ class RestaurantOperationsService(BaseService):
                 DailyDataRevenueBreakdownItemResponse(label="Bank Transfer", amount=float(serialized.get("bank_transfer_payments", 0))),
             ]
         else:
+            initial_cash, final_cash = self._resolve_method_1_cash_bounds(serialized)
             revenue_breakdown = [
                 DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0))),
-                DailyDataRevenueBreakdownItemResponse(label="Cash In", amount=float(serialized.get("cash_in", 0))),
+                DailyDataRevenueBreakdownItemResponse(label="Cash Withdrawals", amount=float(serialized.get("cash_withdrawals", 0))),
+                DailyDataRevenueBreakdownItemResponse(label="Cash expenses paid from the cash drawer", amount=float(serialized.get("expenses_in_cash", 0))),
+                DailyDataRevenueBreakdownItemResponse(label="Final Cash", amount=final_cash),
+                DailyDataRevenueBreakdownItemResponse(label="Initial Cash", amount=-initial_cash),
             ]
         stock_usage_entries = [
             DailyDataInventoryUsageEntryResponse(

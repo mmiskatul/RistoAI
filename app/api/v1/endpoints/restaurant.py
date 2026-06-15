@@ -459,12 +459,12 @@ async def get_daily_data_manual_entry(current_user: dict = Depends(get_current_u
     return await service.get_daily_data_manual_entry(current_user)
 
 
-@router.post('/manual-entry', response_model=DailyDataResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Invoice Manual Entry'], summary='Create Manual Entry', description='Creates a manual invoice-style business entry using method 1 or method 2 input flow. Method 1 accepts lunch_covers, dinner_covers, opening_cash, and closing_cash.')
+@router.post('/manual-entry', response_model=DailyDataResponse, status_code=status.HTTP_201_CREATED, tags=['Restaurant Invoice Manual Entry'], summary='Create Manual Entry', description='Creates a manual invoice-style business entry using method 1 or method 2 input flow.')
 async def create_daily_data(payload: DailyDataCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DailyDataResponse:
     return await service.create_daily_data(current_user, payload)
 
 
-@router.patch('/manual-entry/{record_id}', response_model=DailyDataResponse, tags=['Restaurant Invoice Manual Entry'], summary='Update Manual Entry', description='Updates an existing manual invoice-style business entry. Method 1 accepts lunch_covers, dinner_covers, opening_cash, and closing_cash.')
+@router.patch('/manual-entry/{record_id}', response_model=DailyDataResponse, tags=['Restaurant Invoice Manual Entry'], summary='Update Manual Entry', description='Updates an existing manual invoice-style business entry.')
 async def update_daily_data(record_id: str, payload: DailyDataCreateRequest, current_user: dict = Depends(get_current_user), service: RestaurantOperationsService = Depends(get_restaurant_operations_service)) -> DailyDataResponse:
     return await service.update_daily_data(current_user, record_id, payload)
 

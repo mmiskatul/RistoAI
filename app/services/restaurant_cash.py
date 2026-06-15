@@ -44,7 +44,18 @@ def calculate_cash_ledger(
         2,
     )
     base_cash_available = round(
-        max(cash_in_total - cash_out_total - cash_withdrawals_total - manual_entry_expenses_total, 0.0),
+        sum(
+            float(item.get("cash_available", 0) or 0)
+            if item.get("cash_available") is not None
+            else max(
+                float(item.get("cash_in", item.get("cash_payments", 0)) or 0)
+                - float(item.get("cash_out", 0) or 0)
+                - float(item.get("cash_withdrawals", 0) or 0)
+                - float(item.get("total_expenses", 0) or 0),
+                0.0,
+            )
+            for item in daily_items
+        ),
         2,
     )
     withdrawals_total = round(
