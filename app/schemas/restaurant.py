@@ -570,8 +570,6 @@ class DailyDataMethodOneRequest(BaseSchema):
     business_date: date
     pos_payments: float = Field(default=0, ge=0)
     cash_withdrawals: float = Field(default=0, ge=0)
-    cash_in: float = Field(default=0, ge=0)
-    cash_out: float = Field(default=0, ge=0)
     expenses_in_cash: float = Field(default=0, ge=0)
     opening_cash: float = Field(default=0, ge=0)
     closing_cash: float = Field(default=0, ge=0)

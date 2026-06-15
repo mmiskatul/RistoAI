@@ -1092,26 +1092,12 @@ class RestaurantOperationsService(BaseService):
                 )
             return
 
-        if self._safe_float(record.get("cash_in")) > 0:
-            await self._upsert_source_linked_cash_deposit(
-                scope_id=scope_id,
-                current_user=current_user,
-                source_kind="manual_entry",
-                source_id=source_id,
-                source_subtype="cash_in",
-                deposit_date=business_date,
-                amount=self._safe_float(record.get("cash_in")),
-                deposit_type="cash_in",
-                bank_account="Cash In",
-                notes=str(record.get("notes") or "Entered from daily data"),
-            )
-        else:
-            await self.cash_repository.delete_source_linked_deposit(
-                scope_id=scope_id,
-                source_kind="manual_entry",
-                source_id=source_id,
-                source_subtype="cash_in",
-            )
+        await self.cash_repository.delete_source_linked_deposit(
+            scope_id=scope_id,
+            source_kind="manual_entry",
+            source_id=source_id,
+            source_subtype="cash_in",
+        )
         await self._upsert_source_linked_cash_deposit(
             scope_id=scope_id,
             current_user=current_user,
@@ -1124,26 +1110,12 @@ class RestaurantOperationsService(BaseService):
             bank_account="Cash Withdrawals",
             notes=str(record.get("notes") or "Entered from daily data"),
         )
-        if self._safe_float(record.get("cash_out")) > 0:
-            await self._upsert_source_linked_cash_deposit(
-                scope_id=scope_id,
-                current_user=current_user,
-                source_kind="manual_entry",
-                source_id=source_id,
-                source_subtype="cash_out",
-                deposit_date=business_date,
-                amount=self._safe_float(record.get("cash_out")),
-                deposit_type="cash_out",
-                bank_account="Cash Out",
-                notes=str(record.get("notes") or "Entered from daily data"),
-            )
-        else:
-            await self.cash_repository.delete_source_linked_deposit(
-                scope_id=scope_id,
-                source_kind="manual_entry",
-                source_id=source_id,
-                source_subtype="cash_out",
-            )
+        await self.cash_repository.delete_source_linked_deposit(
+            scope_id=scope_id,
+            source_kind="manual_entry",
+            source_id=source_id,
+            source_subtype="cash_out",
+        )
         await self._upsert_source_linked_cash_deposit(
             scope_id=scope_id,
             current_user=current_user,
@@ -1226,10 +1198,6 @@ class RestaurantOperationsService(BaseService):
             add_transaction(transaction_type="bank_collection", amount=self._safe_float(record.get("pos_payments")), payment_channel="pos", reference_label="POS Payments")
             add_transaction(transaction_type="withdrawal", amount=self._safe_float(record.get("cash_withdrawals")), payment_channel="cash", reference_label="Cash Withdrawals")
             add_transaction(transaction_type="expense", amount=self._safe_float(record.get("expenses_in_cash")), payment_channel="cash", reference_label="Expenses in Cash")
-            if self._safe_float(record.get("cash_in")) > 0:
-                add_transaction(transaction_type="cash_collection", amount=self._safe_float(record.get("cash_in")), payment_channel="cash", reference_label="Cash In")
-            if self._safe_float(record.get("cash_out")) > 0:
-                add_transaction(transaction_type="withdrawal", amount=self._safe_float(record.get("cash_out")), payment_channel="cash", reference_label="Cash Out")
             return transactions
 
         add_transaction(transaction_type="bank_collection", amount=self._safe_float(record.get("pos_payments")), payment_channel="pos", reference_label="POS Payments")
@@ -1770,7 +1738,7 @@ class RestaurantOperationsService(BaseService):
             "pos_payments": pos_payments_total,
             "withdrawals_total": round(
                 sum(float(item.get("cash_withdrawals", 0) or 0) for item in daily_records)
-                + sum(float(item.get("cash_out", 0) or 0) for item in daily_records),
+                + sum(float(item.get("cash_out", 0) or 0) for item in daily_records if str(item.get("method") or "") == "method_2"),
                 2,
             ),
             "bank_deposits": cash_deposit_total,
@@ -1785,11 +1753,21 @@ class RestaurantOperationsService(BaseService):
         if not has_cash_flow_inputs:
             return round(sum(float(item.get("cash_available", 0) or 0) for item in records), 2)
 
-        cash_in_total = sum(float(item.get("cash_in", item.get("cash_payments", 0)) or 0) for item in records)
-        cash_out_total = sum(float(item.get("cash_out", 0) or 0) for item in records)
-        cash_withdrawals_total = sum(float(item.get("cash_withdrawals", 0) or 0) for item in records)
-        expenses_total = sum(float(item.get("total_expenses", 0) or 0) for item in records)
-        return round(max(cash_in_total - (cash_out_total + cash_withdrawals_total + expenses_total), 0.0), 2)
+        method_1_cash_available_total = sum(
+            float(item.get("closing_cash", 0) or 0)
+            for item in records
+            if str(item.get("method") or "") == "method_1"
+        )
+        method_2_cash_in_total = sum(
+            float(item.get("cash_in", item.get("cash_payments", 0)) or 0)
+            for item in records
+            if str(item.get("method") or "") != "method_1"
+        )
+        cash_out_total = sum(float(item.get("cash_out", 0) or 0) for item in records if str(item.get("method") or "") != "method_1")
+        cash_withdrawals_total = sum(float(item.get("cash_withdrawals", 0) or 0) for item in records if str(item.get("method") or "") != "method_1")
+        expenses_total = sum(float(item.get("total_expenses", 0) or 0) for item in records if str(item.get("method") or "") != "method_1")
+        method_2_cash_available_total = max(method_2_cash_in_total - (cash_out_total + cash_withdrawals_total + expenses_total), 0.0)
+        return round(method_1_cash_available_total + method_2_cash_available_total, 2)
 
     async def get_vat_overview(self, current_user: dict) -> VatOverviewResponse:
         scope_id = ScopedRepository.resolve_scope_id(current_user)
@@ -2630,6 +2608,20 @@ class RestaurantOperationsService(BaseService):
 
         return opening_cash, closing_cash
 
+    def _build_method_1_record_payload(self, data: dict) -> dict[str, Any]:
+        resolved_opening_cash, resolved_closing_cash = self._resolve_method_1_cash_bounds(data)
+        normalized_payload = {
+            **data,
+            "opening_cash": resolved_opening_cash,
+            "closing_cash": resolved_closing_cash,
+            # Keep legacy fields mirrored for old readers, but do not treat them as inputs anymore.
+            "cash_in": resolved_opening_cash,
+            "cash_out": resolved_closing_cash,
+        }
+        normalized_payload["cash_collected_total"] = self._calculate_method_1_total_revenue(normalized_payload)
+        normalized_payload["cash_available"] = max(resolved_closing_cash, 0.0)
+        return normalized_payload
+
     def _calculate_method_1_total_revenue(self, data: dict) -> float:
         initial_cash, final_cash = self._resolve_method_1_cash_bounds(data)
         return round(
@@ -2650,19 +2642,11 @@ class RestaurantOperationsService(BaseService):
                 raise ValidationException("method_one is required when method is method_1")
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
-            total_revenue = self._calculate_method_1_total_revenue(data)
+            record_payload = self._build_method_1_record_payload(data)
+            total_revenue = self._calculate_method_1_total_revenue(record_payload)
             total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = 0
             dinner_covers = 0
-            _, resolved_closing_cash = self._resolve_method_1_cash_bounds(data)
-            record_payload = {
-                **data,
-                "cash_collected_total": total_revenue,
-                "cash_available": max(resolved_closing_cash, 0.0),
-                "cash_in": data["cash_in"],
-                "cash_out": data["cash_out"],
-                "closing_cash": resolved_closing_cash,
-            }
         else:
             if payload.method_two is None:
                 raise ValidationException("method_two is required when method is method_2")
@@ -2740,19 +2724,11 @@ class RestaurantOperationsService(BaseService):
                 raise ValidationException("method_one is required when method is method_1")
             data = payload.method_one.model_dump(mode="json")
             business_date = payload.method_one.business_date
-            total_revenue = self._calculate_method_1_total_revenue(data)
+            record_payload = self._build_method_1_record_payload(data)
+            total_revenue = self._calculate_method_1_total_revenue(record_payload)
             total_expenses = round(data["expenses_in_cash"], 2)
             lunch_covers = 0
             dinner_covers = 0
-            _, resolved_closing_cash = self._resolve_method_1_cash_bounds(data)
-            record_payload = {
-                **data,
-                "cash_collected_total": total_revenue,
-                "cash_available": max(resolved_closing_cash, 0.0),
-                "cash_in": data["cash_in"],
-                "cash_out": data["cash_out"],
-                "closing_cash": resolved_closing_cash,
-            }
         else:
             if payload.method_two is None:
                 raise ValidationException("method_two is required when method is method_2")
@@ -6138,7 +6114,6 @@ class RestaurantOperationsService(BaseService):
             else:
                 transaction_configs.extend(
                     [
-                        ("cash_in", "cash_in", "Cash In", "Auto-generated from daily cash in", "auto-cash-in"),
                         (
                             "cash_withdrawals",
                             "cash_withdrawal",
@@ -6146,7 +6121,6 @@ class RestaurantOperationsService(BaseService):
                             "Auto-generated from daily cash withdrawals",
                             "auto-withdrawal",
                         ),
-                        ("cash_out", "cash_out", "Cash Out", "Auto-generated from daily cash out", "auto-cash-out"),
                         (
                             "expenses_in_cash",
                             "cash_expense",
@@ -7815,10 +7789,6 @@ class RestaurantOperationsService(BaseService):
         bucket: dict[str, Any],
     ) -> list[DailyDataSectionResponse]:
         pos_total = round(sum(float(item.get("pos_payments", 0) or 0) for item in records), 2)
-        cash_in_total = round(
-            sum(float(item.get("cash_in", 0) or 0) for item in records if item.get("method") != "method_2"),
-            2,
-        )
         cash_payments_total = round(
             sum(float(item.get("cash_payments", 0) or 0) for item in records if item.get("method") == "method_2"),
             2,
@@ -7829,7 +7799,10 @@ class RestaurantOperationsService(BaseService):
         )
         daily_cash_expense_total = round(sum(float(item.get("expenses_in_cash", 0) or 0) for item in records), 2)
         cash_withdrawals_total = round(sum(float(item.get("cash_withdrawals", 0) or 0) for item in records), 2)
-        cash_out_total = round(sum(float(item.get("cash_out", 0) or 0) for item in records), 2)
+        cash_out_total = round(
+            sum(float(item.get("cash_out", 0) or 0) for item in records if item.get("method") == "method_2"),
+            2,
+        )
         opening_cash_total = round(sum(float(item.get("opening_cash", 0) or 0) for item in records), 2)
         closing_cash_total = round(sum(float(item.get("closing_cash", 0) or 0) for item in records), 2)
         cash_difference_total = round(sum(float(item.get("cash_difference", 0) or 0) for item in records), 2)
@@ -7855,7 +7828,6 @@ class RestaurantOperationsService(BaseService):
                 fields=[
                     DailyDataSectionFieldResponse(key="pos_payments", label="POS Payments", value=pos_total, value_type="currency"),
                     DailyDataSectionFieldResponse(key="cash_payments", label="Cash Payments", value=cash_payments_total, value_type="currency"),
-                    DailyDataSectionFieldResponse(key="cash_in", label="Cash In", value=cash_in_total, value_type="currency"),
                     DailyDataSectionFieldResponse(key="bank_transfer_payments", label="Bank Transfer Payments", value=bank_transfer_total, value_type="currency"),
                     DailyDataSectionFieldResponse(
                         key="total_deposits",
@@ -7921,6 +7893,9 @@ class RestaurantOperationsService(BaseService):
         lunch_covers = int(serialized.get("lunch_covers", 0))
         dinner_covers = int(serialized.get("dinner_covers", 0))
         total_covers = lunch_covers + dinner_covers
+        method = str(serialized.get("method") or "")
+        legacy_cash_in = float(serialized.get("cash_in", 0.0) or 0.0)
+        legacy_cash_out = float(serialized.get("cash_out", 0.0) or 0.0)
         if serialized.get("method") == "method_2":
             revenue_breakdown = [
                 DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0))),
@@ -7929,6 +7904,8 @@ class RestaurantOperationsService(BaseService):
             ]
         else:
             initial_cash, final_cash = self._resolve_method_1_cash_bounds(serialized)
+            legacy_cash_in = initial_cash
+            legacy_cash_out = final_cash
             revenue_breakdown = [
                 DailyDataRevenueBreakdownItemResponse(label="POS Payments", amount=float(serialized.get("pos_payments", 0))),
                 DailyDataRevenueBreakdownItemResponse(label="Cash Withdrawals", amount=float(serialized.get("cash_withdrawals", 0))),
@@ -7963,8 +7940,8 @@ class RestaurantOperationsService(BaseService):
             avg_revenue_per_cover=serialized.get("avg_revenue_per_cover", 0.0),
             pos_payments=float(serialized.get("pos_payments", 0.0) or 0.0),
             cash_withdrawals=float(serialized.get("cash_withdrawals", 0.0) or 0.0),
-            cash_in=float(serialized.get("cash_in", 0.0) or 0.0),
-            cash_out=float(serialized.get("cash_out", 0.0) or 0.0),
+            cash_in=legacy_cash_in if method == "method_1" else float(serialized.get("cash_in", 0.0) or 0.0),
+            cash_out=legacy_cash_out if method == "method_1" else float(serialized.get("cash_out", 0.0) or 0.0),
             cash_payments=float(serialized.get("cash_payments", 0.0) or 0.0),
             bank_transfer_payments=float(serialized.get("bank_transfer_payments", 0.0) or 0.0),
             expenses_in_cash=float(serialized.get("expenses_in_cash", 0.0) or 0.0),
@@ -8031,6 +8008,11 @@ class RestaurantOperationsService(BaseService):
         lunch_covers = int(serialized.get("lunch_covers", 0) or 0)
         dinner_covers = int(serialized.get("dinner_covers", 0) or 0)
         total_covers = lunch_covers + dinner_covers
+        method = str(serialized.get("method") or "")
+        legacy_cash_in = float(serialized.get("cash_in", 0.0) or 0.0)
+        legacy_cash_out = float(serialized.get("cash_out", 0.0) or 0.0)
+        if method == "method_1":
+            legacy_cash_in, legacy_cash_out = self._resolve_method_1_cash_bounds(serialized)
         stock_usage_entries = [
             DailyDataInventoryUsageEntryResponse(
                 inventory_item_id=str(item.get("inventory_item_id") or ""),
@@ -8059,8 +8041,8 @@ class RestaurantOperationsService(BaseService):
             dinner_covers=dinner_covers,
             pos_payments=float(serialized.get("pos_payments", 0.0) or 0.0),
             cash_withdrawals=float(serialized.get("cash_withdrawals", 0.0) or 0.0),
-            cash_in=float(serialized.get("cash_in", 0.0) or 0.0),
-            cash_out=float(serialized.get("cash_out", 0.0) or 0.0),
+            cash_in=legacy_cash_in if method == "method_1" else float(serialized.get("cash_in", 0.0) or 0.0),
+            cash_out=legacy_cash_out if method == "method_1" else float(serialized.get("cash_out", 0.0) or 0.0),
             cash_payments=float(serialized.get("cash_payments", 0.0) or 0.0),
             bank_transfer_payments=float(serialized.get("bank_transfer_payments", 0.0) or 0.0),
             expenses_in_cash=float(serialized.get("expenses_in_cash", 0.0) or 0.0),

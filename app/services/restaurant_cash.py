@@ -34,9 +34,11 @@ def calculate_cash_ledger(
     daily_items = list(daily_records)
     transaction_items = list(finance_transactions)
 
-    cash_in_total = round(sum(float(item.get("cash_in", item.get("cash_payments", 0)) or 0) for item in daily_items), 2)
     pos_payments_total = round(sum(float(item.get("pos_payments", 0) or 0) for item in daily_items), 2)
-    cash_out_total = round(sum(float(item.get("cash_out", 0) or 0) for item in daily_items), 2)
+    cash_out_total = round(
+        sum(float(item.get("cash_out", 0) or 0) for item in daily_items if str(item.get("method") or "") == "method_2"),
+        2,
+    )
     cash_withdrawals_total = round(sum(float(item.get("cash_withdrawals", 0) or 0) for item in daily_items), 2)
     manual_entry_expenses_total = round(sum(float(item.get("total_expenses", 0) or 0) for item in daily_items), 2)
     document_expense_total_from_records = round(
@@ -48,10 +50,14 @@ def calculate_cash_ledger(
             float(item.get("cash_available", 0) or 0)
             if item.get("cash_available") is not None
             else max(
-                float(item.get("cash_in", item.get("cash_payments", 0)) or 0)
-                - float(item.get("cash_out", 0) or 0)
-                - float(item.get("cash_withdrawals", 0) or 0)
-                - float(item.get("total_expenses", 0) or 0),
+                float(item.get("closing_cash", 0) or 0)
+                if str(item.get("method") or "") == "method_1"
+                else (
+                    float(item.get("cash_payments", item.get("cash_in", 0)) or 0)
+                    - float(item.get("cash_out", 0) or 0)
+                    - float(item.get("cash_withdrawals", 0) or 0)
+                    - float(item.get("total_expenses", 0) or 0)
+                ),
                 0.0,
             )
             for item in daily_items
