@@ -2577,6 +2577,8 @@ class RestaurantOperationsService(BaseService):
                         DailyDataFormFieldResponse(key="expenses_in_cash", label="Cash expenses paid from the cash drawer", value_type="number", placeholder="0.00", section="cash_tracking"),
                         DailyDataFormFieldResponse(key="opening_cash", label="Initial Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                         DailyDataFormFieldResponse(key="closing_cash", label="Final Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
+                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Covers", value_type="integer", placeholder="0", section="covers"),
+                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Covers", value_type="integer", placeholder="0", section="covers"),
                         DailyDataFormFieldResponse(key="notes", label="Add Note", value_type="string", placeholder="Optional note", section="cash_tracking"),
                     ],
                 ),
@@ -2592,6 +2594,8 @@ class RestaurantOperationsService(BaseService):
                         DailyDataFormFieldResponse(key="expenses_in_cash", label="Expenses in Cash (-)", value_type="number", placeholder="0.00", section="payment_inputs"),
                         DailyDataFormFieldResponse(key="opening_cash", label="Opening Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
                         DailyDataFormFieldResponse(key="closing_cash", label="Closing Cash", value_type="number", placeholder="0.00", section="cash_register_balance"),
+                        DailyDataFormFieldResponse(key="lunch_covers", label="Lunch Covers", value_type="integer", placeholder="0", section="covers"),
+                        DailyDataFormFieldResponse(key="dinner_covers", label="Dinner Covers", value_type="integer", placeholder="0", section="covers"),
                     ],
                 ),
             ]
@@ -2645,8 +2649,8 @@ class RestaurantOperationsService(BaseService):
             record_payload = self._build_method_1_record_payload(data)
             total_revenue = self._calculate_method_1_total_revenue(record_payload)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = 0
-            dinner_covers = 0
+            lunch_covers = int(data.get("lunch_covers", 0) or 0)
+            dinner_covers = int(data.get("dinner_covers", 0) or 0)
         else:
             if payload.method_two is None:
                 raise ValidationException("method_two is required when method is method_2")
@@ -2654,8 +2658,8 @@ class RestaurantOperationsService(BaseService):
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = 0
-            dinner_covers = 0
+            lunch_covers = int(data.get("lunch_covers", 0) or 0)
+            dinner_covers = int(data.get("dinner_covers", 0) or 0)
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
             cash_difference = round(data["closing_cash"] - expected_closing_cash, 2)
             cash_out = max(expected_closing_cash - data["closing_cash"], 0)
@@ -2727,8 +2731,8 @@ class RestaurantOperationsService(BaseService):
             record_payload = self._build_method_1_record_payload(data)
             total_revenue = self._calculate_method_1_total_revenue(record_payload)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = 0
-            dinner_covers = 0
+            lunch_covers = int(data.get("lunch_covers", 0) or 0)
+            dinner_covers = int(data.get("dinner_covers", 0) or 0)
         else:
             if payload.method_two is None:
                 raise ValidationException("method_two is required when method is method_2")
@@ -2736,8 +2740,8 @@ class RestaurantOperationsService(BaseService):
             business_date = payload.method_two.business_date
             total_revenue = round(data["pos_payments"] + data["cash_payments"] + data["bank_transfer_payments"], 2)
             total_expenses = round(data["expenses_in_cash"], 2)
-            lunch_covers = 0
-            dinner_covers = 0
+            lunch_covers = int(data.get("lunch_covers", 0) or 0)
+            dinner_covers = int(data.get("dinner_covers", 0) or 0)
             expected_closing_cash = round(data["opening_cash"] + data["cash_payments"] - data["expenses_in_cash"], 2)
             cash_difference = round(data["closing_cash"] - expected_closing_cash, 2)
             cash_out = max(expected_closing_cash - data["closing_cash"], 0)

@@ -573,6 +573,8 @@ class DailyDataMethodOneRequest(BaseSchema):
     expenses_in_cash: float = Field(default=0, ge=0)
     opening_cash: float = Field(default=0, ge=0)
     closing_cash: float = Field(default=0, ge=0)
+    lunch_covers: int = Field(default=0, ge=0)
+    dinner_covers: int = Field(default=0, ge=0)
     notes: str | None = Field(default=None, max_length=500)
 
 
@@ -584,6 +586,8 @@ class DailyDataMethodTwoRequest(BaseSchema):
     expenses_in_cash: float = Field(default=0, ge=0)
     opening_cash: float = Field(default=0, ge=0)
     closing_cash: float = Field(default=0, ge=0)
+    lunch_covers: int = Field(default=0, ge=0)
+    dinner_covers: int = Field(default=0, ge=0)
 
 
 class DailyDataInventoryUsageRequest(BaseSchema):
