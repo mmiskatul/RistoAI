@@ -166,15 +166,25 @@ def build_aggregate_snapshot(
     *,
     manual_records: Iterable[dict[str, Any]],
     finance_transactions: Iterable[dict[str, Any]],
+    cash_deposits: Iterable[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     manual_record_items = list(manual_records)
     transaction_items = list(finance_transactions)
+    deposit_items = list(cash_deposits or [])
 
     cash = calculate_cash_ledger(
         daily_records=manual_record_items,
         finance_transactions=transaction_items,
     )
     manual_sales_total = round(sum(float(item.get("total_revenue", 0)) for item in manual_record_items), 2)
+    revenue_entry_sales_total = round(
+        sum(
+            float(item.get("amount", 0) or 0)
+            for item in deposit_items
+            if str(item.get("source_kind", "")).lower() == "revenue_entry"
+        ),
+        2,
+    )
     deposit_sales_total = round(
         sum(
             float(item.get("amount", 0))
@@ -203,10 +213,25 @@ def build_aggregate_snapshot(
         2,
     )
 
-    total_revenue = round(manual_sales_total + deposit_sales_total + document_sales_total + other_sales_total, 2)
+    total_revenue = round(
+        manual_sales_total + revenue_entry_sales_total + deposit_sales_total + document_sales_total + other_sales_total,
+        2,
+    )
     manual_entry_expenses = round(sum(float(item.get("total_expenses", 0)) for item in manual_record_items), 2)
-    lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in manual_record_items))
-    dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in manual_record_items))
+    lunch_covers = int(sum(int(item.get("lunch_covers", 0)) for item in manual_record_items)) + int(
+        sum(
+            int(item.get("lunch_covers", 0) or 0)
+            for item in deposit_items
+            if str(item.get("source_kind", "")).lower() == "revenue_entry"
+        )
+    )
+    dinner_covers = int(sum(int(item.get("dinner_covers", 0)) for item in manual_record_items)) + int(
+        sum(
+            int(item.get("dinner_covers", 0) or 0)
+            for item in deposit_items
+            if str(item.get("source_kind", "")).lower() == "revenue_entry"
+        )
+    )
     total_covers = lunch_covers + dinner_covers
     total_expenses = round(manual_entry_expenses + cash.manual_expenses_total + cash.document_expense_total, 2)
     net_revenue_total = round(total_revenue - total_expenses, 2)
@@ -241,6 +266,7 @@ def build_aggregate_snapshot(
         "revenue_summary": {
             "sales_total": total_revenue,
             "manual_entry_sales_total": manual_sales_total,
+            "revenue_entry_sales_total": revenue_entry_sales_total,
             "deposit_sales_total": deposit_sales_total,
             "document_sales_total": document_sales_total,
             "other_sales_total": other_sales_total,
