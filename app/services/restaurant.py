@@ -2276,6 +2276,8 @@ class RestaurantOperationsService(BaseService):
                 "tenant_id": scope_id,
                 "deposit_date": datetime.combine(revenue_date, datetime.min.time(), tzinfo=UTC),
                 "amount": payload.amount,
+                "lunch_covers": payload.lunch_covers,
+                "dinner_covers": payload.dinner_covers,
                 "type": "cash_in",
                 "bank_account": payload.title,
                 "notes": "Manual revenue entry",
@@ -2296,6 +2298,8 @@ class RestaurantOperationsService(BaseService):
             id=serialized_deposit["id"],
             title=str(serialized_deposit.get("bank_account") or "Revenue"),
             amount=float(serialized_deposit.get("amount", 0) or 0),
+            lunch_covers=int(serialized_deposit.get("lunch_covers", 0) or 0),
+            dinner_covers=int(serialized_deposit.get("dinner_covers", 0) or 0),
             revenue_date=str(serialized_deposit.get("deposit_date") or ""),
             created_at=str(serialized_deposit.get("created_at") or ""),
             source_kind=str(serialized_deposit.get("source_kind") or "") or None,
@@ -2321,6 +2325,8 @@ class RestaurantOperationsService(BaseService):
                     id=item["id"],
                     title=str(item.get("bank_account") or "Revenue"),
                     amount=float(item.get("amount", 0) or 0),
+                    lunch_covers=int(item.get("lunch_covers", 0) or 0),
+                    dinner_covers=int(item.get("dinner_covers", 0) or 0),
                     revenue_date=str(item.get("deposit_date") or ""),
                     created_at=str(item.get("created_at") or ""),
                     source_kind=str(item.get("source_kind") or "") or None,
@@ -4990,6 +4996,7 @@ class RestaurantOperationsService(BaseService):
             snapshot = build_aggregate_snapshot(
                 manual_records=manual_records,
                 finance_transactions=finance_transactions,
+                cash_deposits=deposits,
             )
             primary_manual_record = manual_records[0] if manual_records else None
 
@@ -5149,6 +5156,7 @@ class RestaurantOperationsService(BaseService):
         snapshot = build_aggregate_snapshot(
             manual_records=weekly_manual_records,
             finance_transactions=weekly_transactions,
+            cash_deposits=weekly_deposits,
         )
         await self.weekly_record_repository.upsert_by_week_start_date(
             scope_id=scope_id,
@@ -5243,6 +5251,7 @@ class RestaurantOperationsService(BaseService):
         snapshot = build_aggregate_snapshot(
             manual_records=monthly_manual_records,
             finance_transactions=monthly_transactions,
+            cash_deposits=monthly_deposits,
         )
         await self.monthly_record_repository.upsert_by_month_key(
             scope_id=scope_id,

@@ -408,6 +408,8 @@ class ExpenseListResponse(BaseSchema):
 class RevenueEntryCreateRequest(BaseSchema):
     title: str = Field(min_length=2, max_length=120)
     amount: float = Field(gt=0)
+    lunch_covers: int = Field(default=0, ge=0)
+    dinner_covers: int = Field(default=0, ge=0)
     revenue_date: date | None = None
 
 
@@ -415,6 +417,8 @@ class RevenueEntryResponse(BaseSchema):
     id: str
     title: str
     amount: float
+    lunch_covers: int = 0
+    dinner_covers: int = 0
     revenue_date: str
     created_at: str
     source_kind: str | None = None
