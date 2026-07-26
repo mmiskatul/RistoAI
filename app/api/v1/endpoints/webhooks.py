@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from bson import ObjectId
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.config.settings import get_settings
@@ -16,32 +16,24 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-class RevenueCatWebhookPayload(BaseModel):
-    event: dict[str, Any]
 
-
-def _expiration(value: Any) -> datetime | None:
-    try:
-        return datetime.fromtimestamp(int(value) / 1000, tz=UTC) if value else None
-    except (TypeError, ValueError, OSError):
-        return None
-
-
-def _billing_cycle(product_id: str) -> SubscriptionPlan:
-    product = product_id.lower()
-    return SubscriptionPlan.ONE_YEAR if any(token in product for token in ('annual', 'year', 'yearly', '12_month')) else SubscriptionPlan.ONE_MONTH
 
 
 @router.post('/revenuecat', include_in_schema=False)
 async def handle_revenuecat_webhook(
-    payload: RevenueCatWebhookPayload,
+    request: Request,
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
     settings = get_settings()
     if settings.revenuecat_webhook_secret and authorization != f'Bearer {settings.revenuecat_webhook_secret}':
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid webhook authorization header')
 
-    event = payload.event
+    try:
+        raw_json = await request.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid JSON payload')
+
+    event = raw_json.get('event') if isinstance(raw_json.get('event'), dict) else raw_json
     event_type = str(event.get('type') or '')
     app_user_id = str(event.get('app_user_id') or '').strip()
     if not app_user_id:
