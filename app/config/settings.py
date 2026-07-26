@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     stripe_checkout_success_url: str = Field(default="aldo://subscription/success", alias="STRIPE_CHECKOUT_SUCCESS_URL")
     stripe_checkout_cancel_url: str = Field(default="aldo://subscription/cancel", alias="STRIPE_CHECKOUT_CANCEL_URL")
     stripe_customer_portal_return_url: str = Field(default="aldo://subscription/manage", alias="STRIPE_CUSTOMER_PORTAL_RETURN_URL")
+    revenuecat_webhook_secret: str | None = Field(default=None, alias="REVENUECAT_WEBHOOK_SECRET")
     slow_request_threshold_ms: float = Field(default=1_000.0, alias="SLOW_REQUEST_THRESHOLD_MS")
 
     @computed_field
