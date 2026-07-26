@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, dashboard, onboarding, restaurant, settings, subscriptions, support, users, upload
+from app.api.v1.endpoints import auth, dashboard, onboarding, restaurant, settings, subscriptions, support, users, upload, webhooks
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix='/auth')
@@ -14,6 +14,7 @@ api_router.include_router(subscriptions.router, prefix='/subscriptions')
 api_router.include_router(settings.router, prefix='/settings')
 api_router.include_router(support.router, prefix='/support')
 api_router.include_router(upload.router, prefix='/upload', tags=['Upload'])
+api_router.include_router(webhooks.router, prefix='/webhooks', tags=['Webhooks'])
 
 
 
