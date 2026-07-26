@@ -74,8 +74,13 @@ async def handle_revenuecat_webhook(
         logger.info(f"Unhandled RevenueCat event type: {event_type}")
         return {"status": "ignored", "event_type": event_type}
 
+    from bson import ObjectId
+    user_filter = {"_id": app_user_id}
+    if ObjectId.is_valid(app_user_id):
+        user_filter = {"$or": [{"_id": app_user_id}, {"_id": ObjectId(app_user_id)}]}
+
     result = await users_collection.update_one(
-        {"_id": app_user_id},
+        user_filter,
         {"$set": update_data},
     )
 
