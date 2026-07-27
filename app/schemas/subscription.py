@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, field_validator
 
 from app.core.enums import CouponDiscountType, CouponStatus, SubscriptionPlan, SubscriptionStatus
 from app.schemas.common import BaseSchema
@@ -226,6 +226,15 @@ class UserSubscriptionSelectRequest(BaseSchema):
     plan_id: str | None = None
     billing_cycle: SubscriptionPlan
     start_trial: bool = True
+
+    @field_validator('billing_cycle', mode='before')
+    @classmethod
+    def normalize_revenuecat_billing_cycle(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip().lower() in {'monthly', 'month', '1_month'}:
+            return SubscriptionPlan.ONE_MONTH
+        if isinstance(value, str) and value.strip().lower() in {'annual', 'annually', 'yearly', 'year', '1_year'}:
+            return SubscriptionPlan.ONE_YEAR
+        return value
 
 
 class UserSubscriptionCheckoutSessionResponse(BaseSchema):
