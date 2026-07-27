@@ -20,19 +20,22 @@ jobs:
           script: |
             set -e
 
-            cd ~/risto-deploy/RistoAI
+            cd /home/ubuntu/risto-deploy/RistoAI
 
-            echo "Pulling latest code..."
+            echo "Updating source..."
             git fetch origin
             git reset --hard origin/main
 
-            echo "Installing dependencies..."
-            npm ci || npm install
+            echo "Activating virtual environment..."
+            source .venv/bin/activate
 
-            echo "Building..."
-            npm run build
+            echo "Installing Python packages..."
+            pip install -r requirements.txt
 
-            echo "Restarting application..."
-            pm2 restart all
+            echo "Restarting API..."
+            sudo systemctl restart risto-api.service
 
-            pm2 save
+            echo "Checking service..."
+            sudo systemctl status risto-api.service --no-pager
+
+            echo "Deployment completed."
