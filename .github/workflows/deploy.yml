@@ -1,0 +1,38 @@
+name: Deploy RistoAI Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.PORT }}
+          script: |
+            set -e
+
+            cd ~/risto-deploy/RistoAI
+
+            echo "Pulling latest code..."
+            git fetch origin
+            git reset --hard origin/main
+
+            echo "Installing dependencies..."
+            npm ci || npm install
+
+            echo "Building..."
+            npm run build
+
+            echo "Restarting application..."
+            pm2 restart all
+
+            pm2 save
